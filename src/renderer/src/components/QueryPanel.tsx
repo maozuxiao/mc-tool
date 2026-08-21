@@ -160,32 +160,6 @@ export function QueryPanel({ disabled }: { disabled: boolean }) {
   // 对普通（非 draggable 父级）输入框，阻止 mousedown 冒泡，避免任何潜在拖拽干扰
   const stopDragOnInput = (e: React.MouseEvent<HTMLInputElement | HTMLTextAreaElement>) => e.stopPropagation()
 
-  // 在可拖拽行内的输入框中按住鼠标拖动选中文本时，临时关闭父行 draggable，
-  // 否则浏览器会优先触发整行原生拖拽而阻止文本选区（仅 stopPropagation 无效）。
-  const onFieldRowMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
-    const target = e.target as HTMLElement
-    const tag = target.tagName
-    const isEditable =
-      tag === 'INPUT' || tag === 'TEXTAREA' ||
-      target.isContentEditable ||
-      !!target.closest('input,textarea,[contenteditable="true"],.animal-input-12WUn,.filter-kw-row')
-    if (isEditable) {
-      e.currentTarget.setAttribute('draggable', 'false')
-      // ensure text selection is allowed on the input
-      target.style.userSelect = 'text'
-    }
-  }
-  // mousedown 后（无论是否形成选区）恢复行的可拖拽状态
-  useEffect(() => {
-    const restore = () => {
-      document.querySelectorAll('.field-row[draggable="false"]').forEach(el => {
-        el.setAttribute('draggable', 'true')
-      })
-    }
-    window.addEventListener('mouseup', restore)
-    return () => window.removeEventListener('mouseup', restore)
-  }, [])
-
   return (
     <div className={`panel${disabled ? ' panel-locked' : ''}`}>
       {/* 标题栏 */}
@@ -205,6 +179,9 @@ export function QueryPanel({ disabled }: { disabled: boolean }) {
         <div className="header-actions">
           <span className="header-time"><CurrentTime /></span>
           <div className="header-tools">
+            {zoomToast && (
+              <span className="zoom-badge" title={t('zoomHint')}>{zoom}%</span>
+            )}
             <Select
               options={langOptions}
               value={lang}
@@ -252,10 +229,6 @@ export function QueryPanel({ disabled }: { disabled: boolean }) {
             )}
           </div>
         </div>
-        {/* 缩放百分比临时浮层：仅缩放操作时显示 1 秒 */}
-        {zoomToast && (
-          <div className="zoom-toast" title={t('zoomHint')}>{zoom}%</div>
-        )}
       </div>
 
       {disabled && <div className="panel-lock-mask" />}
@@ -369,14 +342,18 @@ export function QueryPanel({ disabled }: { disabled: boolean }) {
               <div
                 key={f.id}
                 className="field-row"
-                draggable
-                onMouseDown={onFieldRowMouseDown}
-                onDragStart={() => setDragIdx(i)}
                 onDragOver={e => e.preventDefault()}
                 onDrop={() => onDrop(i)}
               >
                 <span className="drag-handle" title={t('dragHint')}>
-                  <span className="mq-seq"><span className="grip">⋮⋮</span> {i + 1}</span>
+                  <span
+                    className="mq-seq"
+                    draggable
+                    onDragStart={() => setDragIdx(i)}
+                    onDragEnd={() => setDragIdx(null)}
+                  >
+                    <span className="grip">⋮⋮</span> {i + 1}
+                  </span>
                 </span>
                 <Input
                   value={f.val}

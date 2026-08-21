@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
+import { useStore } from '../store'
 
 interface Props {
   loginState: 'checking' | 'logging' | 'failed' | 'ok'
@@ -7,6 +8,9 @@ interface Props {
 const MAX_POLL_MS = 3 * 60 * 1000 // 最多轮询 3 分钟
 
 export function LoginOverlay({ loginState }: Props) {
+  const lang = useStore(s => s.lang)
+  const appName = lang === 'en' ? 'DingTalk' : '钉钉'
+
   const [qrSrc, setQrSrc] = useState('')
   const [qrToken, setQrToken] = useState('')
   const [authChainCode, setAuthChainCode] = useState('')
@@ -71,7 +75,7 @@ export function LoginOverlay({ loginState }: Props) {
       setAuthChainCode(res.authChainCode || res.data?.authChainCode || '')
       setLck(res.lck || res.data?.lck || '')
       setQrSrc(buildQrSrc(msg))
-      setStatus('请使用 OA 手机 App 扫码登录')
+      setStatus(`请使用 ${appName} 手机 App 扫码登录`)
       setLoading(false)
     } catch (e: any) {
       const msg = e.message || '获取二维码失败'
@@ -203,7 +207,7 @@ export function LoginOverlay({ loginState }: Props) {
         <div className="qr-login-header">
           <div className="qr-login-badge">OA 登录</div>
           <h2 className="qr-login-title">扫码登录</h2>
-          <p className="qr-login-subtitle">请使用 OA 手机 App 扫描二维码</p>
+          <p className="qr-login-subtitle">请使用 {appName} 手机 App 扫描二维码</p>
         </div>
 
         <div className={`qr-frame ${loading ? 'qr-frame--loading' : ''} ${scanned ? 'qr-frame--scanned' : ''}`}>

@@ -210,8 +210,10 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1180,
     height: 800,
-    minWidth: 920,
-    minHeight: 640,
+    // 不限制最小尺寸：允许自由拖拽缩放宽度/高度，并支持 Windows 分屏（snap 半屏/四分之一）
+    resizable: true,
+    minWidth: 480,
+    minHeight: 360,
     title: 'MC物料查询',
     backgroundColor: '#f8f8f0',
     icon: getIconPath(),
@@ -751,16 +753,20 @@ async function completeOaSso(_loginToken: string): Promise<boolean> {
 
   const oaTrigger = 'http://oa.streamax.com:8080/ruiming/mc/materiel_ui/materielSearch.do?method=wuliao&q.ORGANIZATION_ID=102&q.ITEM_NUMBER=0000000000000&__seq=' + Date.now()
   let ok = false
+  let ssoTriggered = false
   try {
+    // 最多等待约 12s，让 OAuth 回跳 + OA 会话落地完成。
+    // 关键优化：仅在“尚未触发过握手”时 loadURL 一次（后续轮纯探测等待落地），
+    // 避免反复 loadURL 引发 IAM 连接风暴/超时(-118)，显著缩短偶发长登录时间。
     for (let i = 0; i < 12; i++) {
       ok = (await probeOaSession(sess)).ok
       if (ok) {
         debugLog(`[SSO] OA session landed (probe ok) after ~${i}s`)
         break
       }
-      try {
-        // 给 loadURL 加超时兜底：网络连不上时(ERR_CONNECTION_TIMED_OUT)不要傻等 ~23s，
-        // 用 did-stop-loading / did-fail-load 或 5s 超时快速放弃，进入下一轮 probe。
+      if (!ssoTriggered) {
+        ssoTriggered = true
+        // 给 loadURL 加超时兜底：网络连不上(ERR_CONNECTION_TIMED_OUT)时快速放弃，不阻塞落地流程
         await new Promise<void>((resolve) => {
           let done = false
           const finish = () => { if (!done) { done = true; resolve() } }
@@ -775,15 +781,15 @@ async function completeOaSso(_loginToken: string): Promise<boolean> {
             debugLog('[SSO] trigger OA load rejected: ' + (e?.message || e))
             finish()
           })
-          // 硬性超时：最多等 5s，避免长时间阻塞 SSO 落地流程
-          setTimeout(finish, 5000)
+          // 硬性超时：最多等 3s，避免长时间阻塞 SSO 落地流程
+          setTimeout(finish, 3000)
         })
         // 给 OAuth 回跳 + 会话落地一点时间
         await new Promise(r => setTimeout(r, 800))
-      } catch (e: any) {
-        debugLog('[SSO] trigger OA load error: ' + e.message)
+      } else {
+        // 已触发握手：只等待落地，每 1s 探测一次
+        await new Promise(r => setTimeout(r, 1000))
       }
-      await new Promise(r => setTimeout(r, 1000))
     }
   } finally {
     // 关闭隐藏 SSO 窗口，释放资源

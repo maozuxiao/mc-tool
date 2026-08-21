@@ -383,28 +383,24 @@ body {
   text-align: center;
 }
 .header-tools { display: flex; align-items: center; gap: 8px; }
-/* 缩放百分比临时浮层：仅缩放操作时显示 1 秒，定位在标题栏右侧 */
-.zoom-toast {
-  position: absolute;
-  top: 14px;
-  right: 18px;
-  z-index: 50;
-  background: rgba(19,138,126,0.92);
+/* 缩放百分比临时标识：仅缩放操作时显示 1 秒，位于语言切换按钮左侧 */
+.zoom-badge {
+  background: rgba(255,255,255,0.22);
   color: #fff;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
-  padding: 6px 12px;
+  padding: 4px 8px;
   border-radius: 999px;
-  min-width: 48px;
+  min-width: 42px;
   text-align: center;
   font-variant-numeric: tabular-nums;
-  box-shadow: 0 4px 14px rgba(0,0,0,0.18);
+  cursor: default;
   pointer-events: none;
-  animation: zoomToastIn 0.12s ease-out;
+  animation: zoomBadgeIn 0.12s ease-out;
 }
-@keyframes zoomToastIn {
-  from { opacity: 0; transform: translateY(-4px); }
-  to { opacity: 1; transform: translateY(0); }
+@keyframes zoomBadgeIn {
+  from { opacity: 0; transform: scale(0.92); }
+  to { opacity: 1; transform: scale(1); }
 }
 /* 语言切换 / 帮助下拉框固定 32px 高、当前宽度一半 */
 .header-tools [class*="wrapper-"] {
@@ -569,12 +565,13 @@ body {
   min-width: 52px; color: var(--animal-text-soft); font-size: 12px; font-weight: 600;
   flex-shrink: 0; user-select: none;
 }
-/* 搜索条件序号：⋮⋮ {idx} 拖拽手柄样式 */
+/* 搜索条件序号：⋮⋮ {idx} 拖拽手柄样式（仅此手柄可拖拽整行，输入框内可正常选词） */
 .mq-seq {
-  display: inline-flex; align-items: center; gap: 5px; cursor: move;
+  display: inline-flex; align-items: center; gap: 5px; cursor: grab;
   color: var(--animal-text-soft); font-size: 12px; font-weight: 700; user-select: none;
   flex-shrink: 0;
 }
+.mq-seq:active { cursor: grabbing; }
 .mq-seq .grip { letter-spacing: 1px; line-height: 1; opacity: .8; }
 /* 通用按钮样式（参考 .mq-btn） */
 .mq-btn {
