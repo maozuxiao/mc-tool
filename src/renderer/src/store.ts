@@ -158,7 +158,7 @@ export const useStore = create<State>((set, get) => ({
   matExpandedKeys: new Set(),
   bomExpandedKeys: new Set(),
   // 软件版本号：从主进程 app.getVersion() 实时读取，保持与 package.json 一致
-  appVersion: (() => { try { return window.mcApi.appVersion() } catch { return '1.0.8' } })(),
+  appVersion: (() => { try { return window.mcApi.appVersion() } catch { return '1.0.9' } })(),
 
   t: (key, vars) => translate(get().lang, key, vars),
   setLang: (l) => { localStorage.setItem('mc-lang', l); set({ lang: l }) },
