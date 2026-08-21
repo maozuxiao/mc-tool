@@ -30,6 +30,20 @@ export function initAutoUpdater(win: BrowserWindow, feedUrl: string) {
   autoUpdater.setFeedURL({ provider: 'generic', url: feedUrl })
 
   autoUpdater.on('update-available', (info) => {
+    // 仅在服务器版本高于本地时才视为有更新，避免低版本误报
+    const na = (info.version || '').split('.').map(n => parseInt(n, 10) || 0)
+    const nb = app.getVersion().split('.').map(n => parseInt(n, 10) || 0)
+    const len = Math.max(na.length, nb.length)
+    let newer = false
+    for (let i = 0; i < len; i++) {
+      const x = na[i] || 0, y = nb[i] || 0
+      if (x > y) { newer = true; break }
+      if (x < y) break
+    }
+    if (!newer) {
+      debugLog(`[AUTO_UPDATE] server version ${info.version} not higher than local ${app.getVersion()}, ignore`)
+      return
+    }
     win.webContents.send('update-available', {
       hasUpdate: true,
       version: info.version,

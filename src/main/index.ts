@@ -506,6 +506,20 @@ ipcMain.on(IPC.APP_VERSION, (e) => {
   e.returnValue = app.getVersion()
 })
 
+// 语义化版本比较：a > b 返回 1，a < b 返回 -1，相等返回 0（忽略构建号后缀）
+function cmpVer(a: string, b: string): number {
+  const na = (a || '').split('.').map(n => parseInt(n, 10) || 0)
+  const nb = (b || '').split('.').map(n => parseInt(n, 10) || 0)
+  const len = Math.max(na.length, nb.length)
+  for (let i = 0; i < len; i++) {
+    const x = na[i] || 0
+    const y = nb[i] || 0
+    if (x > y) return 1
+    if (x < y) return -1
+  }
+  return 0
+}
+
 // 手动触发检查更新（Help -> Check for Update）
 ipcMain.handle(IPC.CHECK_UPDATE, async () => {
   try {
@@ -513,12 +527,14 @@ ipcMain.handle(IPC.CHECK_UPDATE, async () => {
     const result = await autoUpdater.checkForUpdates()
 
     const newVersion = result?.updateInfo?.version
-    // 无更新信息 / 版本相同 → 当前为最新版本
-    if (!newVersion || newVersion === app.getVersion()) {
+    const current = app.getVersion()
+    // 无更新信息 / 版本相同 / 服务器版本不高于本地 → 当前即为最新版本
+    // （防止服务器 latest.yml 指向更低版本时误报“有更新/回退升级”）
+    if (!newVersion || cmpVer(newVersion, current) <= 0) {
       return { ok: true, latest: true }
     }
 
-    // 有更新：仅返回结果，由渲染端显示「下载」按钮，用户点击后再下载
+    // 有更高版本：仅返回结果，由渲染端显示「下载」按钮，用户点击后再下载
     return { ok: true, hasUpdate: true, version: newVersion, downloading: false }
   } catch (e: any) {
     const msg = e?.message || String(e)
