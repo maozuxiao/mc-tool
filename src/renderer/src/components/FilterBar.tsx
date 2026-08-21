@@ -93,6 +93,9 @@ export function FilterBar({ disabled, target = 'mat' }: { disabled: boolean; tar
   const dedup = useStore(s => s.dedup)
   const toggleDedup = useStore(s => s.toggleDedup)
 
+  // 阻止输入框 mousedown 冒泡，确保内部文本可正常拖动选中
+  const stopDragOnInput = (e: React.MouseEvent<HTMLInputElement>) => e.stopPropagation()
+
   const isBom = target === 'bom'
 
   // 从当前搜索结果中动态收集实际出现的生命周期值
@@ -117,12 +120,14 @@ export function FilterBar({ disabled, target = 'mat' }: { disabled: boolean; tar
               placeholder={t('kwPh')}
               value={bomKw}
               onChange={e => setBomKw(e.target.value)}
+              onMouseDown={stopDragOnInput}
               disabled={disabled}
             />
             <Input
               placeholder={t('kwNotPh')}
               value={bomKwNot}
               onChange={e => setBomKwNot(e.target.value)}
+              onMouseDown={stopDragOnInput}
               disabled={disabled}
             />
           </div>
@@ -141,12 +146,14 @@ export function FilterBar({ disabled, target = 'mat' }: { disabled: boolean; tar
             placeholder={t('kwPh')}
             value={kw}
             onChange={e => setKw(e.target.value)}
+            onMouseDown={stopDragOnInput}
             disabled={disabled}
           />
           <Input
             placeholder={t('kwNotPh')}
             value={kwNot}
             onChange={e => setKwNot(e.target.value)}
+            onMouseDown={stopDragOnInput}
             disabled={disabled}
           />
         </div>

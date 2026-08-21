@@ -72,6 +72,14 @@ export function QueryPanel({ disabled }: { disabled: boolean }) {
   const [zoom, setZoom] = useState(100)
   const zoomRef = useRef(zoom)
   zoomRef.current = zoom
+  // 缩放百分比临时浮层：仅在缩放操作时显示 1 秒，不常驻标题栏
+  const [zoomToast, setZoomToast] = useState(false)
+  const zoomToastTimer = useRef<number | null>(null)
+  const flashZoom = () => {
+    setZoomToast(true)
+    if (zoomToastTimer.current) window.clearTimeout(zoomToastTimer.current)
+    zoomToastTimer.current = window.setTimeout(() => setZoomToast(false), 1000)
+  }
   useEffect(() => {
     if (!window.mcApi?.getZoom) return
     window.mcApi.getZoom().then(z => setZoom(Math.round(z * 100)))
@@ -80,13 +88,13 @@ export function QueryPanel({ disabled }: { disabled: boolean }) {
       e.preventDefault()
       const delta = e.deltaY < 0 ? 0.1 : -0.1
       const next = Math.max(0.5, Math.min(2.0, zoomRef.current / 100 + delta))
-      window.mcApi.setZoom(next).then(() => setZoom(Math.round(next * 100)))
+      window.mcApi.setZoom(next).then(() => { setZoom(Math.round(next * 100)); flashZoom() })
     }
     const onKey = (e: KeyboardEvent) => {
       if (!e.ctrlKey) return
       if (e.key === '0') {
         e.preventDefault()
-        window.mcApi.resetZoom().then(() => setZoom(100))
+        window.mcApi.resetZoom().then(() => { setZoom(100); flashZoom() })
       }
     }
     window.addEventListener('wheel', onWheel, { passive: false })
@@ -94,6 +102,7 @@ export function QueryPanel({ disabled }: { disabled: boolean }) {
     return () => {
       window.removeEventListener('wheel', onWheel as any)
       window.removeEventListener('keydown', onKey)
+      if (zoomToastTimer.current) window.clearTimeout(zoomToastTimer.current)
     }
   }, [])
 
@@ -148,8 +157,34 @@ export function QueryPanel({ disabled }: { disabled: boolean }) {
   }
   const preview = fields.map(f => f.val.trim()).filter(Boolean).map(v => `(${v})`).join(' && ') || t('previewEmpty')
 
-  // 在可拖拽行内的输入框中按住鼠标拖动选中文本时，不应触发父级拖拽
+  // 对普通（非 draggable 父级）输入框，阻止 mousedown 冒泡，避免任何潜在拖拽干扰
   const stopDragOnInput = (e: React.MouseEvent<HTMLInputElement | HTMLTextAreaElement>) => e.stopPropagation()
+
+  // 在可拖拽行内的输入框中按住鼠标拖动选中文本时，临时关闭父行 draggable，
+  // 否则浏览器会优先触发整行原生拖拽而阻止文本选区（仅 stopPropagation 无效）。
+  const onFieldRowMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement
+    const tag = target.tagName
+    const isEditable =
+      tag === 'INPUT' || tag === 'TEXTAREA' ||
+      target.isContentEditable ||
+      !!target.closest('input,textarea,[contenteditable="true"],.animal-input-12WUn,.filter-kw-row')
+    if (isEditable) {
+      e.currentTarget.setAttribute('draggable', 'false')
+      // ensure text selection is allowed on the input
+      target.style.userSelect = 'text'
+    }
+  }
+  // mousedown 后（无论是否形成选区）恢复行的可拖拽状态
+  useEffect(() => {
+    const restore = () => {
+      document.querySelectorAll('.field-row[draggable="false"]').forEach(el => {
+        el.setAttribute('draggable', 'true')
+      })
+    }
+    window.addEventListener('mouseup', restore)
+    return () => window.removeEventListener('mouseup', restore)
+  }, [])
 
   return (
     <div className={`panel${disabled ? ' panel-locked' : ''}`}>
@@ -170,7 +205,6 @@ export function QueryPanel({ disabled }: { disabled: boolean }) {
         <div className="header-actions">
           <span className="header-time"><CurrentTime /></span>
           <div className="header-tools">
-            <span className="zoom-badge" title={t('zoomHint')}>{zoom}%</span>
             <Select
               options={langOptions}
               value={lang}
@@ -218,6 +252,10 @@ export function QueryPanel({ disabled }: { disabled: boolean }) {
             )}
           </div>
         </div>
+        {/* 缩放百分比临时浮层：仅缩放操作时显示 1 秒 */}
+        {zoomToast && (
+          <div className="zoom-toast" title={t('zoomHint')}>{zoom}%</div>
+        )}
       </div>
 
       {disabled && <div className="panel-lock-mask" />}
@@ -332,6 +370,7 @@ export function QueryPanel({ disabled }: { disabled: boolean }) {
                 key={f.id}
                 className="field-row"
                 draggable
+                onMouseDown={onFieldRowMouseDown}
                 onDragStart={() => setDragIdx(i)}
                 onDragOver={e => e.preventDefault()}
                 onDrop={() => onDrop(i)}
