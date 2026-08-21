@@ -1,0 +1,40 @@
+/* animal-island-ui 风格自定义光标（Cursor 组件行为复现）
+   用青蛙/动物手指风格的圆头指针，hotspot 在 4 0 */
+.ai-cursor,
+.ai-cursor * {
+  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Ccircle cx='14' cy='14' r='11' fill='%2319c8b9' stroke='%23138a7e' stroke-width='2'/%3E%3Ccircle cx='14' cy='14' r='4' fill='%23fff'/%3E%3Cpath d='M22 14 L30 14' stroke='%23138a7e' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E") 4 0, pointer !important;
+}
+
+/* 链接/按钮保持 pointer（覆盖全局手型，避免嵌套冲突） */
+.ai-cursor a,
+.ai-cursor button,
+.ai-cursor .btn,
+.ai-cursor .tab-btn,
+.ai-cursor .chip,
+.ai-cursor .mini-btn,
+.ai-cursor .add-btn,
+.ai-cursor .del,
+.ai-cursor .ms-btn,
+.ai-cursor .ms-clear,
+.ai-cursor .batch-toggle,
+.ai-cursor .file-link,
+.ai-cursor .col-resize-handle {
+  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Ccircle cx='14' cy='14' r='11' fill='%23f0a544' stroke='%23d98e2b' stroke-width='2'/%3E%3Ccircle cx='14' cy='14' r='4' fill='%23fff'/%3E%3Cpath d='M22 14 L30 14' stroke='%23d98e2b' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E") 4 0, pointer !important;
+}
+
+/* 文本输入保持 text 光标 */
+.ai-cursor input,
+.ai-cursor textarea {
+  cursor: text !important;
+}
+
+/* 禁用状态保持 not-allowed */
+.ai-cursor button:disabled,
+.ai-cursor .del:disabled {
+  cursor: not-allowed !important;
+}
+
+/* 列宽拖拽手柄保持 col-resize */
+.ai-cursor .col-resize-handle {
+  cursor: col-resize !important;
+}

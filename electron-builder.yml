@@ -1,0 +1,54 @@
+appId: com.streamax.mcquery
+productName: MC物料查询
+copyright: Copyright © 2026 Sean Mao
+# 应用/文件版本号（四位，区别于 package.json 三段产品版本）
+buildVersion: 1.0.8.0
+
+directories:
+  output: dist
+  buildResources: build
+
+# 应用图标（PNG/SVG，electron-builder 会自动转换）
+icon: build/icon.png
+
+files:
+  - out/**/*
+  # 排除开发依赖，减小体积
+  - '!**/node_modules/.cache/**'
+  - '!**/*.map'
+
+# 把图标作为额外资源放到 resources/ 下（asar 外），避免路径解析问题
+extraResources:
+  - from: build/icon.ico
+    to: icon.ico
+  - from: build/icon.png
+    to: icon.png
+
+# 启用 asar 打包（减小体积 + 加快加载）
+asar: true
+
+# 压缩级别（最高压缩减小 exe 体积）
+compression: maximum
+
+win:
+  target:
+    - nsis
+    - portable
+  # 禁用asarUnpack（保持 asar 压缩）
+  asarUnpack: []
+
+mac:
+  target:
+    - dmg
+  artifactName: MC物料查询-${version}-${arch}.${ext}
+  category: public.app-category.business
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  shortcutName: MC物料查询
+
+publish:
+  - provider: generic
+    url: https://github.com/maozuxiao/Streamax/raw/main/assets/MC_Tool
