@@ -769,20 +769,17 @@ async function completeOaSso(_loginToken: string): Promise<boolean> {
 
   const oaTrigger = 'http://oa.streamax.com:8080/ruiming/mc/materiel_ui/materielSearch.do?method=wuliao&q.ORGANIZATION_ID=102&q.ITEM_NUMBER=0000000000000&__seq=' + Date.now()
   let ok = false
-  let ssoTriggered = false
   try {
-    // 最多等待约 12s，让 OAuth 回跳 + OA 会话落地完成。
-    // 关键优化：仅在“尚未触发过握手”时 loadURL 一次（后续轮纯探测等待落地），
-    // 避免反复 loadURL 引发 IAM 连接风暴/超时(-118)，显著缩短偶发长登录时间。
+    // 最多等待约 12 轮，让 OAuth 回跳 + OA 会话落地完成。
+    // 策略：每轮先探测，未落地则通过隐藏窗口触发一次 OA→IAM 握手，给会话落地机会。
+    // 单次 loadURL 加 3s 硬性超时，避免网络抖动时单轮阻塞过长。
     for (let i = 0; i < 12; i++) {
       ok = (await probeOaSession(sess)).ok
       if (ok) {
         debugLog(`[SSO] OA session landed (probe ok) after ~${i}s`)
         break
       }
-      if (!ssoTriggered) {
-        ssoTriggered = true
-        // 给 loadURL 加超时兜底：网络连不上(ERR_CONNECTION_TIMED_OUT)时快速放弃，不阻塞落地流程
+      try {
         await new Promise<void>((resolve) => {
           let done = false
           const finish = () => { if (!done) { done = true; resolve() } }
@@ -802,10 +799,10 @@ async function completeOaSso(_loginToken: string): Promise<boolean> {
         })
         // 给 OAuth 回跳 + 会话落地一点时间
         await new Promise(r => setTimeout(r, 800))
-      } else {
-        // 已触发握手：只等待落地，每 1s 探测一次
-        await new Promise(r => setTimeout(r, 1000))
+      } catch (e: any) {
+        debugLog('[SSO] trigger OA load error: ' + e.message)
       }
+      await new Promise(r => setTimeout(r, 1000))
     }
   } finally {
     // 关闭隐藏 SSO 窗口，释放资源
@@ -813,7 +810,13 @@ async function completeOaSso(_loginToken: string): Promise<boolean> {
     ssoWin = null
   }
 
-  if (!ok) debugLog('[SSO] OA session did NOT land within ~20s (IAM half-login only)')
+  if (!ok) {
+    debugLog('[SSO] OA session did NOT land within ~20s (IAM half-login only)')
+    // 关键：SSO 失败时必须通知渲染进程取消 loading，否则用户会卡在"正在进入工具..."
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(IPC.OA_CHECK_LOGGED, { loggedIn: false })
+    }
+  }
 
   // SSO 落地成功：把 OA 会话 cookie 备份到文件，确保重开 app 可免登录
   if (ok) {
