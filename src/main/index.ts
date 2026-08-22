@@ -123,6 +123,30 @@ async function migrateLegacyBackupIfNeeded() {
 // 启动时若 partition 内 OA 会话为空则从文件恢复，并强制补齐 expirationDate 使其持久。
 const SESSION_BACKUP_PATH = join(app.getPath('userData'), 'oa-session-backup.json')
 
+// 登录偏好持久化：记录 token 最后刷新时间与上一次发起登录请求的本地自然日，
+// 用于实现「强制走二维码登录」策略（当天首次登录 且 token 间隔 > 1 小时时跳过免密）。
+const LOGIN_PREF_PATH = join(app.getPath('userData'), 'oa-login-pref.json')
+interface LoginPref { lastTokenTs: number; lastLoginDay: string }
+function getLoginPref(): LoginPref {
+  try {
+    if (existsSync(LOGIN_PREF_PATH)) {
+      const raw = JSON.parse(readFileSync(LOGIN_PREF_PATH, 'utf-8'))
+      return { lastTokenTs: raw.lastTokenTs || 0, lastLoginDay: raw.lastLoginDay || '' }
+    }
+  } catch {}
+  return { lastTokenTs: 0, lastLoginDay: '' }
+}
+function setLoginPref(p: LoginPref) {
+  try { writeFileSync(LOGIN_PREF_PATH, JSON.stringify(p)) } catch {}
+}
+// 本地自然日（设备系统时间），跨天以 00:00 为界
+function todayStr(): string {
+  const d = new Date()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${d.getFullYear()}-${m}-${day}`
+}
+
 async function backupOaSession(sess: Electron.Session): Promise<void> {
   try {
     const all = await sess.cookies.get({})
@@ -146,6 +170,8 @@ async function backupOaSession(sess: Electron.Session): Promise<void> {
     }))
     writeFileSync(SESSION_BACKUP_PATH, JSON.stringify(data, null, 2))
     debugLog(`[backup] saved ${data.length} OA session cookies to file`)
+    // 同步记录 token 最后刷新时间，供「强制走二维码」策略判断间隔
+    try { setLoginPref({ ...getLoginPref(), lastTokenTs: Date.now() }) } catch {}
   } catch (e: any) {
     debugLog('[backup] error: ' + e.message)
   }
@@ -442,6 +468,28 @@ function checkLoginAndNotify(): Promise<void> {
 
 async function doCheckLoginAndNotify() {
   if (!mainWindow) return
+
+  // 强制走二维码登录判定：
+  // 同时满足「当天首次登录」与「token 间隔 > 1 小时」时，跳过 token 免密恢复/探测，
+  // 直接展示二维码登录，避免过期/失效 token 触发的自动重试与体验问题。
+  //   - 当天首次：以设备本地自然日(00:00 切换)为准，lastLoginDay 与今天不同即为首次
+  //   - token 间隔：本地系统时间 − 本地存储的 token 最后刷新时间 > 1h
+  const pref = getLoginPref()
+  const today = todayStr()
+  const isFirstToday = pref.lastLoginDay !== today
+  const tokenAgeMs = Date.now() - pref.lastTokenTs
+  const TOKEN_MAX_AGE_MS = 60 * 60 * 1000
+  const forceQr = isFirstToday && tokenAgeMs > TOKEN_MAX_AGE_MS
+  // 记录“今天已发起过登录请求”，确保当天后续检查不再算首次
+  if (isFirstToday) setLoginPref({ ...pref, lastLoginDay: today })
+
+  if (forceQr) {
+    debugLog(`[startup] force QR login: isFirstToday=${isFirstToday}, tokenAge=${Math.round(tokenAgeMs / 1000)}s (>1h=${tokenAgeMs > TOKEN_MAX_AGE_MS})`)
+    // 不尝试免密恢复，直接让渲染进程显示二维码登录视图
+    mainWindow.webContents.send(IPC.OA_LOGIN_STATE, { state: 'logging' })
+    return
+  }
+
   // 一次性迁移旧备份（若 partition 已空且有老文件）；之后信任 persist 持久化
   await migrateLegacyBackupIfNeeded()
   // 若 partition 内无 OA 会话，尝试从文件恢复（解决 session cookie 跨启动丢失）
