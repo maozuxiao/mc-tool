@@ -10,9 +10,6 @@ import { IPC } from '@shared/types'
 import { initAutoUpdater } from './updater'
 
 let mainWindow: BrowserWindow | null = null
-// 最近一次清除 cookie 的时间戳；退出登录后 IAM 需要短暂冷却才能正常走 SSO 跳转链，
-// 否则 step1 会卡在 iam 第一次 302 后不继续（表现为 timeout）。这里用于退出后拉码前等待冷却。
-let lastCookieClearAt = 0
 // 使用持久化 partition，让 OA 登录 Cookie 自动写入磁盘并跨启动保留。
 // 这是最可靠的方案：Electron 会为每个 persist:* partition 维护独立的
 // Cookie/Storage 目录，进程退出后依然保留，无需手动文件备份。
@@ -815,10 +812,10 @@ async function clearIamHalfLoginCookies(sess: Electron.Session): Promise<void> {
 //   1. 必须用隐藏窗口跑握手，否则主窗口会被导航到 IAM/OA 页面，React UI 被卸载，
 //      用户会看到 IAM/OA 页面内容（含断图占位符 @image:...）。
 //   2. 不再傻等 authnEngine 的 JS 前端跳转，直接访问真实 OA 接口触发授权码回跳。
-async function completeOaSso(_loginToken: string): Promise<boolean> {
+async function completeOaSso(_loginToken: string): Promise<{ ok: boolean; reason: 'network' | 'reauth' }> {
   if (!mainWindow || mainWindow.isDestroyed()) {
     debugLog('[SSO] mainWindow unavailable, skip SSO')
-    return false
+    return { ok: false, reason: 'reauth' }
   }
   // 通知渲染进程立即显示全屏 Loading 覆盖层
   mainWindow.webContents.send(IPC.OA_LOGIN_LANDING)
@@ -839,12 +836,20 @@ async function completeOaSso(_loginToken: string): Promise<boolean> {
 
   const oaTrigger = 'http://oa.streamax.com:8080/ruiming/mc/materiel_ui/materielSearch.do?method=wuliao&q.ORGANIZATION_ID=102&q.ITEM_NUMBER=0000000000000&__seq=' + Date.now()
   let ok = false
+  // 记录失败原因，用于给前端更明确的提示：
+  //   'network' —— 网络抖动 / iam 不可达，可检查网络后重试
+  //   'reauth'  —— OA 仍要求重新认证（半登录态）
+  // 任意一轮出现 network 即整体判为网络问题（更可能是临时抖动）。
+  let failReason: 'network' | 'reauth' = 'reauth'
   try {
-    // 最多等待约 12 轮，让 OAuth 回跳 + OA 会话落地完成。
+    // 最多等待约 6 轮（≈25s），让 OAuth 回跳 + OA 会话落地完成。
+    // 轮数下调：网络抖动时不应让用户干等太久，尽快回到扫码提示重试。
     // 策略：每轮先探测，未落地则通过隐藏窗口触发一次 OA→IAM 握手，给会话落地机会。
     // 单次 loadURL 加 3s 硬性超时，避免网络抖动时单轮阻塞过长。
-    for (let i = 0; i < 12; i++) {
-      ok = (await probeOaSession(sess)).ok
+    for (let i = 0; i < 6; i++) {
+      const pr = await probeOaSession(sess)
+      ok = pr.ok
+      if (!ok && pr.reason === 'network') failReason = 'network'
       if (ok) {
         debugLog(`[SSO] OA session landed (probe ok) after ~${i}s`)
         break
@@ -855,6 +860,11 @@ async function completeOaSso(_loginToken: string): Promise<boolean> {
           const finish = () => { if (!done) { done = true; resolve() } }
           const onFail = (_e: any, errMsg?: string) => {
             debugLog('[SSO] trigger OA load error: ' + (errMsg || 'fail'))
+            // IAM 不可达 / 连接超时（-118 ERR_CONNECTION_TIMED_OUT、-3 ERR_ABORTED 超时类）
+            // 属于网络问题，应提示用户检查网络而非"重新扫码"
+            if (errMsg && /TIMED_OUT|ERR_CONNECTION|timeout|-118|-3/i.test(errMsg)) {
+              failReason = 'network'
+            }
             finish()
           }
           const onStop = () => finish()
@@ -862,6 +872,9 @@ async function completeOaSso(_loginToken: string): Promise<boolean> {
           ssoWin!.webContents.once('did-stop-loading', onStop)
           ssoWin!.loadURL(oaTrigger).catch((e: any) => {
             debugLog('[SSO] trigger OA load rejected: ' + (e?.message || e))
+            if (e && /TIMED_OUT|ERR_CONNECTION|timeout|-118|-3/i.test(e?.message || '')) {
+              failReason = 'network'
+            }
             finish()
           })
           // 硬性超时：最多等 3s，避免长时间阻塞 SSO 落地流程
@@ -881,40 +894,28 @@ async function completeOaSso(_loginToken: string): Promise<boolean> {
   }
 
   if (!ok) {
-    debugLog('[SSO] OA session did NOT land within ~20s (IAM half-login only)')
-    // 关键：SSO 失败时必须通知渲染进程取消 loading，否则用户会卡在"正在进入工具..."
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send(IPC.OA_CHECK_LOGGED, { loggedIn: false })
-    }
+    debugLog(`[SSO] OA session did NOT land within ~25s (failReason=${failReason})`)
   }
 
   // SSO 落地成功：把 OA 会话 cookie 备份到文件，确保重开 app 可免登录
   if (ok) {
     await backupOaSession(sess)
   }
-  return ok
+  // 注意：不在此处发送 OA_CHECK_LOGGED，统一由 QR-POLL 外层根据返回值发送，
+  // 避免「内部发一次 + 外层再发一次无 reason」导致 reason 被覆盖、前端重复 re-fetch。
+  return { ok, reason: failReason }
 }
 
 ipcMain.handle(IPC.OA_QR_LOGIN_START, async () => {
   const sess = session.fromPartition(PARTITION)
   try {
-    // 0) 清掉 IAM 半登录态 cookie，避免带着旧 route/SESSION/usk 访问 OA 登录页时
-    //    触发 oa<->iam 静默 SSO 重定向震荡导致 step1 timeout。OA 工具会话不受影响。
-    await clearIamHalfLoginCookies(sess)
+    // 0) 不再主动清 IAM 半登录态：登出流程已保留 IAM 会话（COOKIE_CLEAR 只清 OA/streamax），
+    //    故 IAM 通常是「热」的，保留可让 step1 第 1 次就 200、秒出二维码。
+    //    首启冷启动 IAM 本就空，不清也无副作用。之前「震荡 timeout」实为循环前重复清 IAM 所致，已修。
 
     // 1) 先访问 OA 登录页，跟随重定向，提取一次性上下文 token (lck)
     //    lck 不在 HTML 里，而是在最终跳转 URL 的 query 参数中：/ac/#/index?lck=context_oauth2_xxx&entityId=oa
     debugLog(`[QR-START] step1: fetch login page ${OA_LOGIN_URL}`)
-
-    // 退出登录后 IAM 需要短暂冷却才能正常走 SSO 跳转链，否则 step1 会卡在
-    // iam 第一次 302 后不继续（表现为 timeout）。若距上次清除不足冷却期，先等待补足。
-    const COOLDOWN_MS = 12000
-    const sinceClear = Date.now() - lastCookieClearAt
-    if (sinceClear < COOLDOWN_MS) {
-      const wait = COOLDOWN_MS - sinceClear
-      debugLog(`[QR-START] within IAM cooldown, waiting ${wait}ms before step1`)
-      await new Promise(r => setTimeout(r, wait))
-    }
 
     // 冷启动预热：长时间未成功登录（距上次 SSO 落地 > 30 分钟，典型如「每天首次」强制二维码），
     // IAM 后端处于冷态，第一次 302 跳转链常跑不完导致 step1 超时。先等待 IAM 预热再取登录页。
@@ -927,22 +928,36 @@ ipcMain.handle(IPC.OA_QR_LOGIN_START, async () => {
 
     let loginPage
     let lastErr
-    // step1 单次超时 12s；最多重试 5 次，重试间隔随次数平滑递增（5s/8s/11s/14s），
-    // 给 IAM 冷启动/解冻留出时间，确保跳转链在循环内跑通，不再把 timeout 抛给前端二次重试。
-    // 只在首轮清一次 IAM 半登录态（反复清会重置 IAM 会话、延长解冻时间）。
-    await clearIamHalfLoginCookies(sess)
-    for (let attempt = 0; attempt < 5; attempt++) {
+    // step1：取 OA 登录页并跟随跳转链到 IAM 的 ac/#/index（拿到 lck）。
+    // IAM 后端偶发卡顿（首次冷启动或网络抖动）时，跳转链会跑不完导致超时。
+    // 策略：第 1 次正常取（单次超时 8s）；若失败，进入「指数退避快速重试」——
+    // 短超时 5s + 退避 1.5s→3s→4.5s，最多重试 3 轮（共 4 次尝试，最坏 ≈ 8+1.5+5+3+5+4.5+5 ≈ 32s 上限）。
+    // 相比旧版（固定 2s × 8 轮、单次 6s，最坏 ≈ 12+8*8=76s），把 IAM 抖动时的等待显著压短，
+    // 并在全部失败后明确抛 network 错误，前端提示「网络异常」而非无限转圈。
+    // 注意：QR-START 开头已不再清 IAM 半登录态（保留热会话，登出后多数情况第 1 次就 200、秒出码）。
+    let backoff = 1500
+    for (let attempt = 0; attempt < 4; attempt++) {
       try {
-        loginPage = await httpJsonWithRedirect(OA_LOGIN_URL, sess, 5, 12000)
+        loginPage = await httpJsonWithRedirect(OA_LOGIN_URL, sess, 5, attempt === 0 ? 8000 : 5000)
         lastErr = undefined
         break
       } catch (e: any) {
         lastErr = e
         debugLog(`[QR-START] step1 attempt ${attempt + 1} failed: ${e.message}`)
-        if (attempt < 4) await new Promise(r => setTimeout(r, 5000 + attempt * 3000))
+        if (attempt < 3) {
+          // 指数退避等 IAM 恢复，避免固定长间隔盲等把等待拉到 40s+
+          await new Promise(r => setTimeout(r, backoff))
+          backoff = Math.min(backoff * 2, 4500)
+        }
       }
     }
-    if (lastErr) throw lastErr
+    if (lastErr) {
+      // step1 全部失败：IAM/网络不可达，标记 network 让前端显示「网络异常」而非技术错误
+      const isNet = /timeout|ETIMEDOUT|ECONNRESET|ECONNREFUSED|ERR_CONNECTION|TIMED_OUT|ENOTFOUND|getaddrinfo/i.test(lastErr.message || '')
+      lastErr.reason = isNet ? 'network' : 'server'
+      lastErr.friendly = isNet ? '网络异常，请检查网络或稍后重试' : '登录服务暂不可用，请稍后重试'
+      throw lastErr
+    }
     const page = loginPage!
     const pageText = page.text || ''
     const finalUrl = page.finalUrl || ''
@@ -1029,7 +1044,12 @@ ipcMain.handle(IPC.OA_QR_LOGIN_START, async () => {
     }
   } catch (err: any) {
     debugLog('[QR-START] error: ' + err.message)
-    return { success: false, message: err.message }
+    // 区分网络类错误（step1 timeout / IAM 不可达）与业务逻辑错误，
+    // 前端据此显示「网络异常」提示而非原始技术栈信息。
+    const isNet = /timeout|ETIMEDOUT|ECONNRESET|ECONNREFUSED|ERR_CONNECTION|TIMED_OUT|ENOTFOUND|getaddrinfo/i.test(err.message || '')
+    const reason = err.reason || (isNet ? 'network' : 'server')
+    const message = err.friendly || (isNet ? '网络异常，请检查网络或稍后重试' : (err.message || '获取二维码失败'))
+    return { success: false, reason, message }
   }
 })
 
@@ -1108,6 +1128,7 @@ ipcMain.handle(IPC.OA_QR_LOGIN_POLL, async (_e, payload: {
           // 但 OA 服务端判定为 901 需要重认证）。落地与否必须以真实探测为准，
           // 否则会把"假登录"骗进工具，首次查询即被 901 踢回扫码（表现为进工具→转圈→回扫码）。
           let landed = false
+          let landReason: 'network' | 'reauth' = 'reauth'
           if (hasOaSession(after)) {
             // 有 cookie 名只是必要条件，再用真实探测确认 OA 接口真的认可该会话
             const probe = await probeOaSession(sess)
@@ -1118,15 +1139,21 @@ ipcMain.handle(IPC.OA_QR_LOGIN_POLL, async (_e, payload: {
               // 探测因网络抖动失败，无法确认是否落地：保险起见仍走主窗口导航再探一次，
               // 避免弱网下把假登录放进工具，也不因一次超时直接判失败。
               debugLog('[QR-POLL] cookie present but probe network-error, fallback to main-window nav to confirm')
-              landed = await completeOaSso(String(loginToken))
+              const r = await completeOaSso(String(loginToken))
+              landed = r.ok
+              if (!r.ok) landReason = r.reason
             } else {
               // 明确 reauth/invalid：HTTP 链没真正落地，走主窗口完整 SSO 跳转链
               debugLog('[QR-POLL] HTTP SSO chain did NOT land OA session (probe reauth), falling back to main-window navigation')
-              landed = await completeOaSso(String(loginToken))
+              const r = await completeOaSso(String(loginToken))
+              landed = r.ok
+              if (!r.ok) landReason = r.reason
             }
           } else {
             debugLog('[QR-POLL] HTTP SSO chain did not land OA session, falling back to main-window navigation')
-            landed = await completeOaSso(String(loginToken))
+            const r = await completeOaSso(String(loginToken))
+            landed = r.ok
+            if (!r.ok) landReason = r.reason
           }
           // SSO 完成后以真实探测作为唯一判定标准（不信任 cookie 名、不在 network 下兜底放行）。
           // 刚完成扫码的路径上，若 OA 确实没落地就如实返回 false，让前端回到扫码重试，
@@ -1153,9 +1180,9 @@ ipcMain.handle(IPC.OA_QR_LOGIN_POLL, async (_e, payload: {
             mainWindow.webContents.send(IPC.OA_CHECK_LOGGED, { loggedIn: true })
           } else if (mainWindow && !mainWindow.isDestroyed()) {
             // SSO 未真正落地：如实通知前端回到扫码界面重试（关闭"正在进入工具"loading），
-            // 不再把假登录骗进工具后首次查询才被 901 踢出。
-            debugLog('[QR-POLL] SSO did not truly land, notify renderer to retry QR login')
-            mainWindow.webContents.send(IPC.OA_CHECK_LOGGED, { loggedIn: false })
+            // 不再把假登录骗进工具后首次查询才被 901 踢出。带原因：network→网络异常提示。
+            debugLog(`[QR-POLL] SSO did not truly land (reason=${landReason}), notify renderer to retry QR login`)
+            mainWindow.webContents.send(IPC.OA_CHECK_LOGGED, { loggedIn: false, reason: landReason })
           }
         } else {
           debugLog('[QR-POLL] authExecute success but no loginToken found, cannot complete SSO')
@@ -1419,21 +1446,26 @@ ipcMain.handle(IPC.OA_FILE_DOWNLOAD, async (_e, payload: { url: string; filename
 
 ipcMain.handle(IPC.COOKIE_CLEAR, async () => {
   const sess = session.fromPartition(PARTITION)
-  // 记录清除时间，供 QR-START step1 冷却等待（退出后 IAM 需短暂复位）
-  lastCookieClearAt = Date.now()
-  // 彻底清空 partition 下所有持久化数据（Cookie / Storage / Cache），
-  // 覆盖 oa.streamax.com 与 iam.streamax.com 等 SSO 域
-  await sess.clearStorageData()
-  await sess.cookies.remove('http://oa.streamax.com:8080', '').catch(() => {})
-  // 也尝试按域清理（cookies.remove 需要 name，这里用 cookies.get+clear 兜底）
+  // 登出只清「OA 工具会话」：oa.streamax.com 与 streamax.com 的会话 cookie。
+  // 刻意【保留】iam.streamax.com 的 route/SESSION/usk/REQID —— 这些是 IAM SSO 会话，
+  // 不清则登出后 IAM 仍是热的，下次刷新二维码 step1 第 1 次就能 200（约 2~5s 出码），
+  // 不必重建会话（否则会连续 timeout、拉码耗时 60s+）。
   const all = await sess.cookies.get({})
   for (const c of all) {
-    try {
-      const url = `${c.secure ? 'https' : 'http'}://${c.domain?.replace(/^\./, '')}${c.path || '/'}`
-      await sess.cookies.remove(url, c.name)
-    } catch { /* ignore */ }
+    const domain = (c.domain || '').toLowerCase()
+    // 只删 OA / streamax 主域；保留 iam.streamax.com IAM 会话
+    if (domain.endsWith('oa.streamax.com') || domain.endsWith('streamax.com')) {
+      try {
+        const url = `${c.secure ? 'https' : 'http'}://${domain.replace(/^\./, '')}${c.path || '/'}`
+        await sess.cookies.remove(url, c.name)
+      } catch { /* ignore */ }
+    }
   }
-  debugLog('[COOKIE_CLEAR] cleared all partition cookies/storage')
+  // 清掉 OA 工具态相关的本地存储（避免旧页面态干扰），但保留 IAM 会话
+  await sess.clearStorageData({
+    storages: ['localstorage', 'indexdb', 'cachestorage', 'serviceworkers'],
+  }).catch(() => {})
+  debugLog('[COOKIE_CLEAR] cleared OA/streamax session cookies, kept IAM session')
   // 同时删除 OA 会话文件备份，避免退出登录后重开又自动恢复登录态
   try { if (existsSync(SESSION_BACKUP_PATH)) unlinkSync(SESSION_BACKUP_PATH) } catch {}
   checkLoginAndNotify()

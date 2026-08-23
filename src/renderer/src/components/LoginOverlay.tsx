@@ -10,6 +10,9 @@ const MAX_POLL_MS = 3 * 60 * 1000 // 最多轮询 3 分钟
 export function LoginOverlay({ loginState }: Props) {
   const lang = useStore(s => s.lang)
   const appName = lang === 'en' ? 'DingTalk' : '钉钉'
+  const loginError = useStore(s => s.loginError)
+  const setLoginError = useStore(s => s.setLoginError)
+  const qrRefetchSeq = useStore(s => s.qrRefetchSeq)
 
   const [qrSrc, setQrSrc] = useState('')
   const [qrToken, setQrToken] = useState('')
@@ -50,11 +53,12 @@ export function LoginOverlay({ loginState }: Props) {
   // 默认 forceQr=true：直接获取二维码，跳过主进程免登录校验（免登录由启动时的
   // checkLoginAndNotify 负责；这里只需拿到可用二维码）。退出登录/重开无 cookie 时
   // 直接拿码，避免走易 timeout 的自动校验路径。
-  const fetchQr = useCallback(async (forceQr = true) => {
+  const fetchQr = useCallback(async (forceQr = true, retryLeft = 0) => {
     console.log('[QR] fetchQr called, loginState=', loginState, 'forceQr=', forceQr)
     stopPolling()
     setLoading(true)
     setError('')
+    setLoginError('')
     setScanned(false)
     setQrSrc('')
     setQrToken('')
@@ -67,7 +71,17 @@ export function LoginOverlay({ loginState }: Props) {
       // forceQr=true 表示用户手动点击刷新：跳过主进程自动认证判断，直接获取二维码
       const res = await window.mcApi.startQrLogin(forceQr)
       console.log('[QR] startQrLogin result=', res)
-      if (!res.success) throw new Error(res.message || '获取二维码失败')
+      if (!res.success) {
+        // 网络类错误（IAM 超时/不可达）：自动退避重试，IAM 一恢复即出新码，无需用户手动刷新
+        if (res.reason === 'network' && retryLeft > 0) {
+          setError('网络异常，正在重新获取二维码...')
+          setStatus('网络异常，正在重试...')
+          setLoading(false)
+          window.setTimeout(() => fetchQr(forceQr, retryLeft - 1), 5000)
+          return
+        }
+        throw new Error(res.message || '获取二维码失败')
+      }
       const token = res.qrToken || res.data?.qrToken
       const msg = res.qrMsg || res.data?.qrMessage || res.data?.qrMsg || res.data?.qrData
       if (!token || !msg) throw new Error('二维码数据不完整')
@@ -82,7 +96,7 @@ export function LoginOverlay({ loginState }: Props) {
       // 主进程正在并发获取二维码（互斥锁拒绝），稍候自动重试，不向用户报错
       if (/正在获取二维码/.test(msg)) {
         setStatus('正在获取二维码...')
-        window.setTimeout(() => fetchQr(forceQr), 800)
+        window.setTimeout(() => fetchQr(forceQr, retryLeft), 800)
         return
       }
       setError(msg)
@@ -103,9 +117,19 @@ export function LoginOverlay({ loginState }: Props) {
     // 初次进入（无 token）或“重新登录”（上次不是 logging）→ 重新拉取
     if (!qrToken || prev !== 'logging') {
       setExpired(false)
-      fetchQr()
+      fetchQr(true, 6)
     }
   }, [loginState, qrToken, fetchQr])
+
+  // 主进程 SSO 落地网络失败等场景：通过 qrRefetchSeq 自增触发自动重新拉取并显示新二维码，
+  // 用户无需手动点击刷新（旧码已被扫过、重扫无效）。
+  const lastRefetchSeqRef = useRef<number>(0)
+  useEffect(() => {
+    if (qrRefetchSeq === 0) return
+    if (qrRefetchSeq === lastRefetchSeqRef.current) return
+    lastRefetchSeqRef.current = qrRefetchSeq
+    fetchQr(true, 6)
+  }, [qrRefetchSeq, fetchQr])
 
   // 二维码拿到后开始长轮询（authExecute）
   // 注意：必须是单条请求串行等待，authExecute 会挂起 60s；用 setInterval 会导致多个请求并发互相覆盖。
@@ -228,11 +252,12 @@ export function LoginOverlay({ loginState }: Props) {
         </div>
 
         {error && <div className="qr-error">{error}</div>}
+        {!error && loginError && <div className="qr-error">{loginError}</div>}
 
         <div className="qr-actions">
           <button
             className="animal-btn animal-btn--primary"
-            onClick={() => fetchQr(true)}
+            onClick={() => fetchQr(true, 6)}
             disabled={loading}
           >
             {loading ? '加载中...' : '刷新二维码'}

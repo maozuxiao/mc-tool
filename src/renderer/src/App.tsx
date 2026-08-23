@@ -42,15 +42,36 @@ export function App() {
   const setChecking = useStore(s => s.setCheckingLogin)
   const setLoginState = useStore(s => s.setLoginState)
   const setLanding = useStore(s => s.setLanding)
+  const setLoginError = useStore(s => s.setLoginError)
+  const setQrRefetchSeq = useStore(s => s.setQrRefetchSeq)
   const setUpdateInfo = useStore(s => s.setUpdateInfo)
 
   useEffect(() => {
     // 监听主进程回传的登录态检测结果
-    window.mcApi.onLoginChecked((s: { loggedIn: boolean }) => {
+    window.mcApi.onLoginChecked((s: { loggedIn: boolean; reason?: string }) => {
       setLanding(false)
       setLoggedIn(s.loggedIn)
       setChecking(false)
-      if (s.loggedIn) setLoginState('ok')
+      if (s.loggedIn) {
+        setLoginState('ok')
+        setLoginError('')
+      } else {
+        // SSO 未真正落地：区分网络异常与认证失败，给出明确提示
+        const reason = s.reason
+        setLoginError(
+          reason === 'network'
+            ? '网络异常，正在重新获取二维码...'
+            : '登录未完成，请重新扫描二维码'
+        )
+        if (reason === 'network') {
+          // 网络异常（如 IAM 超时）时：通过 qrRefetchSeq 自增触发 LoginOverlay 自动重新拉取
+          // 并显示新二维码，用户无需手动点击刷新（旧码已被扫过、重扫无效）。
+          setQrRefetchSeq(useStore.getState().qrRefetchSeq + 1)
+        } else {
+          // 认证失败（reauth）时停在 failed，等待用户手动重新扫码
+          setLoginState('failed')
+        }
+      }
     })
     window.mcApi.onLoginReady((s: { loggedIn: boolean }) => {
       setLanding(false)

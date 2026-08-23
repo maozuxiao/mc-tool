@@ -20,6 +20,10 @@ interface State {
   landing: boolean
   // 登录阶段状态：checking(检测令牌) | logging(登录中) | failed(失败)
   loginState: 'checking' | 'logging' | 'failed' | 'ok'
+  // SSO 落地失败时给用户的明确提示（网络异常 / 认证失败），由主进程通过原因驱动
+  loginError: string
+  // 强制重新拉取二维码的序号：network 失败等场景自增，LoginOverlay 监听后自动重新拉码
+  qrRefetchSeq: number
   // 基础输入
   itemNo: string
   fields: Field[]
@@ -146,6 +150,8 @@ export const useStore = create<State>((set, get) => ({
   checkingLogin: true,
   landing: false,
   loginState: 'checking',
+  loginError: '',
+  qrRefetchSeq: 0,
   itemNo: '',
   fields: [{ id: 'f1', val: '' }, { id: 'f2', val: '' }, { id: 'f3', val: '' }],
   batchText: '',
@@ -166,6 +172,8 @@ export const useStore = create<State>((set, get) => ({
   setCheckingLogin: (v) => set({ checkingLogin: v }),
   setLanding: (v) => set({ landing: v }),
   setLoginState: (v) => set({ loginState: v }),
+  setLoginError: (v) => set({ loginError: v }),
+  setQrRefetchSeq: (v) => set({ qrRefetchSeq: v }),
 
   setItemNo: (v) => set({ itemNo: v }),
   addField: () => set(s => ({ fields: [...s.fields, { id: 'f' + Date.now(), val: '' }] })),
