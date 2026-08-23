@@ -450,6 +450,28 @@ async function isOALoggedin(): Promise<boolean> {
   }
 }
 
+// 严格版：供「刚完成扫码/SSO 落地」路径使用。此时会话本应已落地，
+// 必须以真实探测 ok 为准，不对 network 做"信任 cookie"兜底——
+// 否则弱网/服务端超时(-118)会把假登录骗进工具，首次查询即被 901 踢回扫码。
+async function isOALoggedinStrict(sess: Electron.Session): Promise<boolean> {
+  try {
+    const cookies = (await sess.cookies.get({})).filter(c => /streamax/.test(c.domain || ''))
+    if (cookies.length === 0) return false
+    const OA_HOST = 'oa.streamax.com'
+    const oaCookies = cookies.filter(c => (c.domain || '').toLowerCase().includes(OA_HOST.toLowerCase()))
+    const hasOaSession = oaCookies.some(c =>
+      /^(JSESSIONID|SESSION|LTPATOKEN|ROUTE|TOKEN|OA_TOKEN|UID|USER|LOGIN|SSO)/i.test(c.name) ||
+      c.name.toUpperCase().includes('SESSION') || c.name.toUpperCase().includes('TOKEN'))
+    if (!hasOaSession) return false
+    const probed = await probeOaSession(sess)
+    // 仅 probe.ok 才算登录；reauth/invalid/network 一律视为未生效
+    debugLog(`[isOALoggedinStrict] probe ok=${probed.ok} reason=${probed.reason}`)
+    return probed.ok
+  } catch {
+    return false
+  }
+}
+
 // 防重入：createWindow() 与渲染进程 OA_RELOAD 可能几乎同时触发登录检查，
 // 导致启动期整条探测链（migrate/restore/probe）跑两遍、多发 6 次 OA 请求。
 // 并发调用共享同一次 in-flight 检查。
@@ -1082,16 +1104,34 @@ ipcMain.handle(IPC.OA_QR_LOGIN_POLL, async (_e, payload: {
             (/^(JSESSIONID|SESSION|LTPATOKEN|ROUTE|TOKEN|OA_TOKEN|UID|USER|LOGIN|SSO)/i.test(c.name) ||
              c.name.toUpperCase().includes('SESSION') || c.name.toUpperCase().includes('TOKEN')))
           debugLog(`[QR-POLL] after HTTP SSO: oa cookies = ${after.filter(c => (c.domain||'').toLowerCase().includes('oa.streamax.com')).map(c => c.name).join(', ') || '(none)'}`)
-          let landed = hasOaSession(after)
-          if (!landed) {
-            // HTTP 链没拿到 OA 会话，用主窗口跑完整 SSO 跳转链（含主动导航 portal 兜底）
+          // 注意：cookie 名存在 ≠ OA 会话真实生效（IAM 半登录态也会种 route/SESSION，
+          // 但 OA 服务端判定为 901 需要重认证）。落地与否必须以真实探测为准，
+          // 否则会把"假登录"骗进工具，首次查询即被 901 踢回扫码（表现为进工具→转圈→回扫码）。
+          let landed = false
+          if (hasOaSession(after)) {
+            // 有 cookie 名只是必要条件，再用真实探测确认 OA 接口真的认可该会话
+            const probe = await probeOaSession(sess)
+            if (probe.ok) {
+              landed = true
+              debugLog('[QR-POLL] HTTP SSO chain landed OA session (probe ok), skipping main-window nav')
+            } else if (probe.reason === 'network') {
+              // 探测因网络抖动失败，无法确认是否落地：保险起见仍走主窗口导航再探一次，
+              // 避免弱网下把假登录放进工具，也不因一次超时直接判失败。
+              debugLog('[QR-POLL] cookie present but probe network-error, fallback to main-window nav to confirm')
+              landed = await completeOaSso(String(loginToken))
+            } else {
+              // 明确 reauth/invalid：HTTP 链没真正落地，走主窗口完整 SSO 跳转链
+              debugLog('[QR-POLL] HTTP SSO chain did NOT land OA session (probe reauth), falling back to main-window navigation')
+              landed = await completeOaSso(String(loginToken))
+            }
+          } else {
             debugLog('[QR-POLL] HTTP SSO chain did not land OA session, falling back to main-window navigation')
             landed = await completeOaSso(String(loginToken))
-          } else {
-            debugLog('[QR-POLL] HTTP SSO chain landed OA session, skipping main-window nav')
           }
-          // SSO 完成后主动检测登录态并通知渲染进程进入工具；若主窗口导航返回成功也直接推送
-          const finalOk = landed || await isOALoggedin()
+          // SSO 完成后以真实探测作为唯一判定标准（不信任 cookie 名、不在 network 下兜底放行）。
+          // 刚完成扫码的路径上，若 OA 确实没落地就如实返回 false，让前端回到扫码重试，
+          // 而不是骗进工具后首次查询才被 901 踢出。
+          const finalOk = landed && (await isOALoggedinStrict(sess))
           debugLog(`[QR-POLL] final isOALoggedin = ${finalOk}`)
           // 登录后预热 OA 会话：主动访问一次真实 OA 接口，强制完成 SSO 握手落地，
           // 避免用户首次查询时才被 OA 踢去 IAM 重新认证（901），消除“重新登录”体验。
@@ -1111,6 +1151,11 @@ ipcMain.handle(IPC.OA_QR_LOGIN_POLL, async (_e, payload: {
           }
           if (finalOk && mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send(IPC.OA_CHECK_LOGGED, { loggedIn: true })
+          } else if (mainWindow && !mainWindow.isDestroyed()) {
+            // SSO 未真正落地：如实通知前端回到扫码界面重试（关闭"正在进入工具"loading），
+            // 不再把假登录骗进工具后首次查询才被 901 踢出。
+            debugLog('[QR-POLL] SSO did not truly land, notify renderer to retry QR login')
+            mainWindow.webContents.send(IPC.OA_CHECK_LOGGED, { loggedIn: false })
           }
         } else {
           debugLog('[QR-POLL] authExecute success but no loginToken found, cannot complete SSO')
