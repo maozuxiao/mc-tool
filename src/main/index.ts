@@ -894,21 +894,30 @@ ipcMain.handle(IPC.OA_QR_LOGIN_START, async () => {
       await new Promise(r => setTimeout(r, wait))
     }
 
+    // 冷启动预热：长时间未成功登录（距上次 SSO 落地 > 30 分钟，典型如「每天首次」强制二维码），
+    // IAM 后端处于冷态，第一次 302 跳转链常跑不完导致 step1 超时。先等待 IAM 预热再取登录页。
+    const pref = getLoginPref()
+    const sinceLastSso = Date.now() - (pref.lastTokenTs || 0)
+    if (pref.lastTokenTs && sinceLastSso > 30 * 60 * 1000) {
+      debugLog(`[QR-START] IAM cold start (idle ${(sinceLastSso / 60000) | 0}min), warm-up wait 8s before step1`)
+      await new Promise(r => setTimeout(r, 8000))
+    }
+
     let loginPage
     let lastErr
-    // step1 单次超时 15s；重试前先等 IAM 解冻，避免在冻结期内密集重试把 IAM 反复重置。
+    // step1 单次超时 12s；最多重试 5 次，重试间隔随次数平滑递增（5s/8s/11s/14s），
+    // 给 IAM 冷启动/解冻留出时间，确保跳转链在循环内跑通，不再把 timeout 抛给前端二次重试。
     // 只在首轮清一次 IAM 半登录态（反复清会重置 IAM 会话、延长解冻时间）。
     await clearIamHalfLoginCookies(sess)
-    for (let attempt = 0; attempt < 3; attempt++) {
+    for (let attempt = 0; attempt < 5; attempt++) {
       try {
-        loginPage = await httpJsonWithRedirect(OA_LOGIN_URL, sess, 5, 15000)
+        loginPage = await httpJsonWithRedirect(OA_LOGIN_URL, sess, 5, 12000)
         lastErr = undefined
         break
       } catch (e: any) {
         lastErr = e
         debugLog(`[QR-START] step1 attempt ${attempt + 1} failed: ${e.message}`)
-        // 等待 IAM 解冻后再重试，间隔随次数递增（8s / 16s / 24s）
-        await new Promise(r => setTimeout(r, 8000 * (attempt + 1)))
+        if (attempt < 4) await new Promise(r => setTimeout(r, 5000 + attempt * 3000))
       }
     }
     if (lastErr) throw lastErr
