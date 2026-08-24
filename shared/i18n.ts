@@ -3,11 +3,9 @@ export const I18N: Record<string, Record<string, string | string[]>> = {
   zh: {
     appTitle: 'MC物料查询',
     help: '帮助',
-    version: '版本号',
     about: '关于',
     aboutInfo: 'MC物料查询\n\n说明：MC物料查询是一款面向锐明技术（Streamax）员工的物料信息速查桌面工具，支持料号 / BOM / 规格文件一键查询、批量查询、结果筛选与导出。\n\n作者：Sean Mao\n联系方式：sean@streamax.com\n\n版本：{v}',
     checkForUpdate: '检查更新',
-    versionInfo: 'MC物料查询桌面端\n版本：{v}',
     zoomHint: 'Ctrl+滚轮缩放页面，Ctrl+0 复位',
     updateLatest: '当前已是最新版本',
     updateDownloading: '正在下载更新（{p}%）',
@@ -141,11 +139,9 @@ export const I18N: Record<string, Record<string, string | string[]>> = {
   en: {
     appTitle: 'MC Material Query',
     help: 'Help',
-    version: 'Version',
     about: 'About',
     aboutInfo: 'MC Material Query\n\nDescription: MC Material Query is a desktop quick-search tool for Streamax employees to look up item information, BOM and spec files, supporting batch queries, filtering and export.\n\nAuthor: Sean Mao\nContact: sean@streamax.com\n\nVersion: {v}',
     checkForUpdate: 'Check for Update',
-    versionInfo: 'MC Material Query Desktop\nVersion: {v}',
     zoomHint: 'Ctrl+wheel to zoom, Ctrl+0 to reset',
     updateLatest: 'You are up to date',
     updateDownloading: 'Downloading update ({p}%)',

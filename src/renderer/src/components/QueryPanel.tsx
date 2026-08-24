@@ -193,12 +193,10 @@ export function QueryPanel({ disabled }: { disabled: boolean }) {
               value=""
               placeholder={t('help')}
               options={[
-                { key: 'version', label: t('version') },
                 { key: 'about', label: t('about') },
                 { key: 'check', label: updateInfo.checking ? t('updateChecking') : t('checkForUpdate') }
               ]}
               onChange={(key) => {
-                if (key === 'version') alert(t('versionInfo', { v: appVersion }))
                 if (key === 'about') alert(t('aboutInfo', { v: appVersion }))
                 if (key === 'check') {
                   // 手动检查：弹窗返回结果；有更新则提供「立即下载」入口
