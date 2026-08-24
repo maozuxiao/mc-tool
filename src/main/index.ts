@@ -368,25 +368,23 @@ async function probeOaSession(sess: Electron.Session): Promise<ProbeResult> {
 // 隐藏窗口走一次真实 OA 接口，触发 IAM OAuth 授权码回跳，让 OA 会话重新落地。
 // 供 isOALoggedin(启动期) 与 OA_REFRESH_SESSION(查询期) 复用，避免逻辑重复。
 async function tryAutoSsoRefresh(sess: Electron.Session): Promise<boolean> {
-  debugLog('[autoSSO] start hidden-window OAuth refresh')
-  let ssoWin: BrowserWindow | null = new BrowserWindow({
-    show: false,
-    width: 800,
-    height: 600,
-    webPreferences: { partition: PARTITION, contextIsolation: true, nodeIntegration: false, sandbox: false }
-  })
+  debugLog('[autoSSO] start HTTP SSO refresh (follow OA login page redirects)')
   try {
-    await ssoWin.loadURL(PROBE_URL_BASE + Date.now())
-    // 等待 OAuth 回跳 + 会话落地
-    for (let i = 0; i < 12; i++) {
-      await new Promise(r => setTimeout(r, 1000))
+    // 纯 HTTP 跟随 OA 登录页重定向链：若 partition 里 IAM 仍登录，OA 会静默完成
+    // oa→iam?code→oa 落地并种下 OA 会话；若 IAM 已失效，则停在 IAM 登录页（OA 不落地）。
+    try {
+      const r = await httpJsonWithRedirect(OA_LOGIN_URL, sess, 6, 15000)
+      debugLog(`[autoSSO] OA login page chain final=${r.finalUrl.split('?')[0]} status=${r.status}`)
+    } catch (e: any) {
+      debugLog('[autoSSO] OA login page chain error: ' + e.message)
+    }
+    // 等待落地（优化 A：间隔 400ms，上限 16 轮，覆盖 ~6s 最坏落地）
+    for (let i = 0; i < 16; i++) {
+      await new Promise(r => setTimeout(r, 400))
       if ((await probeOaSession(sess)).ok) break
     }
   } catch (e: any) {
-    debugLog('[autoSSO] trigger load error: ' + e.message)
-  } finally {
-    try { ssoWin?.close() } catch { /* ignore */ }
-    ssoWin = null
+    debugLog('[autoSSO] trigger error: ' + e.message)
   }
   const after = await probeOaSession(sess)
   debugLog(`[autoSSO] result ok=${after.ok} reason=${after.reason}`)
@@ -802,16 +800,19 @@ async function clearIamHalfLoginCookies(sess: Electron.Session): Promise<void> {
   }
 }
 
-// 用隐藏 BrowserWindow 完成 IAM->OA 的 OAuth 授权码 SSO 流程。
-// 真实链路（由 901 Location 反推）：
+// 用纯 HTTP 链（与 partition 共享 cookie jar）完成 IAM->OA 的 OAuth 授权码 SSO 落地。
+// 这是 1.0.9 已验证可用的路径（日志实证：HTTP SSO chain landed OA session）。
+// 真实链路：
 //   authnEngine(loginToken) → 302 →
 //     iam .../authenticate?response_type=code&client_id=oa&redirect_uri=<OA接口>&state=IAM_OA_SSO
-//   → IAM 对已登录用户自动 consent → 带着 code 回跳 redirect_uri(OA 接口)
-//   → OA 校验 code 后种下真正的 OA 会话（JSESSIONID 等），此后接口返回 JSON。
+//   → IAM 对已登录用户自动 consent → 带 code 回跳 redirect_uri(OA 接口)
+//   → OA 校验 code 后通过 Set-Cookie 种下真正的 OA 会话（.oa.streamax.com 的 SESSION 等）。
 // 关键点：
-//   1. 必须用隐藏窗口跑握手，否则主窗口会被导航到 IAM/OA 页面，React UI 被卸载，
-//      用户会看到 IAM/OA 页面内容（含断图占位符 @image:...）。
-//   2. 不再傻等 authnEngine 的 JS 前端跳转，直接访问真实 OA 接口触发授权码回跳。
+//   1. 必须用 httpJsonWithRedirect 跟随 302（落 OA cookie），而不是 BrowserWindow ——
+//      隐藏窗口的 authnEngine 页面不会自动跳回 OA（实测停在 authnEngine），建不起 OA 会话。
+//   2. loginToken 是一次性的；首轮跟随消费后即可，无需重复 load。
+//   3. 跟随完成后 OA 会话可能处于「半建」(票据有了但未激活)，先 probe；若仍 901，
+//      再 GET 一次 OA 登录页激活，然后再次 probe 即 200（与 1.0.9 的 warm-up 重试一致）。
 async function completeOaSso(_loginToken: string): Promise<{ ok: boolean; reason: 'network' | 'reauth' }> {
   if (!mainWindow || mainWindow.isDestroyed()) {
     debugLog('[SSO] mainWindow unavailable, skip SSO')
@@ -821,71 +822,66 @@ async function completeOaSso(_loginToken: string): Promise<{ ok: boolean; reason
   mainWindow.webContents.send(IPC.OA_LOGIN_LANDING)
   const sess = session.fromPartition(PARTITION)
 
-  // 创建隐藏窗口专门跑 SSO（与主窗口共享 partition Cookie）
-  let ssoWin: BrowserWindow | null = new BrowserWindow({
-    show: false,
-    width: 800,
-    height: 600,
-    webPreferences: {
-      partition: PARTITION,
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: false
-    }
-  })
-
-  const oaTrigger = 'http://oa.streamax.com:8080/ruiming/mc/materiel_ui/materielSearch.do?method=wuliao&q.ORGANIZATION_ID=102&q.ITEM_NUMBER=0000000000000&__seq=' + Date.now()
   let ok = false
   // 记录失败原因，用于给前端更明确的提示：
   //   'network' —— 网络抖动 / iam 不可达，可检查网络后重试
-  //   'reauth'  —— OA 仍要求重新认证（半登录态）
-  // 任意一轮出现 network 即整体判为网络问题（更可能是临时抖动）。
+  //   'reauth'  —— OA 仍要求重新认证（半登录态 / loginToken 失效）
   let failReason: 'network' | 'reauth' = 'reauth'
+
+  // 1.0.9 验证可用的落地方式（实测有效）：
+  //   authnEngine(loginToken) 只是在 IAM 侧核销并种下 IAM 票据，**不会自动跳回 OA**，
+  //   因此 authnEngine 页面本身无法建立 OA 会话。真正的 OA 会话是在「已带 IAM 票据地访问
+  //   OA 业务接口」时，由 OA 发起 oa→iam→oa 静默 SSO 落地建起来的。
+  //   故这里用隐藏窗口反复 load OA 业务接口（oaTrigger）+ probe，循环最多 12 轮，
+  //   直到 OA 真正接受会话（probe 200）。这正是 1.0.9 能登录、而后续版本改成 load authnEngine 失败的根因。
+  //   注意：调用方（QR-POLL）必须先 HTTP 跟随 authnEngine 核销 loginToken，把 IAM 票据种好，
+  //   否则这里 load OA 接口会被 302 回 IAM 要求重新认证。
+  const oaTrigger = 'http://oa.streamax.com:8080/ruiming/mc/materiel_ui/materielSearch.do?method=wuliao&q.ORGANIZATION_ID=102&q.ITEM_NUMBER=0000000000000&__seq=' + Date.now()
+
+  // 隐藏窗口跑握手（与主窗口共享 partition Cookie）。屏幕外可见坐标，避免 show:false 节流 JS。
+  let ssoWin: BrowserWindow | null = new BrowserWindow({
+    show: true, x: -2000, y: -2000, width: 800, height: 600,
+    skipTaskbar: true, paintWhenInitiallyHidden: true,
+    webPreferences: { partition: PARTITION, contextIsolation: true, nodeIntegration: false, sandbox: false }
+  })
+
+  // 优化 B：进循环前立即先 load 一次 OA 业务接口，让 oa↔iam 静默 SSO 握手马上开始，
+  // 不浪费第一轮 probe 的等待（实测命中后约 4~6s 落地，比原先 ~11s 快近一倍）。
+  const fireOa = (tag: string) => new Promise<void>((resolve) => {
+    let done = false
+    const finish = () => { if (!done) { done = true; resolve() } }
+    ssoWin!.webContents.once('did-fail-load', (_e: any, errMsg?: string) => {
+      if (errMsg && /TIMED_OUT|ERR_CONNECTION|timeout|-118|-3/i.test(errMsg)) failReason = 'network'
+      finish()
+    })
+    ssoWin!.webContents.once('did-stop-loading', finish)
+    ssoWin!.loadURL(oaTrigger + '&__r=' + tag).catch((e: any) => {
+      if (e && /TIMED_OUT|ERR_CONNECTION|timeout|-118|-3/i.test(e?.message || '')) failReason = 'network'
+      finish()
+    })
+    setTimeout(finish, 5000)
+  })
+
   try {
-    // 最多等待约 6 轮（≈25s），让 OAuth 回跳 + OA 会话落地完成。
-    // 轮数下调：网络抖动时不应让用户干等太久，尽快回到扫码提示重试。
-    // 策略：每轮先探测，未落地则通过隐藏窗口触发一次 OA→IAM 握手，给会话落地机会。
-    // 单次 loadURL 加 3s 硬性超时，避免网络抖动时单轮阻塞过长。
-    for (let i = 0; i < 6; i++) {
+    // 进循环前先触发一次握手（优化 B）
+    await fireOa('pre')
+    for (let i = 0; i < 16; i++) {
       const pr = await probeOaSession(sess)
       ok = pr.ok
-      if (!ok && pr.reason === 'network') failReason = 'network'
       if (ok) {
-        debugLog(`[SSO] OA session landed (probe ok) after ~${i}s`)
+        debugLog(`[SSO] OA session landed (probe ok) round=${i}`)
         break
       }
+      if (pr.reason === 'network') failReason = 'network'
       try {
-        await new Promise<void>((resolve) => {
-          let done = false
-          const finish = () => { if (!done) { done = true; resolve() } }
-          const onFail = (_e: any, errMsg?: string) => {
-            debugLog('[SSO] trigger OA load error: ' + (errMsg || 'fail'))
-            // IAM 不可达 / 连接超时（-118 ERR_CONNECTION_TIMED_OUT、-3 ERR_ABORTED 超时类）
-            // 属于网络问题，应提示用户检查网络而非"重新扫码"
-            if (errMsg && /TIMED_OUT|ERR_CONNECTION|timeout|-118|-3/i.test(errMsg)) {
-              failReason = 'network'
-            }
-            finish()
-          }
-          const onStop = () => finish()
-          ssoWin!.webContents.once('did-fail-load', onFail)
-          ssoWin!.webContents.once('did-stop-loading', onStop)
-          ssoWin!.loadURL(oaTrigger).catch((e: any) => {
-            debugLog('[SSO] trigger OA load rejected: ' + (e?.message || e))
-            if (e && /TIMED_OUT|ERR_CONNECTION|timeout|-118|-3/i.test(e?.message || '')) {
-              failReason = 'network'
-            }
-            finish()
-          })
-          // 硬性超时：最多等 3s，避免长时间阻塞 SSO 落地流程
-          setTimeout(finish, 3000)
-        })
-        // 给 OAuth 回跳 + 会话落地一点时间
-        await new Promise(r => setTimeout(r, 800))
+        // 隐藏窗口 load OA 业务接口：带 IAM 票据时，OA 会静默完成 oa↔iam SSO 并建会话。
+        // loadURL 加 5s 超时兜底，避免长时间阻塞（网络连不上时快速放弃进入下一轮）。
+        await fireOa(String(i))
+        // 优化 A：轮询间隔从 800ms 降到 400ms，缩短空等时间
+        await new Promise(r => setTimeout(r, 400))
       } catch (e: any) {
         debugLog('[SSO] trigger OA load error: ' + e.message)
       }
-      await new Promise(r => setTimeout(r, 1000))
     }
   } finally {
     // 关闭隐藏 SSO 窗口，释放资源
@@ -1126,49 +1122,23 @@ ipcMain.handle(IPC.OA_QR_LOGIN_POLL, async (_e, payload: {
           (json?.data && (json.data as any)?.loginToken) ||
           (json?.data && (json.data as any)?.token)
         if (loginToken) {
-          debugLog('[QR-POLL] authExecute success, completing SSO via authnEngine (token=yes)')
-          // 先用 HTTP 跟随 authnEngine：若它返回 HTTP 302 到 page.jsp，则能直接落 cookie；
-          // 若它返回 200+JS 跳转（HTTP 链拿不到后续），再 fallback 到主窗口执行 JS 跳转。
+          debugLog('[QR-POLL] authExecute success, completing SSO (token=yes)')
+          // 1.0.9 验证可用的两段式落地：
+          //   第一步：HTTP 跟随 authnEngine 核销 loginToken，IAM 在其中种下 IAM 票据
+          //          （usk/REQID/SESSION/LtpaToken）。authnEngine 页面本身不会跳回 OA，
+          //          这一步只是「核销 + 种 IAM 票据」，不建立 OA 会话。
           const authUrl = `https://iam.streamax.com/idp/authCenter/authnEngine?locale=zh-CN&loginToken=${encodeURIComponent(String(loginToken))}`
-          const fin = await httpJsonWithRedirect(authUrl, sess, 8)
-          debugLog(`[QR-POLL] SSO chain final status=${fin.status} finalUrl=${fin.finalUrl}`)
-          const after = await sess.cookies.get({})
-          const hasOaSession = (cs: any[]) => cs.some(c =>
-            (c.domain || '').toLowerCase().includes('oa.streamax.com') &&
-            (/^(JSESSIONID|SESSION|LTPATOKEN|ROUTE|TOKEN|OA_TOKEN|UID|USER|LOGIN|SSO)/i.test(c.name) ||
-             c.name.toUpperCase().includes('SESSION') || c.name.toUpperCase().includes('TOKEN')))
-          debugLog(`[QR-POLL] after HTTP SSO: oa cookies = ${after.filter(c => (c.domain||'').toLowerCase().includes('oa.streamax.com')).map(c => c.name).join(', ') || '(none)'}`)
-          // 注意：cookie 名存在 ≠ OA 会话真实生效（IAM 半登录态也会种 route/SESSION，
-          // 但 OA 服务端判定为 901 需要重认证）。落地与否必须以真实探测为准，
-          // 否则会把"假登录"骗进工具，首次查询即被 901 踢回扫码（表现为进工具→转圈→回扫码）。
-          let landed = false
-          let landReason: 'network' | 'reauth' = 'reauth'
-          if (hasOaSession(after)) {
-            // 有 cookie 名只是必要条件，再用真实探测确认 OA 接口真的认可该会话
-            const probe = await probeOaSession(sess)
-            if (probe.ok) {
-              landed = true
-              debugLog('[QR-POLL] HTTP SSO chain landed OA session (probe ok), skipping main-window nav')
-            } else if (probe.reason === 'network') {
-              // 探测因网络抖动失败，无法确认是否落地：保险起见仍走主窗口导航再探一次，
-              // 避免弱网下把假登录放进工具，也不因一次超时直接判失败。
-              debugLog('[QR-POLL] cookie present but probe network-error, fallback to main-window nav to confirm')
-              const r = await completeOaSso(String(loginToken))
-              landed = r.ok
-              if (!r.ok) landReason = r.reason
-            } else {
-              // 明确 reauth/invalid：HTTP 链没真正落地，走主窗口完整 SSO 跳转链
-              debugLog('[QR-POLL] HTTP SSO chain did NOT land OA session (probe reauth), falling back to main-window navigation')
-              const r = await completeOaSso(String(loginToken))
-              landed = r.ok
-              if (!r.ok) landReason = r.reason
-            }
-          } else {
-            debugLog('[QR-POLL] HTTP SSO chain did not land OA session, falling back to main-window navigation')
-            const r = await completeOaSso(String(loginToken))
-            landed = r.ok
-            if (!r.ok) landReason = r.reason
+          try {
+            const fin = await httpJsonWithRedirect(authUrl, sess, 8, 20000)
+            debugLog(`[QR-POLL] authnEngine HTTP chain final status=${fin.status} finalUrl=${fin.finalUrl.split('?')[0]}`)
+          } catch (e: any) {
+            debugLog('[QR-POLL] authnEngine HTTP chain error: ' + e.message)
           }
+          //   第二步：交由 completeOaSso，用隐藏窗口反复 load OA 业务接口，
+          //          带着刚种好的 IAM 票据触发 oa↔iam 静默 SSO，建立 OA 会话。
+          const r = await completeOaSso(String(loginToken))
+          let landed = r.ok
+          let landReason: 'network' | 'reauth' = r.reason
           // SSO 完成后以真实探测作为唯一判定标准（不信任 cookie 名、不在 network 下兜底放行）。
           // 刚完成扫码的路径上，若 OA 确实没落地就如实返回 false，让前端回到扫码重试，
           // 而不是骗进工具后首次查询才被 901 踢出。
@@ -1181,9 +1151,10 @@ ipcMain.handle(IPC.OA_QR_LOGIN_POLL, async (_e, payload: {
               const warmed = await probeOaSession(sess)
               debugLog(`[QR-POLL] OA session warm-up ok=${warmed.ok} reason=${warmed.reason}`)
               if (!warmed.ok) {
-                // 预热触发了 reauth（901）——再给一次机会通过主窗口导航 portal 完成握手
-                debugLog('[QR-POLL] warm-up hit reauth, retry via completeOaSso')
-                await completeOaSso(String(loginToken))
+                // 预热触发了 reauth（901）——注意 loginToken 一次性，绝不能再次调用 completeOaSso
+                // （会重复消费 token → IAM 判定失效 → 重定向 authenticate，反而破坏会话）。
+                // 改为仅重新探测：probe 访问 OA 业务接口本身会触发 SSO 握手激活。
+                debugLog('[QR-POLL] warm-up hit reauth, re-probe only (no token reuse)')
                 await probeOaSession(sess)
               }
             } catch (warmErr: any) {
