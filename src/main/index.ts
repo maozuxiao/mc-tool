@@ -918,36 +918,50 @@ ipcMain.handle(IPC.OA_QR_LOGIN_START, async () => {
     debugLog(`[QR-START] step1: fetch login page ${OA_LOGIN_URL}`)
 
     // 冷启动预热：长时间未成功登录（距上次 SSO 落地 > 30 分钟，典型如「每天首次」强制二维码），
-    // IAM 后端处于冷态，第一次 302 跳转链常跑不完导致 step1 超时。先等待 IAM 预热再取登录页。
+    // IAM 后端处于冷态，第一次 302 跳转链常跑不完导致 step1 超时。
+    // 改为「自适应探测」：循环轻量探测 OA 入口是否可达（IAM 冷态恢复通常需要 20~35s），
+    // 一旦可达立即 proceed 取登录页，而不是盲等固定 8s 后再一次性超时重试（那样反而会浪费时间）。
     const pref = getLoginPref()
     const sinceLastSso = Date.now() - (pref.lastTokenTs || 0)
     if (pref.lastTokenTs && sinceLastSso > 30 * 60 * 1000) {
-      debugLog(`[QR-START] IAM cold start (idle ${(sinceLastSso / 60000) | 0}min), warm-up wait 8s before step1`)
-      await new Promise(r => setTimeout(r, 8000))
+      debugLog(`[QR-START] IAM cold start (idle ${(sinceLastSso / 60000) | 0}min), adaptive warm-up probing IAM...`)
+      const probeDeadline = Date.now() + 40 * 1000
+      let ready = false
+      while (Date.now() < probeDeadline) {
+        try {
+          // 轻量探测：取 OA 登录页（跟随 302 到 IAM），短超时 4s；IAM 冷态恢复即命中
+          await httpJsonWithRedirect(OA_LOGIN_URL, sess, 5, 4000)
+          ready = true
+          debugLog('[QR-START] IAM warm-up probe ok, proceed to step1')
+          break
+        } catch (e: any) {
+          debugLog(`[QR-START] IAM warm-up probe retry: ${e.message}`)
+          await new Promise(r => setTimeout(r, 2000))
+        }
+      }
+      if (!ready) debugLog('[QR-START] IAM warm-up probe timed out (40s), fall through to step1 retry')
     }
 
     let loginPage
     let lastErr
     // step1：取 OA 登录页并跟随跳转链到 IAM 的 ac/#/index（拿到 lck）。
     // IAM 后端偶发卡顿（首次冷启动或网络抖动）时，跳转链会跑不完导致超时。
-    // 策略：第 1 次正常取（单次超时 8s）；若失败，进入「指数退避快速重试」——
-    // 短超时 5s + 退避 1.5s→3s→4.5s，最多重试 3 轮（共 4 次尝试，最坏 ≈ 8+1.5+5+3+5+4.5+5 ≈ 32s 上限）。
-    // 相比旧版（固定 2s × 8 轮、单次 6s，最坏 ≈ 12+8*8=76s），把 IAM 抖动时的等待显著压短，
-    // 并在全部失败后明确抛 network 错误，前端提示「网络异常」而非无限转圈。
+    // 策略：第 1 次正常取（单次超时 6s）；若失败，进入「快速重试」——
+    // 短超时 4s + 退避 2s→3s→4s（上限 4s），最多重试 5 轮（共 6 次尝试）。
+    // 冷启动已由上面的自适应探测尽量覆盖，这里再做兜底；全部失败则抛 network 错误，
+    // 前端提示「网络异常」而非无限转圈。
     // 注意：QR-START 开头已不再清 IAM 半登录态（保留热会话，登出后多数情况第 1 次就 200、秒出码）。
-    let backoff = 1500
-    for (let attempt = 0; attempt < 4; attempt++) {
+    const retryBackoff = [2000, 3000, 4000, 4000, 4000]
+    for (let attempt = 0; attempt < 6; attempt++) {
       try {
-        loginPage = await httpJsonWithRedirect(OA_LOGIN_URL, sess, 5, attempt === 0 ? 8000 : 5000)
+        loginPage = await httpJsonWithRedirect(OA_LOGIN_URL, sess, 5, attempt === 0 ? 6000 : 4000)
         lastErr = undefined
         break
       } catch (e: any) {
         lastErr = e
         debugLog(`[QR-START] step1 attempt ${attempt + 1} failed: ${e.message}`)
-        if (attempt < 3) {
-          // 指数退避等 IAM 恢复，避免固定长间隔盲等把等待拉到 40s+
-          await new Promise(r => setTimeout(r, backoff))
-          backoff = Math.min(backoff * 2, 4500)
+        if (attempt < 5) {
+          await new Promise(r => setTimeout(r, retryBackoff[attempt] || 4000))
         }
       }
     }
