@@ -56,21 +56,17 @@ export function App() {
         setLoginState('ok')
         setLoginError('')
       } else {
-        // SSO 未真正落地：区分网络异常与认证失败，给出明确提示
+        // SSO 未真正落地（无论 network 还是 reauth）：二维码都已失效（被扫过），必须自动重新拉取新码。
+        // 区别仅在提示文案：网络异常 vs 登录未完成。
         const reason = s.reason
         setLoginError(
           reason === 'network'
             ? '网络异常，正在重新获取二维码...'
-            : '登录未完成，请重新扫描二维码'
+            : '登录未完成，正在重新获取二维码...'
         )
-        if (reason === 'network') {
-          // 网络异常（如 IAM 超时）时：通过 qrRefetchSeq 自增触发 LoginOverlay 自动重新拉取
-          // 并显示新二维码，用户无需手动点击刷新（旧码已被扫过、重扫无效）。
-          setQrRefetchSeq(useStore.getState().qrRefetchSeq + 1)
-        } else {
-          // 认证失败（reauth）时停在 failed，等待用户手动重新扫码
-          setLoginState('failed')
-        }
+        // 通过 qrRefetchSeq 自增触发 LoginOverlay 自动重新拉取并显示新二维码，
+        // 用户无需手动点击刷新（旧码已被扫过、重扫无效）。
+        setQrRefetchSeq(useStore.getState().qrRefetchSeq + 1)
       }
     })
     window.mcApi.onLoginReady((s: { loggedIn: boolean }) => {
