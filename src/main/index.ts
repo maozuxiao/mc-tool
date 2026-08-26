@@ -834,8 +834,11 @@ let ssoWin: BrowserWindow | null = null
 const IAM_SPA_LANDING = 'https://iam.streamax.com/ac/#/index'
 function createSsoWin(): BrowserWindow {
   if (ssoWin && !ssoWin.isDestroyed()) return ssoWin
+  // show:false —— 彻底不可见，避免 1×1 无框窗口偶发闪现到桌面。
+  // 隐藏窗口仍会正常加载并执行 SPA 的 JS 回跳 OA（offscreen 渲染，JS 不暂停），握手不受影响。
+  // 注意：曾用 show:true + 1×1 在 (0,0)，但 SPA 运行/合成异常时偶发被放大成可见「无框网页」。
   ssoWin = new BrowserWindow({
-    show: true, width: 1, height: 1, x: 0, y: 0,
+    show: false, width: 1, height: 1,
     frame: false, skipTaskbar: true,
     webPreferences: { partition: PARTITION, contextIsolation: true, nodeIntegration: false, sandbox: false }
   })
@@ -1077,6 +1080,8 @@ async function completeOaSso(_loginToken: string, lck?: string): Promise<{ ok: b
       }
     }
   } finally {
+    // 双保险：无论如何都把隐藏窗口收起，绝不留可见窗口在桌面。
+    if (ssoWin && !ssoWin.isDestroyed()) ssoWin.hide()
     // 保留 ssoWin 复用（已在扫码阶段预热），不关闭；下次登录直接复用热连接。
     // 仅在窗口已销毁时由 createSsoWin 触发重建。
   }
