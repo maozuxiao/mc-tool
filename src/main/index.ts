@@ -824,6 +824,20 @@ async function clearIamHalfLoginCookies(sess: Electron.Session): Promise<void> {
 //   2. loginToken 是一次性的；首轮跟随消费后即可，无需重复 load。
 //   3. 跟随完成后 OA 会话可能处于「半建」(票据有了但未激活)，先 probe；若仍 901，
 //      再 GET 一次 OA 登录页激活，然后再次 probe 即 200（与 1.0.9 的 warm-up 重试一致）。
+// 复用隐藏 SSO 窗口，避免每次登录重建导致 webContents 冷连接
+// （实测 iam 服务端对冷 CONNECTION 极易 21s 连接超时 -118，预热可规避）
+let ssoWin: BrowserWindow | null = null
+const IAM_SPA_LANDING = 'https://iam.streamax.com/ac/#/index'
+function createSsoWin(): BrowserWindow {
+  if (ssoWin && !ssoWin.isDestroyed()) return ssoWin
+  ssoWin = new BrowserWindow({
+    show: true, width: 1, height: 1, x: 0, y: 0,
+    frame: false, skipTaskbar: true,
+    webPreferences: { partition: PARTITION, contextIsolation: true, nodeIntegration: false, sandbox: false }
+  })
+  return ssoWin
+}
+
 async function completeOaSso(_loginToken: string, lck?: string): Promise<{ ok: boolean; reason: 'network' | 'reauth' }> {
   if (!mainWindow || mainWindow.isDestroyed()) {
     debugLog('[SSO] mainWindow unavailable, skip SSO')
@@ -850,7 +864,6 @@ async function completeOaSso(_loginToken: string, lck?: string): Promise<{ ok: b
   //   故 oaTrigger 必须用带 lck 的 IAM SPA 落地页（与旧版一致，但配合下方优化避免慢）。
   //   注意：调用方（QR-POLL）必须先 HTTP 跟随 authnEngine 核销 loginToken，把 IAM 票据（usk 等）种好，
   //   否则 SPA 回跳 OA 时 OA 仍要求重新认证。
-  const IAM_SPA_LANDING = 'https://iam.streamax.com/ac/#/index'
   const oaTrigger = (lck && lck.startsWith('context_oauth2_'))
     ? `${IAM_SPA_LANDING}?lck=${encodeURIComponent(lck)}&entityId=oa&theme=5b315b74bab14c5ba6e4072d8e9f3273`
     : OA_LOGIN_URL
@@ -858,11 +871,8 @@ async function completeOaSso(_loginToken: string, lck?: string): Promise<{ ok: b
   // 隐藏窗口跑握手（与主窗口共享 partition Cookie）。
   // 注意：屏幕外坐标(x:-2000)在部分环境会导致网络/GPU 初始化异常、SPA 加载静默卡死（-118）。
   // 改为 1×1 像素、skipTaskbar、不显示在任务栏，但保留可见性，避免渲染/网络被节流。
-  let ssoWin: BrowserWindow | null = new BrowserWindow({
-    show: true, width: 1, height: 1, x: 0, y: 0,
-    frame: false, skipTaskbar: true,
-    webPreferences: { partition: PARTITION, contextIsolation: true, nodeIntegration: false, sandbox: false }
-  })
+  // 复用模块级 ssoWin（若扫码阶段已预热，则直接进入热连接，避免首轮 -118）。
+  const ssoWin = createSsoWin()
 
   // fireOa：用 ssoWin 加载 IAM SPA 落地页（ac/#/index?lck=）触发回跳 OA，建立 OA 会话。
   // 关键机制（HAR 实证，2026-08-25）：回跳 OA(?code=...) 由 SPA 的 JS 发出
@@ -1055,9 +1065,8 @@ async function completeOaSso(_loginToken: string, lck?: string): Promise<{ ok: b
       }
     }
   } finally {
-    // 关闭隐藏 SSO 窗口，释放资源
-    try { ssoWin?.close() } catch {}
-    ssoWin = null
+    // 保留 ssoWin 复用（已在扫码阶段预热），不关闭；下次登录直接复用热连接。
+    // 仅在窗口已销毁时由 createSsoWin 触发重建。
   }
 
   if (!ok) {
@@ -1215,6 +1224,28 @@ ipcMain.handle(IPC.OA_QR_LOGIN_START, async () => {
     debugLog(`[QR-START] getAuthQr status=${status} qrToken=${json?.data?.qrToken?.slice(0, 8)}... body=${JSON.stringify(json).slice(0, 200)}`)
     const ok = status >= 200 && status < 300 && (json?.code === '0' || json?.code === 0 || json?.code === '200' || json?.code === 200 || json?.status === 'success' || json?.success === true)
     if (!ok && json?.message) throw new Error(json.message)
+
+    // 后台预热隐藏 SSO 窗口（趁用户扫码这张二维码的几秒）：让 webContents 与 iam 服务端提前进入热态，
+    // 规避 completeOaSso 握手时反复 -118（实测单行连接超时 ~21s × 2 轮 = 40s 卡顿）。
+    // 不阻塞二维码返回——前端展示二维码后用户才有时间扫，预热在后台完成。
+    ;(async () => {
+      try {
+        const w = createSsoWin()
+        await new Promise<void>((res) => {
+          let done = false
+          const fin = () => { if (!done) { done = true; res() } }
+          w.webContents.once('did-fail-load', fin)
+          w.webContents.once('did-finish-load', fin)
+          setTimeout(fin, 8000) // 预热最多等 8s，超时不影响后续流程
+          const url = `${IAM_SPA_LANDING}?lck=${encodeURIComponent(lck)}&entityId=oa&theme=5b315b74bab14c5ba6e4072d8e9f3273`
+          w.webContents.loadURL(url).catch(() => fin())
+        })
+        debugLog('[QR-START] ssoWin pre-warmed (iam SPA loaded)')
+      } catch (e: any) {
+        debugLog('[QR-START] pre-warm error: ' + e.message)
+      }
+    })()
+
     return {
       success: ok,
       qrToken: json?.data?.qrToken,
