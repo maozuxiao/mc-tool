@@ -1323,6 +1323,7 @@ ipcMain.handle(IPC.OA_QR_LOGIN_POLL, async (_e, payload: {
             landed = r.ok
             landReason = r.ok ? 'network' : landReason
           }
+          const finalOk = landed
           debugLog(`[QR-POLL] completeOaSso.ok=${r.ok} finalProbe.ok=${finalProbe.ok} reason=${finalProbe.reason} -> landed=${landed}`)
           // 登录后预热 OA 会话：主动访问一次真实 OA 接口，强制完成 SSO 握手落地，
           // 避免用户首次查询时才被 OA 踢去 IAM 重新认证（901），消除“重新登录”体验。
