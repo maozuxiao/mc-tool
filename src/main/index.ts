@@ -416,14 +416,19 @@ async function isOALoggedin(): Promise<boolean> {
     debugLog(`[isOALoggedin] oa.host cookies(${oaCookies.length})=${oaCookies.map(c => c.name).join(', ')}; hasOaSession=${hasOaSession}`)
     queryLog(`[isOALoggedin] streamax cookies=${cookies.length}, oa.host cookies(${oaCookies.length})=[${oaCookies.map(c => `${c.domain}/${c.name}`).join(', ')}], hasOaSession=${hasOaSession}`)
     if (!hasOaSession) return false
-    // OA 会话 cookie（SESSION@oa / LtpaToken@streamax）已存在 = 已真正登录。
-    // 用真实探测作为「辅助确认」但**不**用它的失败来否定登录态：
-    // OA 服务端降级态对裸业务请求永远 302→IAM（probe=reauth），但带会话 cookie 的请求
-    // （即真正的查询请求，会走 SSO 握手）仍能正常工作——浏览器登录后 probe 同样 901 但能查数据。
-    // 故 hasOaSession=true 即信任 cookie 返回 true，避免把真登录误判成 false 逼用户重扫。
     const probed = await probeOaSession(sess)
-    queryLog(`[isOALoggedin] hasOaSession=true, probeOaSession ok=${probed.ok} reason=${probed.reason} -> trust cookie`)
-    return true
+    if (probed.ok) return true
+    // 修复 1.0.13 回归：OA 明确拒绝登录时（probe=reauth，返回 901），即便 cookie 名存在
+    // （SESSION@oa / LtpaToken@streamax）也**不能**信任——那是 OA 尚未认可的无效/旧 token，
+    // 放行会导致查询被 OA 302 踢回 IAM、内部功能全废（见 2026-08-26 日志实证）。
+    // 仅在探针因「网络级错误」(reason=network) 时才信任 cookie 兜底，避免网络抖动误踢真登录。
+    // 注意：此处的 network 兜底是指「spa 已落地完成、SSO 刚结束」这类场景，调用方可结合 probe/落地结果决策。
+    if (probed.reason === 'network') {
+      queryLog(`[isOALoggedin] hasOaSession=true, probe reason=network -> trust cookie (network blip)`)
+      return true
+    }
+    queryLog(`[isOALoggedin] hasOaSession=true but probe=reauth -> NOT logged in`)
+    return false
   } catch {
     return false
   }
@@ -497,8 +502,18 @@ async function doCheckLoginAndNotify() {
   const restoredOk = await restoreOaSession(session.fromPartition(PARTITION))
   // 打印诊断，确认跨启动后 Cookie 是否仍在
   await dumpPersistedCookies()
-  // 恢复后探测已通过则无需重复探测，直接放行（省一次 OA 请求）
-  const ok = restoredOk ? true : await isOALoggedin()
+  // 恢复后仍需真实探测确认 OA 认可登录态：1.0.13 回归证明「cookie 已恢复≠OA 认可」，
+  // 恢复成功但 OA 接口仍 901 reauth（IAM↔OA 信任链未打通）时，必须重新走 SSO 而非放行，
+  // 否则进工具后所有查询被 OA 302 踢回 IAM、内部功能全废（见 2026-08-26 日志）。
+  let ok = false
+  if (restoredOk) {
+    const probed = await probeOaSession(session.fromPartition(PARTITION))
+    if (probed.ok) ok = true
+    else if (probed.reason === 'network') ok = await isOALoggedin() // 网络级失败才兜底 cookie
+    else debugLog(`[startup] restored cookies present but OA probe=reauth -> require re-SSO`)
+  } else {
+    ok = await isOALoggedin()
+  }
   debugLog(`[startup] restoredOk=${restoredOk}, isOALoggedin = ${ok}`)
   if (ok) {
     // 有可用 cookie：直接进入工具页面，并确保主窗口显示在桌面前台
@@ -1018,11 +1033,17 @@ async function completeOaSso(_loginToken: string, lck?: string): Promise<{ ok: b
         debugLog(`[SSO] OA session landed (probe ok) round=${i}`)
         break
       }
-      // 兜底：即使 probe 因网络抖动 901，只要 OA 会话 cookie 已出现也算落地
-      if (await checkOaSessionCookie()) {
-        debugLog(`[SSO] OA session landed via cookie round=${i}`)
+      // 落地判定：以真实探测(probe)为唯一权威。
+      // 修复 1.0.13 回归：先前「只要 OA 会话 cookie 名出现就判落地」是错的——
+      // cookie 被种下不代表 OA 认可登录（IAM↔OA 信任链未打通时 OA 接口仍 901 reauth）。
+      // 故 cookie 仅作为「network 抖动时」的兜底证据，不能凌驾 reauth。
+      if (pr.reason === 'network' && await checkOaSessionCookie()) {
+        debugLog(`[SSO] OA session landed via cookie (probe=network blip) round=${i}`)
         ok = true
         break
+      }
+      if (pr.reason === 'reauth') {
+        debugLog(`[SSO] OA probe=reauth (OA rejects session) round=${i}, keep retrying/handshake`)
       }
       if (pr.reason === 'network') failReason = 'network'
       try {
@@ -1287,16 +1308,22 @@ ipcMain.handle(IPC.OA_QR_LOGIN_POLL, async (_e, payload: {
           //   第二步：交由 completeOaSso，用隐藏窗口反复 load OA 业务接口，
           //          带着刚种好的 IAM 票据触发 oa↔iam 静默 SSO，建立 OA 会话。
           const r = await completeOaSso(String(loginToken), lck)
-          let landed = r.ok
+          // 落地判定以「真实探测 OA 接口」为权威（修复 1.0.13 回归）：
+          // 1.0.13 用「OA 会话 cookie 名出现」当落地信号是错的——cookie 种下≠OA 认可登录，
+          // 信任链未打通时 OA 接口仍 901 reauth，放行后查询被 302 踢回 IAM（见 2026-08-26 日志）。
+          // 故这里再 probe 一次作为最终判定：ok=true 才真正落地；reauth 必须要求重扫。
+          // completeOaSso 的 reason 仅作诊断/前端提示，不决定是否放行。
+          let landed = false
           let landReason: 'network' | 'reauth' = r.reason
-          // completeOaSso 内部已用「OA 会话 cookie（SESSION@oa / LtpaToken@streamax）出现」作为
-          // 落地信号——这比 probe URL 可靠（OA 服务端降级态对裸请求永远 302→901，probe 必失败）。
-          // 故不再用 isOALoggedinStrict 二次否定（它会因 probe=reauth 把真登录判成 false）。
-          // landed=true 即视为真正落地：OA 会话 cookie 已写入分区，与浏览器登录态等价。
-          const finalOk = landed
-          // 仅作诊断参考：打印宽松版判定结果，不影响最终结论
-          const diag = await isOALoggedin()
-          debugLog(`[QR-POLL] landed=${landed} finalOk=${finalOk} (isOALoggedin loose diag=${diag})`)
+          const finalProbe = await probeOaSession(sess)
+          if (finalProbe.ok) {
+            landed = true
+          } else if (finalProbe.reason === 'network') {
+            // 网络级失败才信任 cookie 兜底（避免网络抖动误踢真登录）
+            landed = r.ok
+            landReason = r.ok ? 'network' : landReason
+          }
+          debugLog(`[QR-POLL] completeOaSso.ok=${r.ok} finalProbe.ok=${finalProbe.ok} reason=${finalProbe.reason} -> landed=${landed}`)
           // 登录后预热 OA 会话：主动访问一次真实 OA 接口，强制完成 SSO 握手落地，
           // 避免用户首次查询时才被 OA 踢去 IAM 重新认证（901），消除“重新登录”体验。
           if (finalOk) {
