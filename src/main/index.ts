@@ -1225,26 +1225,9 @@ ipcMain.handle(IPC.OA_QR_LOGIN_START, async () => {
     const ok = status >= 200 && status < 300 && (json?.code === '0' || json?.code === 0 || json?.code === '200' || json?.code === 200 || json?.status === 'success' || json?.success === true)
     if (!ok && json?.message) throw new Error(json.message)
 
-    // 后台预热隐藏 SSO 窗口（趁用户扫码这张二维码的几秒）：让 webContents 与 iam 服务端提前进入热态，
-    // 规避 completeOaSso 握手时反复 -118（实测单行连接超时 ~21s × 2 轮 = 40s 卡顿）。
-    // 不阻塞二维码返回——前端展示二维码后用户才有时间扫，预热在后台完成。
-    ;(async () => {
-      try {
-        const w = createSsoWin()
-        await new Promise<void>((res) => {
-          let done = false
-          const fin = () => { if (!done) { done = true; res() } }
-          w.webContents.once('did-fail-load', fin)
-          w.webContents.once('did-finish-load', fin)
-          setTimeout(fin, 8000) // 预热最多等 8s，超时不影响后续流程
-          const url = `${IAM_SPA_LANDING}?lck=${encodeURIComponent(lck)}&entityId=oa&theme=5b315b74bab14c5ba6e4072d8e9f3273`
-          w.webContents.loadURL(url).catch(() => fin())
-        })
-        debugLog('[QR-START] ssoWin pre-warmed (iam SPA loaded)')
-      } catch (e: any) {
-        debugLog('[QR-START] pre-warm error: ' + e.message)
-      }
-    })()
+    // 注意：此处**不能**用 webContents 预热 iam SPA（带 lck 的认证 URL），否则会提前消耗 lck 会话状态，
+    // 导致后续 completeOaSso 的 fireOa 加载同 hash 页面时 SPA 不再重新认证、永远 reauth（见 2026-08-26 07:07 日志）。
+    // 握手冷启动由 fireOa 首轮 8s 兜底自行处理，已验证可用。
 
     return {
       success: ok,

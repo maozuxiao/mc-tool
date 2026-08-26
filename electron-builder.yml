@@ -2,7 +2,7 @@ appId: com.streamax.mcquery
 productName: MC物料查询
 copyright: Copyright © 2026 Sean Mao
 # 应用/文件版本号（四位，区别于 package.json 三段产品版本）
-buildVersion: 1.0.16.0
+buildVersion: 1.0.17.0
 
 directories:
   output: dist
