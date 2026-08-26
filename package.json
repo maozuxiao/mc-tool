@@ -1,6 +1,6 @@
 {
   "name": "mc-material-query",
-  "version": "1.0.19",
+  "version": "1.0.20",
   "description": "MC物料查询桌面端",
   "author": "Sean Mao",
   "main": "out/main/index.js",

@@ -1135,24 +1135,39 @@ ipcMain.handle(IPC.OA_QR_LOGIN_START, async () => {
     let lastErr
     // step1：取 OA 登录页并跟随跳转链到 IAM 的 ac/#/index（拿到 lck）。
     // IAM 后端偶发卡顿（首次冷启动或网络抖动）时，跳转链会跑不完导致超时。
-    // 策略：第 1 次正常取（单次超时 6s）；若失败，进入「快速重试」——
-    // 短超时 4s + 退避 2s→3s→4s（上限 4s），最多重试 5 轮（共 6 次尝试）。
+    // 优化（应对「偶尔卡 60s」）：单次超时收紧（首轮 5s、重试 4s），退避 [1.5,2,3,3,3]s，
+    // 整体再套一层「硬上限 30s」——即便服务端持续抖动也给前端明确的 network 出口，不再盲等到 45s+。
     // 冷启动已由上面的自适应探测尽量覆盖，这里再做兜底；全部失败则抛 network 错误，
     // 前端提示「网络异常」而非无限转圈。
     // 注意：QR-START 开头已不再清 IAM 半登录态（保留热会话，登出后多数情况第 1 次就 200、秒出码）。
-    const retryBackoff = [2000, 3000, 4000, 4000, 4000]
-    for (let attempt = 0; attempt < 6; attempt++) {
-      try {
-        loginPage = await httpJsonWithRedirect(OA_LOGIN_URL, sess, 5, attempt === 0 ? 6000 : 4000, true)
-        lastErr = undefined
-        break
-      } catch (e: any) {
-        lastErr = e
-        debugLog(`[QR-START] step1 attempt ${attempt + 1} failed: ${e.message}`)
-        if (attempt < 5) {
-          await new Promise(r => setTimeout(r, retryBackoff[attempt] || 4000))
+    const STEP1_HARD_CAP = 30_000
+    const retryBackoff = [1500, 2000, 3000, 3000, 3000]
+    const step1Started = Date.now()
+    const step1WithCap = Promise.race([
+      (async () => {
+        for (let attempt = 0; attempt < 6; attempt++) {
+          const elapsed = Date.now() - step1Started
+          if (elapsed >= STEP1_HARD_CAP) throw new Error('step1 overall timeout')
+          const budget = STEP1_HARD_CAP - elapsed
+          try {
+            loginPage = await httpJsonWithRedirect(OA_LOGIN_URL, sess, 5, attempt === 0 ? Math.min(5000, budget) : Math.min(4000, budget), true)
+            lastErr = undefined
+            return
+          } catch (e: any) {
+            lastErr = e
+            debugLog(`[QR-START] step1 attempt ${attempt + 1} failed: ${e.message}${e.message === 'step1 overall timeout' ? ' (cap)' : ''}`)
+            if (attempt < 5 && (Date.now() - step1Started) < STEP1_HARD_CAP) {
+              await new Promise(r => setTimeout(r, retryBackoff[attempt] || 3000))
+            }
+          }
         }
-      }
+      })(),
+      new Promise<void>((_, reject) => setTimeout(() => reject(new Error('step1 overall timeout')), STEP1_HARD_CAP))
+    ])
+    try {
+      await step1WithCap
+    } catch (e: any) {
+      lastErr = lastErr || e
     }
     if (lastErr) {
       // step1 全部失败：IAM/网络不可达，标记 network 让前端显示「网络异常」而非技术错误
