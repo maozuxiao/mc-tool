@@ -739,52 +739,7 @@ function httpJson({ url, method = 'GET', body, headers = {}, timeoutMs = 15000 }
 // 快速落地：POST authnEngine 核销 loginToken，从返回 HTML 提取 oa/?code= 并手动跟随，
 // 建立 OA 会话。参考 Streamax_oa_api_client 的 oa_client.js（纯 HTTP 路径），
 // 彻底规避 BrowserWindow 在冷连接下的 -118 连接超时（round 1/2 各 ~21s，导致 ~73s 卡顿）。
-// 注意：OA 后端接受 HTTP client（probeOaSession / httpJsonWithRedirect 已用 Node http 带 Cookie 成功访问）。
-const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-async function landOaViaHttp(sess: Electron.Session, loginToken: string): Promise<boolean> {
-  try {
-    const cookieStr = await getStreamaxCookieString(sess)
-    const authUrl = 'https://iam.streamax.com/idp/authCenter/authnEngine?locale=zh-CN'
-    const body = 'loginToken=' + encodeURIComponent(loginToken)
-    const html = await new Promise<string>((resolve, reject) => {
-      const u = new URL(authUrl)
-      const req = https.request({
-        hostname: u.hostname, port: 443, path: u.pathname + u.search, method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'User-Agent': BROWSER_UA,
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Cookie': cookieStr,
-          'sec-fetch-site': 'same-origin',
-          'sec-fetch-mode': 'navigate',
-          'sec-fetch-dest': 'document',
-          'Referer': 'https://iam.streamax.com/idp/authCenter/authenticate?response_type=code&client_id=oa&redirect_uri=http%3A%2F%2Foa.streamax.com%3A8080%2F&state=IAM_OA_SSO'
-        }
-      }, (res) => {
-        const chunks: Buffer[] = []
-        res.on('data', c => chunks.push(Buffer.from(c)))
-        res.on('end', () => {
-          if (res.headers['set-cookie']) setCookiesFromHeader(sess, res.headers['set-cookie'])
-          resolve(Buffer.concat(chunks).toString('utf8'))
-        })
-      })
-      req.on('error', reject)
-      req.write(body)
-      req.end()
-    })
-    const cb = (html.match(/https?:\/\/oa\.streamax\.com:8080\/\?code=[^"'<\s]+/) || [])[0]
-    if (!cb) { debugLog('[SSO] landOaViaHttp: no oa/?code= in authnEngine html'); return false }
-    const codeUrl = cb.replace(/&amp;/g, '&')
-    debugLog('[SSO] landOaViaHttp: got oa callback url, following redirect chain...')
-    // 手动跟随（httpJsonWithRedirect 捕获每次 302 的 Set-Cookie 落入 partition）
-    await httpJsonWithRedirect(codeUrl, sess, 8, 20000)
-    return true
-  } catch (e: any) {
-    debugLog('[SSO] landOaViaHttp error: ' + e.message)
-    return false
-  }
-}
-
+// 保留 httpJsonWithRedirect（下方）用于 IAM→OA 的 OAuth 授权码 SSO 落地（QR-POLL 建立 IAM 票据、completeOaSso 用 BrowserWindow 完成 OA 会话）。
 function httpJsonWithRedirect(startUrl: string, sess: Electron.Session, maxRedirects = 5, timeoutMs = 15000, stopAtLck = false) {
   return new Promise<{ status: number; headers: any; text: string; finalUrl: string }>((resolve, reject) => {
     const doRequest = (url: string, redirectCount: number) => {
@@ -1283,9 +1238,16 @@ ipcMain.handle(IPC.OA_QR_LOGIN_START, async () => {
     const ok = status >= 200 && status < 300 && (json?.code === '0' || json?.code === 0 || json?.code === '200' || json?.code === 200 || json?.status === 'success' || json?.success === true)
     if (!ok && json?.message) throw new Error(json.message)
 
-    // 注意：此处**不能**用 webContents 预热 iam SPA（带 lck 的认证 URL），否则会提前消耗 lck 会话状态，
-    // 导致后续 completeOaSso 的 fireOa 加载同 hash 页面时 SPA 不再重新认证、永远 reauth（见 2026-08-26 07:07 日志）。
-    // 握手冷启动由 fireOa 首轮 8s 兜底自行处理，已验证可用。
+    // 预热隐藏窗口：趁用户扫码的几秒，让 BrowserWindow 的 webContents 与 iam/oa 建立「热连接」，
+    // 消除 completeOaSso 握手时 round 1/2 的 -118 连接超时（实测各 ~21s，合计 ~42s 卡顿）。
+    // 关键：预热用「不带 lck 的 OA_LOGIN_URL」（http://oa.streamax.com:8080/），由 iam 自动生成并消耗一个
+    // **无关的** 新 lck，绝不会消耗本次登录的 lck（本次 lck 在 fireOa 阶段才用，仍有效）。
+    // 之前 1.0.16 失败正是因为预热用了「本次 lck」导致 SPA 提前消费、后续 fireOa 不回跳。
+    createSsoWin() // 复用模块级窗口；首次创建后，后续 fireOa 直接复用（连接保持热）
+    if (ssoWin && !ssoWin.isDestroyed()) {
+      ssoWin.webContents.loadURL('http://oa.streamax.com:8080/').catch(() => {})
+      // 异步预热，不阻塞二维码返回；load 结果（302->iam->ac/#/index）会在 completeOaSso 前完成
+    }
 
     return {
       success: ok,
@@ -1372,11 +1334,12 @@ ipcMain.handle(IPC.OA_QR_LOGIN_POLL, async (_e, payload: {
           //          这一步只是「核销 + 种 IAM 票据」，不建立 OA 会话。
           const authUrl = `https://iam.streamax.com/idp/authCenter/authnEngine?locale=zh-CN&loginToken=${encodeURIComponent(String(loginToken))}`
           try {
-            // 参考 oa_client.js：authnEngine(loginToken) 返回 HTML 含 oa/?code= 回调，手动跟随该 URL（捕获 Set-Cookie）
-            // 即可建立 OA 会话，无需 BrowserWindow SPA 跑 JS（规避 Chromium 冷连接 -118 超时 ~73s 卡顿）。
-            const built = await landOaViaHttp(sess, String(loginToken))
-            debugLog(`[QR-POLL] authnEngine->OA via HTTP ${built ? 'ok (no SPA)' : 'no-code, will fallback to SSO window'}`)
-          } catch (e: any) {
+            // 建立 IAM 票据（usk 等）：POST authnEngine 核销一次性 loginToken。
+            // 注意：ian 返回 302 到 oa/?state=（非 ?code=），纯 HTTP 无法完成后续 OA code 交换（需浏览器 JS），
+            // 故 OA 会话落地交给 completeOaSso 的 BrowserWindow（配合 QR-START 预热消除 -118 冷连接）。
+            const fin = await httpJsonWithRedirect(authUrl, sess, 8, 20000)
+            debugLog(`[QR-POLL] authnEngine HTTP chain final status=${fin.status} finalUrl=${fin.finalUrl?.split('?')[0]}`)
+          } catch (  e: any) {
             debugLog('[QR-POLL] authnEngine chain error: ' + e.message)
           }
           //   第二步：交由 completeOaSso，用隐藏窗口反复 load OA 业务接口，
