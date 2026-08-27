@@ -1158,7 +1158,21 @@ ipcMain.handle(IPC.OA_QR_LOGIN_START, () => {
       if (textLck) lck = textLck[1]
     }
     debugLog(`[QR-START] loginPage finalUrl=${finalUrl.split('?')[0]}... status=${page.status}, lck=${lck.slice(0, 20) || '(empty)'}`)
-    if (!lck) throw new Error('未能从登录页获取 lck 上下文参数')
+    if (!lck) {
+      // OA 已登录态：访问登录页直接 200、不再 302 去 IAM 要 lck（SESSION cookie 仍热）。
+      // 此时不应报错退出，而是用真实探测判定是否真的已登录：已登录则短路返回，让前端直接进工具。
+      const onOaHost = /:\/\/oa\.streamax\.com/i.test(finalUrl)
+      if (onOaHost && page.status >= 200 && page.status < 400) {
+        const probe = await probeOaSession(sess)
+        debugLog(`[QR-START] lck empty but landed on OA host, probe ok=${probe.ok} reason=${probe.reason}`)
+        if (probe.ok) {
+          debugLog('[QR-START] OA already logged in (no lck needed), short-circuit to tool')
+          return { success: true, alreadyLoggedIn: true, entityId: 'oa' }
+        }
+        // probe=reauth：OA 不认可（会话失效），落到下方原错误逻辑，由前端重扫/重登录
+      }
+      throw new Error('未能从登录页获取 lck 上下文参数')
+    }
 
     // 登录页会种下 IAM/SSO cookie，后续接口必须带上，否则 queryAuthMethods 返回空或报错
     const cookieStr = await getStreamaxCookieString(sess)

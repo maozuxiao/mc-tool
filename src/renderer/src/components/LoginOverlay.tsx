@@ -82,6 +82,15 @@ export function LoginOverlay({ loginState }: Props) {
         }
         throw new Error(res.message || '获取二维码失败')
       }
+      // OA 已登录态（SESSION 仍热，登录页直接 200 无 lck）：无需扫码，直接进工具
+      if (res.alreadyLoggedIn) {
+        console.log('[QR] alreadyLoggedIn=true, skip QR and enter tool')
+        useStore.getState().setLoginState('ok')
+        useStore.getState().setLoggedIn(true)
+        useStore.getState().setLanding(false)
+        setLoading(false)
+        return
+      }
       const token = res.qrToken || res.data?.qrToken
       const msg = res.qrMsg || res.data?.qrMessage || res.data?.qrMsg || res.data?.qrData
       if (!token || !msg) throw new Error('二维码数据不完整')
