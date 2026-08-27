@@ -973,13 +973,13 @@ async function completeOaSso(_loginToken: string, lck?: string): Promise<{ ok: b
       if (isConnError(e?.message || '')) { failReason = 'network'; loadedOnce = false }
       finish()
     })
-    // 兜底超时：首轮(tag=0)用短兜底 8s，后续轮用 22s。
+    // 兜底超时：首轮(tag=0)用短兜底 8s，后续轮用 16s（1.0.22 从 22s 收紧）。
     // 根因（[13:54] 日志实证）：ssoWin webContents 首次 loadURL 时 partition cookie store 未热，
     //   首请求 hdrLen=96、cookie 完全未附（usk=false 且 route/SESSION 也未带），导致 SPA 认证必失败/卡死。
     //   第二轮 load 时 store 已热，cookie 正常附加，SPA 1s 内回跳成功。故首轮本质是「预热消耗」，
     //   无需等 22s，8s 即可判失败进入第二轮正式握手，把总耗时从 ~26s 降到 ~10s。
-    //   后续轮（已带 cookie）仍需 22s 覆盖正常冷场峰值（约 16s）。
-    const capMs = tag === '0' ? 8000 : 22000
+    //   后续轮（已带 cookie）16s 已覆盖正常冷场峰值；过长的兜底只会在「服务端持续拒绝」时徒增空耗（实测曾 180s）。
+    const capMs = tag === '0' ? 8000 : 16000
     setTimeout(finish, capMs)
   })
 
@@ -1049,9 +1049,11 @@ async function completeOaSso(_loginToken: string, lck?: string): Promise<{ ok: b
     }
 
     // 主循环：每轮先 probe 是否已落地，未落地则 load IAM SPA 落地页触发回跳 OA 建会话。
-    // fireOa 以 will-navigate→oa 为落地信号（或 15s 兜底结束本轮），由主循环 probe/cookie 判定真正落地。
-    // 最多 12 轮（最坏 ~12×(probe+15s)，但 IAM 正常时 1~2 轮即落地）。
-    for (let i = 0; i < 12; i++) {
+    // fireOa 以 will-navigate→oa 为落地信号（或兜底结束本轮），由主循环 probe/cookie 判定真正落地。
+    // 1.0.22：轮数 12→10，且后续轮 capMs 22s→16s（见下方），最坏耗时从 ~180s 降到 ~10×(1+16)≈170s，
+    // 但实测 IAM 正常时 1~4 轮即落地，故收紧主要为减少「服务端持续拒绝」时的无意义空耗。
+    // 注意：不能太早放弃——正常冷态慢登也需要多轮（历史成功日志 round 0~3 均 reauth，round 4 才成）。
+    for (let i = 0; i < 10; i++) {
       const pr = await probeOaSession(sess)
       ok = pr.ok
       if (ok) {
@@ -1100,7 +1102,12 @@ async function completeOaSso(_loginToken: string, lck?: string): Promise<{ ok: b
   return { ok, reason: failReason }
 }
 
-ipcMain.handle(IPC.OA_QR_LOGIN_START, async () => {
+// 重入锁：避免前端「自动重拉」与「refetchSeq 触发」并发调用导致双开 QR（两个 step1 / 两个 fireOa 争抢同一个 ssoWin，
+// 实测会出现并行 QR-START、登录流程互相干扰、OA 握手彻底失败）。并发时第二个 invoke 直接复用第一个进行中的结果。
+let qrLoginInFlight: Promise<any> | null = null
+ipcMain.handle(IPC.OA_QR_LOGIN_START, () => {
+  if (qrLoginInFlight) return qrLoginInFlight
+  qrLoginInFlight = (async () => {
   const sess = session.fromPartition(PARTITION)
   try {
     // 0) 不再主动清 IAM 半登录态：登出流程已保留 IAM 会话（COOKIE_CLEAR 只清 OA/streamax），
@@ -1119,7 +1126,8 @@ ipcMain.handle(IPC.OA_QR_LOGIN_START, async () => {
     const sinceLastSso = Date.now() - (pref.lastTokenTs || 0)
     if (pref.lastTokenTs && sinceLastSso > 30 * 60 * 1000) {
       debugLog(`[QR-START] IAM cold start (idle ${(sinceLastSso / 60000) | 0}min), adaptive warm-up probing IAM...`)
-      const probeDeadline = Date.now() + 40 * 1000
+      // 1.0.22：冷态恢复实测偶需 >40s（次日首登 5 次探针全 timeout），上限延长到 70s 以覆盖更冷的 IAM。
+      const probeDeadline = Date.now() + 70 * 1000
       let ready = false
       while (Date.now() < probeDeadline) {
         try {
@@ -1285,7 +1293,11 @@ ipcMain.handle(IPC.OA_QR_LOGIN_START, async () => {
     const reason = err.reason || (isNet ? 'network' : 'server')
     const message = err.friendly || (isNet ? '网络异常，请检查网络或稍后重试' : (err.message || '获取二维码失败'))
     return { success: false, reason, message }
+  } finally {
+    qrLoginInFlight = null
   }
+  })()
+  return qrLoginInFlight
 })
 
 // 真正的扫码等待接口：authExecute 是「长轮询」，请求挂起直到手机确认后返回登录结果。
