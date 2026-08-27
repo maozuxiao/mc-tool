@@ -1,7 +1,7 @@
 import { app, BrowserWindow, session, ipcMain, shell, dialog, Menu, MenuItem } from 'electron'
 import { autoUpdater } from 'electron-updater'
-import { join } from 'path'
-import { appendFileSync, existsSync, readFileSync, unlinkSync, writeFileSync } from 'fs'
+import { join, dirname } from 'path'
+import { appendFileSync, existsSync, readFileSync, unlinkSync, writeFileSync, mkdirSync } from 'fs'
 import http from 'http'
 import https from 'https'
 import zlib from 'zlib'
@@ -120,6 +120,11 @@ async function migrateLegacyBackupIfNeeded() {
 // 启动时若 partition 内 OA 会话为空则从文件恢复，并强制补齐 expirationDate 使其持久。
 const SESSION_BACKUP_PATH = join(app.getPath('userData'), 'oa-session-backup.json')
 
+// 与技能脚本 mc_query.js 共享的 cookie jar：登录成功后导出全量 streamax cookie（含 IAM 票据 usk/REQID），
+// 字段对齐 CDP Storage.getCookies（name/value/domain/path/secure/httpOnly/sameSite/expires），
+// 使 Electron 登录一次、mc_query.js 直接复用，反之亦然。位置取 ~/.cache/ 与脚本约定一致。
+const COOKIE_JAR_PATH = join(app.getPath('home'), '.cache', 'oa-mc-cookies.json')
+
 // 登录偏好持久化：记录 token 最后刷新时间与上一次发起登录请求的本地自然日，
 // 用于实现「强制走二维码登录」策略（当天首次登录 且 token 间隔 > 1 小时时跳过免密）。
 const LOGIN_PREF_PATH = join(app.getPath('userData'), 'oa-login-pref.json')
@@ -171,6 +176,34 @@ async function backupOaSession(sess: Electron.Session): Promise<void> {
     try { setLoginPref({ ...getLoginPref(), lastTokenTs: Date.now() }) } catch {}
   } catch (e: any) {
     debugLog('[backup] error: ' + e.message)
+  }
+}
+
+// 与技能脚本 mc_query.js 互通：登录成功后把 partition 内全量 streamax cookie 导出到
+// ~/.cache/oa-mc-cookies.json（字段对齐 CDP Storage.getCookies）。Electron 登录一次，脚本直接复用，反之亦然。
+// 导出「全量」(含 IAM 票据 usk/REQID)，而非仅 OA cookie——脚本查询 OA 接口同样需要 IAM 票据完成 SSO。
+async function exportCookiesToJar(sess: Electron.Session): Promise<void> {
+  try {
+    const all = await sess.cookies.get({})
+    const jar = all
+      .filter(c => /streamax\.com$/i.test(c.domain || ''))
+      .map(c => ({
+        name: c.name,
+        value: c.value,
+        domain: c.domain || '',
+        path: c.path || '/',
+        secure: !!c.secure,
+        httpOnly: !!c.httpOnly,
+        sameSite: c.sameSite || 'no_restriction',
+        expires: c.expirationDate || (Date.now() / 1000 + 30 * 24 * 3600)
+      }))
+    if (jar.length === 0) return
+    const dir = dirname(COOKIE_JAR_PATH)
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+    writeFileSync(COOKIE_JAR_PATH, JSON.stringify(jar, null, 2))
+    debugLog(`[jar] exported ${jar.length} streamax cookies to ${COOKIE_JAR_PATH}`)
+  } catch (e: any) {
+    debugLog('[jar] export error: ' + e.message)
   }
 }
 
@@ -656,35 +689,41 @@ async function setCookiesFromHeader(sess: Electron.Session, setCookieHeader: str
     // 保证 Electron 按正确 host 归类（虽然 domain 字段仍不含端口，但 URL host 需精确）。
     const portSuffix = /oa\.streamax\.com$/i.test(host) ? ':8080' : ''
     const url = `${secure ? 'https' : 'http'}://${host}${portSuffix}${path}`
-    try {
-      await sess.cookies.set({
-        url,
-        name: name.trim(),
-        value,
-        domain: domain.startsWith('.') ? domain : undefined,
-        path,
-        secure,
-        httpOnly,
-        sameSite
-      })
-      debugLog(`[COOKIE] set ${name.trim()} for ${host}${portSuffix}`)
-    } catch (e: any) {
-      // 端口版失败则回退到不带端口的 url 再试一次
+    const setOne = async (useUrl: string, usePath: string) => {
       try {
         await sess.cookies.set({
-          url: `${secure ? 'https' : 'http'}://${host}${path}`,
+          url: useUrl,
           name: name.trim(),
           value,
           domain: domain.startsWith('.') ? domain : undefined,
-          path,
+          path: usePath,
           secure,
           httpOnly,
           sameSite
         })
-        debugLog(`[COOKIE] set ${name.trim()} for ${host} (fallback)`)
-      } catch (e2: any) {
-        debugLog(`[COOKIE] failed ${name.trim()}: ${e2.message}`)
+        return true
+      } catch (e: any) {
+        return false
       }
+    }
+    let okSet = await setOne(url, path)
+    if (!okSet) okSet = await setOne(`${secure ? 'https' : 'http'}://${host}${path}`, path)
+    if (okSet) {
+      debugLog(`[COOKIE] set ${name.trim()} for ${host}${portSuffix} path=${path}`)
+      // 关键修复(1.0.13 实证 + 日志印证)：IAM 票据(usk/REQID 等)多为 path=/idp，
+      // 而 SPA 落地页在 /ac/#/index，浏览器 path 规则下 /ac/ 请求不携带 /idp 的 cookie
+      // → SPA 首请求 Cookie contains usk = false → IAM 不认 → OA 弹回 reauth 死循环。
+      // 故对 IAM 票据类 cookie，在 set 成功后直接补一份 path='/' 副本（value 取自完整 Set-Cookie 头，
+      // 绕开 cookies.get 对 httpOnly cookie 返回空 value 的限制）。仅 IAM 域、仅票据类。
+      const isIamTicket = /iam\.streamax\.com$/i.test(domain || '') &&
+        /^(usk|REQID|route|SESSION|LTPATOKEN|JSESSIONID)$/i.test(name.trim())
+      if (isIamTicket && (path || '/') !== '/') {
+        // 用同 host、path=/ 的 url 再 set 一份（value 同源完整），使 /ac/ 等任意路径请求都能带上票据。
+        const rootOk = await setOne(`${secure ? 'https' : 'http'}://${host}/`, '/')
+        debugLog(`[COOKIE] replicate ${name.trim()} path=${path} -> / ${rootOk ? 'ok' : 'FAIL'}`)
+      }
+    } else {
+      debugLog(`[COOKIE] failed ${name.trim()}: all attempts`)
     }
   }
 }
@@ -739,13 +778,18 @@ function httpJson({ url, method = 'GET', body, headers = {}, timeoutMs = 15000 }
 // 快速落地：POST authnEngine 核销 loginToken，从返回 HTML 提取 oa/?code= 并手动跟随，
 // 建立 OA 会话。参考 Streamax_oa_api_client 的 oa_client.js（纯 HTTP 路径），
 // 彻底规避 BrowserWindow 在冷连接下的 -118 连接超时（round 1/2 各 ~21s，导致 ~73s 卡顿）。
-// 保留 httpJsonWithRedirect（下方）用于 IAM→OA 的 OAuth 授权码 SSO 落地（QR-POLL 建立 IAM 票据、completeOaSso 用 BrowserWindow 完成 OA 会话）。
+// 主进程 net 模块对 streamax 请求完全正常（QR-START 的 302 链完美），故 SSO 落地全程用纯 HTTP
+// （httpPostFollow / httpJsonWithRedirect）完整跟随重定向链，彻底规避 BrowserWindow 渲染进程挂起问题。
 function httpJsonWithRedirect(startUrl: string, sess: Electron.Session, maxRedirects = 5, timeoutMs = 15000, stopAtLck = false) {
   return new Promise<{ status: number; headers: any; text: string; finalUrl: string }>((resolve, reject) => {
-    const doRequest = (url: string, redirectCount: number) => {
+    const doRequest = async (url: string, redirectCount: number) => {
       if (redirectCount > maxRedirects) return reject(new Error('重定向次数过多'))
       const u = new URL(url)
       const mod = u.protocol === 'https:' ? https : http
+      // 关键修复(2026-08-27)：每次重定向跟随都必须带上 partition 内已有的 streamax cookie
+      // （尤其 IAM 票据 usk/REQID），否则 IAM 认为未登录 → authnEngine 返回重新认证而非种票据+回跳 OA →
+      // OA 全程 reauth。getStreamaxCookieString 从 sess 实时读取（含上一跳 set-cookie 写入的新票据）。
+      const cookieStr = await getStreamaxCookieString(sess)
       const req = mod.get({
         hostname: u.hostname,
         port: u.port || (u.protocol === 'https:' ? 443 : 80),
@@ -754,7 +798,8 @@ function httpJsonWithRedirect(startUrl: string, sess: Electron.Session, maxRedir
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
           'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-          'Connection': 'keep-alive'
+          'Connection': 'keep-alive',
+          ...(cookieStr ? { 'Cookie': cookieStr } : {})
         }
       }, async (res) => {
         if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
@@ -784,6 +829,134 @@ function httpJsonWithRedirect(startUrl: string, sess: Electron.Session, maxRedir
     }
     doRequest(startUrl, 0)
   })
+}
+
+// POST 带 body 并跟随 3xx 重定向（用于 authnEngine 的「确认」调用，SPA 即 POST 此接口 302 回 OA）。
+function httpPostFollow(startUrl: string, body: string, sess: Electron.Session, maxRedirects = 5, timeoutMs = 15000) {
+  return new Promise<{ status: number; headers: any; text: string; finalUrl: string }>((resolve, reject) => {
+    const doRequest = async (url: string, b: string, redirectCount: number) => {
+      if (redirectCount > maxRedirects) return reject(new Error('重定向次数过多'))
+      const u = new URL(url)
+      const mod = u.protocol === 'https:' ? https : http
+      const cookieStr = await getStreamaxCookieString(sess)
+      const req = mod.request({
+        hostname: u.hostname,
+        port: u.port || (u.protocol === 'https:' ? 443 : 80),
+        path: u.pathname + u.search,
+        method: b ? 'POST' : 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Connection': 'keep-alive',
+          ...(cookieStr ? { 'Cookie': cookieStr } : {}),
+          ...(b ? { 'Content-Length': Buffer.byteLength(b) } : {})
+        }
+      }, async (res) => {
+        if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          const nextUrl = new URL(res.headers.location, url).toString()
+          debugLog(`[QR-POLL] authnEngine POST redirect ${res.statusCode} -> ${nextUrl}`)
+          if (res.headers['set-cookie']) await setCookiesFromHeader(sess, res.headers['set-cookie'])
+          res.resume()
+          return doRequest(nextUrl, '', redirectCount + 1)
+        }
+        const chunks: Buffer[] = []
+        res.on('data', (c) => chunks.push(Buffer.from(c)))
+        res.on('end', async () => {
+          if (res.headers['set-cookie']) await setCookiesFromHeader(sess, res.headers['set-cookie'])
+          const text = Buffer.concat(chunks).toString('utf8')
+          resolve({ status: res.statusCode || 0, headers: res.headers, text, finalUrl: url })
+        })
+      })
+      req.on('error', reject)
+      req.setTimeout(timeoutMs, () => { req.destroy(); reject(new Error('timeout')) })
+      if (b) req.write(b)
+      req.end()
+    }
+    doRequest(startUrl, body, 0)
+  })
+}
+
+// 纯 HTTP 完成 IAM->OA 的 OAuth 落地（彻底弃用 BrowserWindow：渲染进程在该环境加载 streamax 页面
+// 会静默挂起，dom-ready 永不触发，SPA 不执行 JS；而主进程 net 模块对同域请求完全正常）。
+// 真实浏览器扫码后落地链（抓包实证）：
+//   authExecute(成功, loginToken) → POST authnEngine?loginToken= → 302 → oa/?code=...&state=IAM_OA_SSO
+//     → 302 → oa/?state=IAM_OA_SSO → 302 → iam/authenticate?...&redirect_uri=oa&state=IAM_OA_SSO
+//     → 302 → iam/ac/#/index?lck=新 → (浏览器加载 SPA → SPA 用新 lck 完成 OAuth 授权 → 回跳 oa/?code=新)
+// 关键：IAM 在 authnEngine 302 之后，OA 回跳 iam/authenticate 时若 OAuth state 机完整，IAM 会再 302 回 OA
+// 并种下 OA 会话；但若落在 iam/ac/#/index 说明需要 SPA 二次确认。本函数完整跟随 POST authnEngine 的
+// 所有 302（cookie 透传已保证 state 机上下文连续），落点稳定在 oa.streamax.com 即成功。
+async function landOaViaHttp(sess: Electron.Session, loginToken: string): Promise<{ ok: boolean; finalUrl: string; reason: string }> {
+  try {
+    // 关键修正(2026-08-28)：先清掉【失效的 OA 业务会话 cookie】，否则 OA 带着隔天残留的
+    // 陈旧 SESSION/LtpaToken 既不认（probe 901 reauth）又不肯发新会话，导致 OAuth 落地死循环。
+    // 只清 OA 业务域(.oa.streamax.com 的 SESSION/route/j_lang、根域 .streamax.com 的 LtpaToken)，
+    // 绝不碰 IAM 域(.iam.streamax.com 的 usk/SESSION/REQID/route)——那是刚扫码建立的 IAM 票据，必须保留。
+    const before = await sess.cookies.get({})
+    const staleOa = before.filter(c => {
+      const d = (c.domain || '').toLowerCase()
+      if (d.includes('iam.streamax.com')) return false
+      const name = (c.name || '').toUpperCase()
+      return (d.includes('oa.streamax.com') || d === '.streamax.com' || d === 'streamax.com') &&
+        /SESSION|ROUTE|J_LANG|LTPATOKEN|TOKEN|UID|USER|LOGIN|SSO|OA_/.test(name)
+    })
+    for (const c of staleOa) {
+      try { await sess.cookies.remove(`https://${c.domain.replace(/^\./, '')}${c.path || '/'}`, c.name) } catch {}
+    }
+    debugLog(`[HTTP-LAND] cleared ${staleOa.length} stale OA session cookies (kept IAM): [${staleOa.map(c => c.name + '@' + c.domain).join(',')}]`)
+
+    const authnUrl = `https://iam.streamax.com/idp/authCenter/authnEngine?loginToken=${encodeURIComponent(loginToken)}&locale=zh-CN`
+    debugLog(`[HTTP-LAND] POST authnEngine (loginToken) -> read response body`)
+    const r = await httpPostFollow(authnUrl, '', sess, 12, 20000)
+    debugLog(`[HTTP-LAND] authnEngine status=${r.status} finalUrl=${r.finalUrl}`)
+    debugLog(`[HTTP-LAND] authnEngine bodyHead=${r.text.slice(0, 400).replace(/\s+/g, ' ')}`)
+
+    // authnEngine 是 SPA 内部 XHR：它【不会 302】，而是返回 200 + 响应体，由 SPA 的 JS 解析后
+    // 客户端跳转 oa/?code=...&state=...（之前误以为会 302，是错的）。故此处必须自己解析响应体里的 code。
+    // 响应体形式（抓包实证）：含 `location = "oa/?code=<授权码>&state=IAM_OA_SSO"` 的 JS，或 JSON 含 code 字段。
+    const extractCode = (txt: string): { code?: string; state?: string } => {
+      // 优先匹配 JS 跳转里的 oa/?code=...&state=...
+      const m1 = txt.match(/oa\?code=([^"'\s&]+)&state=([^"'\s&]+)/i)
+      if (m1) return { code: decodeURIComponent(m1[1]), state: decodeURIComponent(m1[2]) }
+      const m2 = txt.match(/code=([^"'\s&]+)/i)
+      const m3 = txt.match(/state=([^"'\s&]+)/i)
+      if (m2) return { code: decodeURIComponent(m2[1]), state: m3 ? decodeURIComponent(m3[1]) : 'IAM_OA_SSO' }
+      return {}
+    }
+    const { code, state } = extractCode(r.text)
+    if (!code) {
+      debugLog(`[HTTP-LAND] no code found in authnEngine response (IAM did not issue OAuth code) -> fail`)
+      return { ok: false, finalUrl: r.finalUrl, reason: 'no-code' }
+    }
+    debugLog(`[HTTP-LAND] extracted code=${code.slice(0, 12)}... state=${state}`)
+
+    // 用手动 GET oa/?code=&state= 完成 OAuth 落地（这一步才消费 code、由 OA 建会话）。
+    // 与浏览器 SPA 执行的 window.location="oa/?code=..." 等价；用 httpJsonWithRedirect 完整跟随 302 链。
+    const oaLandingUrl = `http://oa.streamax.com:8080/?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state || 'IAM_OA_SSO')}`
+    debugLog(`[HTTP-LAND] GET oa landing ${oaLandingUrl.slice(0, 90)}... -> follow redirects`)
+    const r2 = await httpJsonWithRedirect(oaLandingUrl, sess, 12, 20000)
+    debugLog(`[HTTP-LAND] oa landing final status=${r2.status} finalUrl=${r2.finalUrl}`)
+    if (/^https?:\/\/oa\.streamax\.com/i.test(r2.finalUrl) && r2.status >= 200 && r2.status < 400) {
+      return { ok: true, finalUrl: r2.finalUrl, reason: 'landed-oa' }
+    }
+    // 落点仍在 iam（ac/#/index 或 authenticate）：取 lck 再 GET ac/#/index 触发 SPA 二次 OAuth 授权回跳。
+    const mLck = r2.finalUrl.match(/[?&#]lck=(context_oauth2_[a-f0-9]+)/i)
+    if (mLck) {
+      const newLck = mLck[1]
+      debugLog(`[HTTP-LAND] oa-landing bounced to iam lck=${newLck}, GET ac/#/index to finish OAuth`)
+      const r3 = await httpJsonWithRedirect(`https://iam.streamax.com/ac/#/index?lck=${newLck}&entityId=oa`, sess, 12, 20000)
+      debugLog(`[HTTP-LAND] retry3 final status=${r3.status} finalUrl=${r3.finalUrl}`)
+      if (/^https?:\/\/oa\.streamax\.com/i.test(r3.finalUrl) && r3.status >= 200 && r3.status < 400) {
+        return { ok: true, finalUrl: r3.finalUrl, reason: 'landed-oa-retry' }
+      }
+      return { ok: false, finalUrl: r3.finalUrl, reason: 'stuck-iam' }
+    }
+    return { ok: false, finalUrl: r2.finalUrl, reason: 'stuck-unknown' }
+  } catch (e: any) {
+    debugLog(`[HTTP-LAND] error: ${e.message}`)
+    return { ok: false, finalUrl: '', reason: 'error:' + e.message }
+  }
 }
 
 // 从 partition 读取 streamax 相关 cookie 并拼成 Cookie 字符串
@@ -823,28 +996,11 @@ async function clearIamHalfLoginCookies(sess: Electron.Session): Promise<void> {
 //   → IAM 对已登录用户自动 consent → 带 code 回跳 redirect_uri(OA 接口)
 //   → OA 校验 code 后通过 Set-Cookie 种下真正的 OA 会话（.oa.streamax.com 的 SESSION 等）。
 // 关键点：
-//   1. 必须用 httpJsonWithRedirect 跟随 302（落 OA cookie），而不是 BrowserWindow ——
-//      隐藏窗口的 authnEngine 页面不会自动跳回 OA（实测停在 authnEngine），建不起 OA 会话。
+//   1. 必须用 httpPostFollow/httpJsonWithRedirect 跟随 302（落 OA cookie）；
+//      BrowserWindow 在该环境加载 streamax 页面会静默挂起（dom-ready 不触发），故全程纯 HTTP。
 //   2. loginToken 是一次性的；首轮跟随消费后即可，无需重复 load。
 //   3. 跟随完成后 OA 会话可能处于「半建」(票据有了但未激活)，先 probe；若仍 901，
 //      再 GET 一次 OA 登录页激活，然后再次 probe 即 200（与 1.0.9 的 warm-up 重试一致）。
-// 复用隐藏 SSO 窗口，避免每次登录重建导致 webContents 冷连接
-// （实测 iam 服务端对冷 CONNECTION 极易 21s 连接超时 -118，预热可规避）
-let ssoWin: BrowserWindow | null = null
-const IAM_SPA_LANDING = 'https://iam.streamax.com/ac/#/index'
-function createSsoWin(): BrowserWindow {
-  if (ssoWin && !ssoWin.isDestroyed()) return ssoWin
-  // show:false —— 彻底不可见，避免 1×1 无框窗口偶发闪现到桌面。
-  // 隐藏窗口仍会正常加载并执行 SPA 的 JS 回跳 OA（offscreen 渲染，JS 不暂停），握手不受影响。
-  // 注意：曾用 show:true + 1×1 在 (0,0)，但 SPA 运行/合成异常时偶发被放大成可见「无框网页」。
-  ssoWin = new BrowserWindow({
-    show: false, width: 1, height: 1,
-    frame: false, skipTaskbar: true,
-    webPreferences: { partition: PARTITION, contextIsolation: true, nodeIntegration: false, sandbox: false }
-  })
-  return ssoWin
-}
-
 async function completeOaSso(_loginToken: string, lck?: string): Promise<{ ok: boolean; reason: 'network' | 'reauth' }> {
   if (!mainWindow || mainWindow.isDestroyed()) {
     debugLog('[SSO] mainWindow unavailable, skip SSO')
@@ -860,242 +1016,44 @@ async function completeOaSso(_loginToken: string, lck?: string): Promise<{ ok: b
   //   'reauth'  —— OA 仍要求重新认证（半登录态 / loginToken 失效）
   let failReason: 'network' | 'reauth' = 'reauth'
 
-  // ===== HTTP 落地已在 QR-POLL 阶段通过 landOaViaHttp 完成（authnEngine→oa/?code=→OA 会话）。
-  // loginToken 是一次性的，不可在此重复核销，故 fastOk 交由 QR-POLL 先行处理；
-  // 此处仅保持 fallback 结构：若 QR-POLL 的 HTTP 落地未生效，则走下方 BrowserWindow SPA 回跳（用 lck）。
-  // 历史：曾在此重复 POST authnEngine 导致 token 复用失败；现已前移至 QR-POLL。
+  // ===== 纯 HTTP 落地（landOaViaHttp）：POST authnEngine 核销 loginToken → 完整跟随 302 链
+  // → OA/?code= → OA 消费 code 建会话。loginToken 一次性，仅在此核销一次。无需 BrowserWindow。
   let fastOk = false
 
-  // 实测确定的落地方式（多次日志实证，而非猜测）：
-  //   直接 load OA 业务接口页（OA_LOGIN_URL = http://oa.streamax.com:8080/）在清掉 OA cookie 后
-  //   **会挂起**（did-start-loading 后无 did-stop/did-navigate，probe 永远 901），建不起 OA 会话。
-  //   唯一能建立 OA 会话的路径是：**带 lck 访问 IAM SPA 落地页 ac/#/index?lck=...**，
-  //   由该 SPA 的 JS 发起回跳 OA（will-navigate -> http://oa.streamax.com:8080/），
-  //   OA 在回跳时种下真正的 OA 会话 cookie（SESSION@oa / LtpaToken@streamax）。
-  //   所有成功日志都显示 fireOa load ac/#/index?lck= 后出现 will-navigate→oa 一轮落地；
-  //   而 1.0.13 改成 load OA 业务页后，登出必败（12 轮全 901）——已证伪"OA 业务页能握手"的假设。
-  //   故 oaTrigger 必须用带 lck 的 IAM SPA 落地页（与旧版一致，但配合下方优化避免慢）。
-  //   注意：调用方（QR-POLL）必须先 HTTP 跟随 authnEngine 核销 loginToken，把 IAM 票据（usk 等）种好，
-  //   否则 SPA 回跳 OA 时 OA 仍要求重新认证。
+  // ===== 纯 HTTP 完成 IAM->OA OAuth 落地（彻底弃用 BrowserWindow，详见 landOaViaHttp 注释）=====
+  // 实证(2026-08-27)：ssoWin(BrowserWindow) 在该环境加载 streamax 页面后 dom-ready 永不触发、
+  // SPA 文档静默 pending、JS 不执行、零回跳（连 9 轮均卡在 fireOa load 后无 302）。而主进程 net 模块
+  // 对同域请求完全正常（QR-START 的 302 链完美）。故改为纯 HTTP 完整跟随 authnEngine 的 302 链完成落地。
   if (!fastOk) {
-  // ===== fallback：BrowserWindow SPA 回跳（仅当 HTTP 快路径失败时使用）=====
-  const oaTrigger = (lck && lck.startsWith('context_oauth2_'))
-    ? `${IAM_SPA_LANDING}?lck=${encodeURIComponent(lck)}&entityId=oa&theme=5b315b74bab14c5ba6e4072d8e9f3273`
-    : OA_LOGIN_URL
-
-  // 隐藏窗口跑握手（与主窗口共享 partition Cookie）。
-  // 注意：屏幕外坐标(x:-2000)在部分环境会导致网络/GPU 初始化异常、SPA 加载静默卡死（-118）。
-  // 改为 1×1 像素、skipTaskbar、不显示在任务栏，但保留可见性，避免渲染/网络被节流。
-  // 复用模块级 ssoWin（若扫码阶段已预热，则直接进入热连接，避免首轮 -118）。
-  const ssoWin = createSsoWin()
-
-  // fireOa：用 ssoWin 加载 IAM SPA 落地页（ac/#/index?lck=）触发回跳 OA，建立 OA 会话。
-  // 关键机制（HAR 实证，2026-08-25）：回跳 OA(?code=...) 由 SPA 的 JS 发出
-  //   （SPA 先 XHR getLoginPageThirdAuth + authnEngine，再 window.location 回跳 OA），
-  //   故**无法用纯 HTTP 跟随绕开 SPA**——必须让 Electron 真正加载并跑完 SPA。
-  // 落地信号：will-navigate->oa.streamax.com（SPA 回跳 OA 建会话 cookie）；did-stop/finish 不 finish。
-  // 重试策略（吸取 13:10 / 13:27 日志教训）：
-  //   1) 每轮 load 前只在「上一轮未 settle（卡死）」时才 wc.stop()，避免打断正常冷场；
-  //   2) 单轮兜底 35s：覆盖 SPA 冷场（实证约 16s）跑完回跳；若 35s 静默仍无回跳，判为卡死，
-  //      下一轮 stop+重 load（不干等）；
-  //   3) 连接级失败(-118 等) 标记 network 且下一轮重 load。
-  // 仅对真正连接级错误（TIMED_OUT / ERR_CONNECTION / -118 等）标记 network；
-  // ERR_ABORTED/-3 来自自身 stop，忽略。
-  const OA_HOST_RE = /oa\.streamax\.com/i
-  let pendingLoad = 0
-  let loadedOnce = false
-  let lastLoadSettled = false // 上一轮是否已完成（回跳或失败）；未 settle=卡死
-  const isConnError = (s?: string) => !!s && /TIMED_OUT|ERR_CONNECTION|timeout|ERR_NAME|ERR_SSL|-118|-106|-7\b/i.test(s)
-  const fireOa = (tag: string) => new Promise<void>((resolve) => {
-    const myLoad = ++pendingLoad
-    let done = false
-    const finish = () => { if (!done) { done = true; resolve() } }
-    const wc = ssoWin!.webContents
-    const onFail = (_e: any, errMsg?: string) => {
-      if (myLoad !== pendingLoad) return // 已被更新的 load 取代，忽略
-      debugLog(`[SSO] fireOa(${tag}) did-fail-load: ${errMsg}`)
-      lastLoadSettled = true
-      if (isConnError(errMsg)) {
-        failReason = 'network'
-        loadedOnce = false // 连接级失败：下一轮允许重 load
-      }
-      finish()
-    }
-    const onStop = () => {
-      if (myLoad !== pendingLoad) return
-      debugLog(`[SSO] fireOa(${tag}) did-stop-loading -> ${wc.getURL().slice(0, 100)}`)
-    }
-    const onNav = () => {
-      if (myLoad !== pendingLoad) return
-      debugLog(`[SSO] fireOa(${tag}) did-navigate -> ${wc.getURL()}`)
-    }
-    const onStart = () => { if (myLoad === pendingLoad) debugLog(`[SSO] fireOa(${tag}) did-start-loading`) }
-    const onWillNav = (_e: any, u: string) => {
-      if (myLoad !== pendingLoad) return
-      debugLog(`[SSO] fireOa(${tag}) will-navigate -> ${u?.slice(0, 100)}`)
-      // 回跳 OA 宿主：这就是 SPA 落地信号，立即结束本轮，交主循环 probe 判定 OA 会话。
-      if (OA_HOST_RE.test(u || '')) {
-        lastLoadSettled = true
-        loadedOnce = true
-        finish()
-      }
-    }
-    const onRedirect = (u: string) => { if (myLoad === pendingLoad) debugLog(`[SSO] fireOa(${tag}) redirect -> ${u?.slice(0, 100)}`) }
-    const onFinish = () => { if (myLoad === pendingLoad) debugLog(`[SSO] fireOa(${tag}) did-finish-load -> ${wc.getURL()}`) }
-    wc.once('did-fail-load', onFail)
-    wc.once('did-stop-loading', onStop)
-    wc.once('did-navigate', onNav)
-    wc.once('did-start-loading', onStart)
-    wc.once('will-navigate', onWillNav)
-    wc.once('did-finish-load', onFinish)
-    try { wc.once('did-get-redirect-request' as any, (_e: any, _o: string, n: string) => onRedirect(n)) } catch {}
-
-    // 已 load 过且上一轮已 settle（回跳成功或失败）：不重复 load，只短暂等让主循环 probe。
-    if (loadedOnce && lastLoadSettled) {
-      debugLog(`[SSO] fireOa(${tag}) reuse existing SPA load (settled), wait for oa callback`)
-      setTimeout(finish, 3000)
-      return
-    }
-    // 上一轮卡死（未 settle）或连接失败：先 stop 清掉僵尸连接，再重 load。
-    if (loadedOnce && !lastLoadSettled) {
-      debugLog(`[SSO] fireOa(${tag}) previous load stalled, stop & reload`)
-      try { wc.stop() } catch {}
-    }
-    const sep = oaTrigger.includes('?') ? '&' : '?'
-    const url = oaTrigger + sep + '__seq=' + tag + '&__t=' + Date.now()
-    loadedOnce = true
-    lastLoadSettled = false
-    debugLog(`[SSO] fireOa(${tag}) load ${url}`)
-    wc.loadURL(url).catch((e: any) => {
-      if (myLoad !== pendingLoad) return
-      debugLog(`[SSO] fireOa(${tag}) loadURL error: ${e?.message}`)
-      lastLoadSettled = true
-      if (isConnError(e?.message || '')) { failReason = 'network'; loadedOnce = false }
-      finish()
-    })
-    // 兜底超时：首轮(tag=0)用短兜底 8s，后续轮用 16s（1.0.22 从 22s 收紧）。
-    // 根因（[13:54] 日志实证）：ssoWin webContents 首次 loadURL 时 partition cookie store 未热，
-    //   首请求 hdrLen=96、cookie 完全未附（usk=false 且 route/SESSION 也未带），导致 SPA 认证必失败/卡死。
-    //   第二轮 load 时 store 已热，cookie 正常附加，SPA 1s 内回跳成功。故首轮本质是「预热消耗」，
-    //   无需等 22s，8s 即可判失败进入第二轮正式握手，把总耗时从 ~26s 降到 ~10s。
-    //   后续轮（已带 cookie）16s 已覆盖正常冷场峰值；过长的兜底只会在「服务端持续拒绝」时徒增空耗（实测曾 180s）。
-    const capMs = tag === '0' ? 8000 : 16000
-    setTimeout(finish, capMs)
-  })
-
-  try {
-    // 诊断：拦截 ssoWin 第一次发往 iam 的请求，确认实际 Cookie 头里是否含 usk。
-    const onBeforeSend = (details: any) => {
-      if (/iam\.streamax\.com/.test(details.url || '')) {
-        const cookieHdr = (details.requestHeaders && (details.requestHeaders['Cookie'] || details.requestHeaders['cookie'])) || '(none)'
-        debugLog(`[SSO-DIAG] request to iam: ${details.url?.slice(0, 90)} | Cookie contains usk = ${/usk=/.test(cookieHdr)} | hdrLen=${cookieHdr.length}`)
-        try { sess.webRequest.onBeforeSendHeaders(null as any) } catch {}
-      }
-    }
-    try { sess.webRequest.onBeforeSendHeaders({ urls: [] }, onBeforeSend) } catch {}
-
-    // 诊断：打印 partition 里 iam/oa/streamax 所有 cookie 的完整属性
     try {
-      const diagCookies = await sess.cookies.get({ domain: 'iam.streamax.com' })
-      for (const c of diagCookies) {
-        debugLog(`[SSO-DIAG] iam cookie: ${c.name} path=${c.path} domain=${c.domain} sameSite=${c.sameSite} secure=${c.secure}`)
-      }
-    } catch (e: any) { debugLog('[SSO-DIAG] get cookies error: ' + e.message) }
-
-    // 关键修复(1.0.13)：OA 服务端（降级/异常态）对「带旧 OA 会话 cookie 的 Chromium 请求」
-    // 会进入挂起态（请求已发出但既不 302 也不返回，did-start-loading 后永远无后续事件），
-    // 导致 oa↔iam 静默 SSO 握手无法完成。而裸请求（不带旧 cookie）能正常 302。
-    // 故在触发握手前，清除旧 OA/streamax 会话 cookie（保留 IAM 侧 usk/REQID 等票据，
-    // usk 是 authnEngine 刚种好的，且 OA 首页加载时才需要 IAM 放行）。让 load OA 首页时
-    // Chromium 不带旧 OA session，OA 干净 302→IAM→（认 usk）回跳 OA 建新会话。
-    try {
-      const domainsToClear = ['oa.streamax.com', '.streamax.com', 'streamax.com']
-      let cleared = 0
-      for (const d of domainsToClear) {
-        const cs = await sess.cookies.get({ domain: d })
-        for (const c of cs) {
-          const urls = [`http://oa.streamax.com:8080`, `https://oa.streamax.com`, `https://streamax.com`]
-          for (const u of urls) {
-            try { await sess.cookies.remove(u, c.name) } catch {}
-          }
-          cleared++
-        }
-      }
-      debugLog(`[SSO] cleared ${cleared} stale OA/streamax cookies before handshake`)
-    } catch (e: any) { debugLog('[SSO] clear stale cookies error: ' + e.message) }
-
-    // 进循环前先触发一次握手
-    // 本地判定：partition 里是否出现了**真正的 OA 业务会话 cookie**。
-    // 真 OA 会话 cookie 分布在 oa.streamax.com 宿主（SESSION/route/j_lang）与根域 .streamax.com
-    // （LtpaToken 种在根域）。注意：IAM 的 SESSION/route 在 .iam.streamax.com，绝不能算 OA 会话，
-    // 否则 landing 会把“只有 IAM 半登录态”误判为“OA 已登录”，导致假登录、重启又得扫码。
-    const checkOaSessionCookie = async (): Promise<boolean> => {
-      try {
-        const all = await sess.cookies.get({})
-        const oa = all.filter(c => {
-          const d = (c.domain || '').toLowerCase()
-          if (d.includes('iam.streamax.com')) return false // 排除 IAM 专有域
-          // 真 OA 会话：oa.streamax.com 宿主，或根域 .streamax.com / streamax.com（LtpaToken）
-          return d.includes('oa.streamax.com') ||
-            d === '.streamax.com' || d === 'streamax.com'
-        })
-        const has = oa.some(c =>
-          /^(JSESSIONID|SESSION|LTPATOKEN|ROUTE|TOKEN|OA_TOKEN|UID|USER|LOGIN|SSO)/i.test(c.name) ||
-          c.name.toUpperCase().includes('SESSION') ||
-          c.name.toUpperCase().includes('TOKEN'))
-        debugLog(`[SSO] oa-session-cookie check: oaCookies=${oa.length} hasOaSession=${has} names=[${oa.map(c => c.name).join(',')}] domains=[${oa.map(c => c.domain).join(',')}]`)
-        return has
-      } catch { return false }
-    }
-
-    // 主循环：每轮先 probe 是否已落地，未落地则 load IAM SPA 落地页触发回跳 OA 建会话。
-    // fireOa 以 will-navigate→oa 为落地信号（或兜底结束本轮），由主循环 probe/cookie 判定真正落地。
-    // 1.0.22：轮数 12→10，且后续轮 capMs 22s→16s（见下方），最坏耗时从 ~180s 降到 ~10×(1+16)≈170s，
-    // 但实测 IAM 正常时 1~4 轮即落地，故收紧主要为减少「服务端持续拒绝」时的无意义空耗。
-    // 注意：不能太早放弃——正常冷态慢登也需要多轮（历史成功日志 round 0~3 均 reauth，round 4 才成）。
-    for (let i = 0; i < 10; i++) {
+      const land = await landOaViaHttp(sess, String(_loginToken))
+      debugLog(`[SSO] landOaViaHttp ok=${land.ok} reason=${land.reason} finalUrl=${land.finalUrl}`)
+      // 落地判定以「真实探测 OA 接口」为权威（修复 1.0.13 回归：cookie 名出现≠OA 认可登录）。
       const pr = await probeOaSession(sess)
-      ok = pr.ok
-      if (ok) {
-        debugLog(`[SSO] OA session landed (probe ok) round=${i}`)
-        break
+      if (pr.ok) ok = true
+      else if (land.ok && pr.reason === 'network') ok = true // 网络抖动时信任 HTTP 落地结果
+      else if (land.ok) {
+        // HTTP 落地成功但 probe 仍 reauth：再尝一次完整跟随（state 机偶发需二次确认）
+        debugLog(`[SSO] HTTP-land ok but probe reauth, retry once`)
+        const land2 = await landOaViaHttp(sess, String(_loginToken))
+        const pr2 = await probeOaSession(sess)
+        ok = pr2.ok || (land2.ok && pr2.reason === 'network')
       }
-      // 落地判定：以真实探测(probe)为唯一权威。
-      // 修复 1.0.13 回归：先前「只要 OA 会话 cookie 名出现就判落地」是错的——
-      // cookie 被种下不代表 OA 认可登录（IAM↔OA 信任链未打通时 OA 接口仍 901 reauth）。
-      // 故 cookie 仅作为「network 抖动时」的兜底证据，不能凌驾 reauth。
-      if (pr.reason === 'network' && await checkOaSessionCookie()) {
-        debugLog(`[SSO] OA session landed via cookie (probe=network blip) round=${i}`)
-        ok = true
-        break
-      }
-      if (pr.reason === 'reauth') {
-        debugLog(`[SSO] OA probe=reauth (OA rejects session) round=${i}, keep retrying/handshake`)
-      }
-      if (pr.reason === 'network') failReason = 'network'
-      try {
-        // 加载 IAM SPA 落地页（ac/#/index?lck=）：SPA 的 JS 回跳 OA 种下 OA 会话 cookie。
-        // fireOa 内部每轮 load 前 wc.stop() 干净上一轮，will-navigate→oa 即 finish 避免自相 ERR_ABORTED。
-        await fireOa(String(i))
-      } catch (e: any) {
-        debugLog('[SSO] trigger OA load error: ' + e.message)
-      }
+      if (!ok) failReason = pr.reason === 'network' ? 'network' : 'reauth'
+    } catch (e: any) {
+      debugLog(`[SSO] landOaViaHttp threw: ${e.message}`)
+      failReason = 'reauth'
     }
-  } finally {
-    // 双保险：无论如何都把隐藏窗口收起，绝不留可见窗口在桌面。
-    if (ssoWin && !ssoWin.isDestroyed()) ssoWin.hide()
-    // 保留 ssoWin 复用（已在扫码阶段预热），不关闭；下次登录直接复用热连接。
-    // 仅在窗口已销毁时由 createSsoWin 触发重建。
-  }
-  } // end if (!fastOk) fallback
-
+  } // end if (!fastOk)
   if (!ok) {
-    debugLog(`[SSO] OA session did NOT land within ~${(12 * 15)}s (failReason=${failReason})`)
+    debugLog(`[SSO] OA session did NOT land (failReason=${failReason})`)
   }
 
   // SSO 落地成功：把 OA 会话 cookie 备份到文件，确保重开 app 可免登录
   if (ok) {
     await backupOaSession(sess)
+    // jar 互通：登录成功后导出全量 streamax cookie，供 mc_query.js 技能脚本复用（反之亦然）。
+    await exportCookiesToJar(sess)
   }
   // 注意：不在此处发送 OA_CHECK_LOGGED，统一由 QR-POLL 外层根据返回值发送，
   // 避免「内部发一次 + 外层再发一次无 reason」导致 reason 被覆盖、前端重复 re-fetch。
@@ -1266,17 +1224,6 @@ ipcMain.handle(IPC.OA_QR_LOGIN_START, () => {
     const ok = status >= 200 && status < 300 && (json?.code === '0' || json?.code === 0 || json?.code === '200' || json?.code === 200 || json?.status === 'success' || json?.success === true)
     if (!ok && json?.message) throw new Error(json.message)
 
-    // 预热隐藏窗口：趁用户扫码的几秒，让 BrowserWindow 的 webContents 与 iam/oa 建立「热连接」，
-    // 消除 completeOaSso 握手时 round 1/2 的 -118 连接超时（实测各 ~21s，合计 ~42s 卡顿）。
-    // 关键：预热用「不带 lck 的 OA_LOGIN_URL」（http://oa.streamax.com:8080/），由 iam 自动生成并消耗一个
-    // **无关的** 新 lck，绝不会消耗本次登录的 lck（本次 lck 在 fireOa 阶段才用，仍有效）。
-    // 之前 1.0.16 失败正是因为预热用了「本次 lck」导致 SPA 提前消费、后续 fireOa 不回跳。
-    createSsoWin() // 复用模块级窗口；首次创建后，后续 fireOa 直接复用（连接保持热）
-    if (ssoWin && !ssoWin.isDestroyed()) {
-      ssoWin.webContents.loadURL('http://oa.streamax.com:8080/').catch(() => {})
-      // 异步预热，不阻塞二维码返回；load 结果（302->iam->ac/#/index）会在 completeOaSso 前完成
-    }
-
     return {
       success: ok,
       qrToken: json?.data?.qrToken,
@@ -1360,22 +1307,13 @@ ipcMain.handle(IPC.OA_QR_LOGIN_POLL, async (_e, payload: {
           (json?.data && (json.data as any)?.token)
         if (loginToken) {
           debugLog('[QR-POLL] authExecute success, completing SSO (token=yes)')
-          // 1.0.9 验证可用的两段式落地：
-          //   第一步：HTTP 跟随 authnEngine 核销 loginToken，IAM 在其中种下 IAM 票据
-          //          （usk/REQID/SESSION/LtpaToken）。authnEngine 页面本身不会跳回 OA，
-          //          这一步只是「核销 + 种 IAM 票据」，不建立 OA 会话。
-          const authUrl = `https://iam.streamax.com/idp/authCenter/authnEngine?locale=zh-CN&loginToken=${encodeURIComponent(String(loginToken))}`
-          try {
-            // 建立 IAM 票据（usk 等）：POST authnEngine 核销一次性 loginToken。
-            // 注意：ian 返回 302 到 oa/?state=（非 ?code=），纯 HTTP 无法完成后续 OA code 交换（需浏览器 JS），
-            // 故 OA 会话落地交给 completeOaSso 的 BrowserWindow（配合 QR-START 预热消除 -118 冷连接）。
-            const fin = await httpJsonWithRedirect(authUrl, sess, 8, 20000)
-            debugLog(`[QR-POLL] authnEngine HTTP chain final status=${fin.status} finalUrl=${fin.finalUrl?.split('?')[0]}`)
-          } catch (  e: any) {
-            debugLog('[QR-POLL] authnEngine chain error: ' + e.message)
-          }
-          //   第二步：交由 completeOaSso，用隐藏窗口反复 load OA 业务接口，
-          //          带着刚种好的 IAM 票据触发 oa↔iam 静默 SSO，建立 OA 会话。
+          // 关键修正(18:19 实证)：loginToken 是一次性的，authnEngine 一旦消费就失效。
+          // 若 QR-POLL 先手动 authnEngine?loginToken= 种 usk，则下游 SPA 再用同一 loginToken 调
+          // authnEngine 时令牌已失效 → SPA 零 XHR、不回跳（18:19 实证）。
+          // 正确路径(15:46 成功实证)：【主进程不消费 loginToken】，把完整 loginToken 交给 SPA；
+          // SPA 加载 ac/#/index?lck=&loginToken= 时，其 JS 自行调 authnEngine 完成「确认」，
+          // 此时 IAM 在响应里 Set-Cookie 下发 usk，并回跳 OA(?code=) 建会话。usk 由 SPA 自己种，无需主进程前置。
+          debugLog('[QR-POLL] hand loginToken to SPA (no premature authnEngine consume)')
           const r = await completeOaSso(String(loginToken), lck)
           // 落地判定以「真实探测 OA 接口」为权威（修复 1.0.13 回归）：
           // 1.0.13 用「OA 会话 cookie 名出现」当落地信号是错的——cookie 种下≠OA 认可登录，
