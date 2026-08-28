@@ -976,13 +976,17 @@ async function getStreamaxCookieString(sess: Electron.Session): Promise<string> 
 async function clearIamHalfLoginCookies(sess: Electron.Session): Promise<void> {
   try {
     const all = await sess.cookies.get({ domain: 'iam.streamax.com' })
+    const removed: string[] = []
     for (const c of all) {
       if (/^(route|SESSION|usk|REQID|LTPATOKEN|JSESSIONID)$/i.test(c.name) || c.name.toUpperCase().includes('TOKEN')) {
         const url = `${c.secure ? 'https' : 'http'}://${c.domain?.replace(/^\./, '')}${c.path || '/'}`
         await sess.cookies.remove(url, c.name).catch(() => {})
+        removed.push(c.name)
       }
     }
-    debugLog('[clearIam] cleared IAM half-login cookies')
+    // 打印实际清除数量与名单：验证时可直接确认「陈旧 IAM 会话是否真的被清掉」。
+    // 注意只作用于 iam.streamax.com 域，OA 的 LtpaToken@.streamax.com 不受影响。
+    debugLog(`[clearIam] cleared ${removed.length}/${all.length} IAM half-login cookies${removed.length ? ': ' + removed.join(', ') : ''}`)
   } catch (e: any) {
     debugLog('[clearIam] error: ' + e.message)
   }
@@ -1171,13 +1175,17 @@ ipcMain.handle(IPC.OA_QR_LOGIN_START, () => {
         }
         // probe=reauth：OA 不认可（会话失效），落到下方原错误逻辑，由前端重扫/重登录
       }
-      // IAM 冷启动：跳转链停在 iam/authenticate 直接返回 200，未继续 302 到
-      // ac/#/index?lck=，故 URL 与 HTML 里都没有 lck。这是 IAM 冷态瞬态——预热探测
-      // 只验证「能收到响应」就误报就绪，step1 的重试又只认异常（200 不抛错故不重试），
-      // 于是一次性失败。标记为 retryable，交前端退避重试：IAM 恢复后即自动出新码。
+      // 卡在 IAM 宿主（onOaHost=false）：诊断日志显示此时 oa.host cookies=0、
+      // 而 iam 域仍残留 8 个陈旧 cookie（idle 数小时），属「IAM 半登录态」——
+      // 静默 SSO 已被 OA 拒绝（901 reauth），IAM 又不肯发起新授权流程签发 lck，
+      // 于是稳定返回 200。这是**确定性**失败：每次重发同样这批陈旧 cookie，
+      // IAM 响应必然相同，单纯重试无效（实测 7 次结果完全一致，间隔 5s）。
+      // 故先清掉陈旧 IAM 会话，让 IAM 视我们为新客户端；配合 retryable，
+      // 下一次重试即以干净会话取码。仅在失败点清理，不动「热 IAM」的正常快路径。
+      await clearIamHalfLoginCookies(sess)
       // friendly 是重试耗尽后的终态文案（重试中的提示由前端按 reason 自行渲染），
       // 故此处写终态语气，不再写「正在重试」。
-      const lckErr: any = new Error('未能从登录页获取 lck 上下文参数（IAM 冷启动未签发上下文）')
+      const lckErr: any = new Error('未能从登录页获取 lck 上下文参数（IAM 半登录态，已清理陈旧会话待重试）')
       lckErr.reason = 'retryable'
       lckErr.friendly = '登录服务未就绪，请稍后重试'
       throw lckErr
