@@ -72,10 +72,16 @@ export function LoginOverlay({ loginState }: Props) {
       const res = await window.mcApi.startQrLogin(forceQr)
       console.log('[QR] startQrLogin result=', res)
       if (!res.success) {
-        // 网络类错误（IAM 超时/不可达）：自动退避重试，IAM 一恢复即出新码，无需用户手动刷新
-        if (res.reason === 'network' && retryLeft > 0) {
-          setError('网络异常，正在重新获取二维码...')
-          setStatus('网络异常，正在重试...')
+        // 可重试错误：自动退避重试，IAM 一恢复即出新码，无需用户手动刷新。
+        //  - network  ：IAM 超时/不可达
+        //  - retryable：IAM 冷启动未签发 lck 上下文（瞬态，重试可恢复）
+        if ((res.reason === 'network' || res.reason === 'retryable') && retryLeft > 0) {
+          setError(
+            res.reason === 'network'
+              ? '网络异常，正在重新获取二维码...'
+              : '登录服务未就绪，正在重新获取二维码...'
+          )
+          setStatus('正在重试...')
           setLoading(false)
           window.setTimeout(() => fetchQr(forceQr, retryLeft - 1), 5000)
           return

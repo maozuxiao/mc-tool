@@ -1171,7 +1171,16 @@ ipcMain.handle(IPC.OA_QR_LOGIN_START, () => {
         }
         // probe=reauth：OA 不认可（会话失效），落到下方原错误逻辑，由前端重扫/重登录
       }
-      throw new Error('未能从登录页获取 lck 上下文参数')
+      // IAM 冷启动：跳转链停在 iam/authenticate 直接返回 200，未继续 302 到
+      // ac/#/index?lck=，故 URL 与 HTML 里都没有 lck。这是 IAM 冷态瞬态——预热探测
+      // 只验证「能收到响应」就误报就绪，step1 的重试又只认异常（200 不抛错故不重试），
+      // 于是一次性失败。标记为 retryable，交前端退避重试：IAM 恢复后即自动出新码。
+      // friendly 是重试耗尽后的终态文案（重试中的提示由前端按 reason 自行渲染），
+      // 故此处写终态语气，不再写「正在重试」。
+      const lckErr: any = new Error('未能从登录页获取 lck 上下文参数（IAM 冷启动未签发上下文）')
+      lckErr.reason = 'retryable'
+      lckErr.friendly = '登录服务未就绪，请稍后重试'
+      throw lckErr
     }
 
     // 登录页会种下 IAM/SSO cookie，后续接口必须带上，否则 queryAuthMethods 返回空或报错
