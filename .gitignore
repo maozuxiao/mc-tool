@@ -1,13 +1,17 @@
+# 依赖：由 npm install 生成，依赖树已完整记录在 package-lock.json 中，
+# 体积大（约 620 MB）且含平台特定二进制，不入库。
 node_modules/
-# dist/ 整体忽略；仅保留 generic 自动更新所需的产物（Setup.exe / latest.yml / blockmap）提交进仓库作 raw 直链更新源
+
+# 打包产物：由 build_now.ps1 / npm run pack:* 生成，
+# 安装包通过 GitHub Releases 分发，无需入库。
 dist/
-# 例外：放行更新必需文件
-!dist/**/MC物料查询 Setup *.exe
-!dist/latest.yml
-!dist/*.blockmap
-# win-unpacked（展开目录，体积超 GitHub 上限）及 builder 临时文件不入库
+
+# electron-vite 构建输出（中间产物）
 out/
+
 *.log
 .DS_Store
+
+# 图标：由 electron-builder 从 build/icon.png 自动生成，体积较大
 build/icon.ico
 build/icon.icns
