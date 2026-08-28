@@ -12,5 +12,5 @@ export const STATUS_CLS: Record<string, string> = {
   '退市': 'mq-red', '禁购': 'mq-red', '禁用': 'mq-red'
 }
 
-// 自动更新包所在的 GitHub raw 基础地址
-export const UPDATE_BASE_URL = 'https://github.com/maozuxiao/Streamax/raw/main/assets/MC_Tool'
+// 自动更新包所在的 GitHub raw 基础地址（打包产物 dist/* 提交进本仓库，raw 直链即更新源）
+export const UPDATE_BASE_URL = 'https://github.com/maozuxiao/mc-tool/raw/main/dist'

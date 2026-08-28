@@ -1,5 +1,11 @@
 node_modules/
+# dist/ 整体忽略；仅保留 generic 自动更新所需的产物（Setup.exe / latest.yml / blockmap）提交进仓库作 raw 直链更新源
 dist/
+# 例外：放行更新必需文件
+!dist/**/MC物料查询 Setup *.exe
+!dist/latest.yml
+!dist/*.blockmap
+# win-unpacked（展开目录，体积超 GitHub 上限）及 builder 临时文件不入库
 out/
 *.log
 .DS_Store
