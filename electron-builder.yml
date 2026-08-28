@@ -50,5 +50,6 @@ nsis:
   shortcutName: MC物料查询
 
 publish:
-  - provider: generic
-    url: https://github.com/maozuxiao/mc-tool/raw/main/dist
+  - provider: github
+    owner: maozuxiao
+    repo: mc-tool

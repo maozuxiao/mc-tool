@@ -23,11 +23,13 @@ export interface UpdatePayload {
   message?: string
 }
 
-export function initAutoUpdater(win: BrowserWindow, feedUrl: string) {
+export function initAutoUpdater(win: BrowserWindow) {
   // 不自动下载：检测到更新后由用户在 UI 中点击「下载」再开始下载
   autoUpdater.autoDownload = false
   autoUpdater.autoInstallOnAppQuit = true
-  autoUpdater.setFeedURL({ provider: 'generic', url: feedUrl })
+  // 私有仓库 + GitHub Releases：Release 附件公开可下载（无需仓库读权限/token），
+  // 因此自动更新对协作者以外的人也可用；源码仍保持私有。
+  autoUpdater.setFeedURL({ provider: 'github', owner: 'maozuxiao', repo: 'mc-tool' })
 
   autoUpdater.on('update-available', (info) => {
     // 仅在服务器版本高于本地时才视为有更新，避免低版本误报

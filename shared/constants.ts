@@ -11,6 +11,3 @@ export const STATUS_CLS: Record<string, string> = {
   '预退市': 'mq-amber', '逐步淘汰': 'mq-amber', '批量-不推荐': 'mq-amber',
   '退市': 'mq-red', '禁购': 'mq-red', '禁用': 'mq-red'
 }
-
-// 自动更新包所在的 GitHub raw 基础地址（打包产物 dist/* 提交进本仓库，raw 直链即更新源）
-export const UPDATE_BASE_URL = 'https://github.com/maozuxiao/mc-tool/raw/main/dist'

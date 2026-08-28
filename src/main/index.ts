@@ -5,7 +5,7 @@ import { appendFileSync, existsSync, readFileSync, unlinkSync, writeFileSync, mk
 import http from 'http'
 import https from 'https'
 import zlib from 'zlib'
-import { OA_LOGIN_URL, UPDATE_BASE_URL, OA_ORIGIN } from '@shared/constants'
+import { OA_LOGIN_URL, OA_ORIGIN } from '@shared/constants'
 import { IPC } from '@shared/types'
 import { initAutoUpdater } from './updater'
 
@@ -572,7 +572,7 @@ app.whenReady().then(() => {
   app.setAppUserModelId(APP_ID)
   app.setName('MC物料查询')
   createWindow()
-  initAutoUpdater(mainWindow!, UPDATE_BASE_URL)
+  initAutoUpdater(mainWindow!)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
