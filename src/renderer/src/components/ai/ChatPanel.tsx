@@ -487,10 +487,11 @@ export function ChatPanel({ disabled }: Props) {
 function MarkdownLink({ href, children }: { href?: string; children?: React.ReactNode }) {
   const t = useStore(s => s.t)
   const display = typeof children === 'string' ? children : ''
+  const [downloading, setDownloading] = useState(false)
   const handleClick = async (e: React.MouseEvent<HTMLAnchorElement>) => {
     e.preventDefault()
     e.stopPropagation()
-    if (!href) return
+    if (!href || downloading) return
 
     // 把相对路径补成 OA 绝对地址
     let url = href
@@ -503,12 +504,16 @@ function MarkdownLink({ href, children }: { href?: string; children?: React.Reac
       /[?&]fileName=/i.test(url)
 
     if (isSpec) {
+      const u = new URL(url)
+      let filename = u.searchParams.get('fileName') || display || 'spec-file'
+      try { filename = decodeURIComponent(filename) } catch { /* 保持原样 */ }
+      void window.mcApi.showMessage({ type: 'info', message: t('fileDownloadStarted', { n: filename }) })
+      setDownloading(true)
       try {
-        const u = new URL(url)
-        let filename = u.searchParams.get('fileName') || display || 'spec-file'
-        try { filename = decodeURIComponent(filename) } catch { /* 保持原样 */ }
         const res: any = await window.mcApi.downloadFile({ url, filename })
-        if (!res?.ok && !res?.canceled) {
+        if (res?.ok && !res?.canceled && res?.savedPath) {
+          void window.mcApi.showMessage({ type: 'info', message: t('fileDownloadSuccess', { p: res.savedPath }) })
+        } else if (!res?.ok && !res?.canceled) {
           void window.mcApi.showMessage({
             type: 'error',
             message: res?.error === 'NEED_RELOGIN'
@@ -518,6 +523,8 @@ function MarkdownLink({ href, children }: { href?: string; children?: React.Reac
         }
       } catch (err: any) {
         void window.mcApi.showMessage({ type: 'error', message: t('fileDownloadFail', { m: err?.message || String(err) }) })
+      } finally {
+        setDownloading(false)
       }
       return
     }
@@ -526,7 +533,16 @@ function MarkdownLink({ href, children }: { href?: string; children?: React.Reac
     window.mcApi.openExternal?.(url)
   }
 
-  return <a href={href} onClick={handleClick}>{children}</a>
+  return (
+    <a
+      href={href}
+      className={`ai-md-link${downloading ? ' busy' : ''}`}
+      onClick={handleClick}
+      aria-disabled={downloading}
+    >
+      {downloading ? t('downloading') : children}
+    </a>
+  )
 }
 
 // 复制优先用 Clipboard API；file:// 协议下它可能不可用，回退到 execCommand

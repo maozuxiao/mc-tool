@@ -242,6 +242,15 @@
 }
 .ai-bubble pre code { background: transparent; color: inherit; padding: 0; }
 
+/* AI 消息里的链接：下载中时显示禁用态，避免用户重复点击 */
+.ai-bubble a.ai-md-link { text-decoration: underline; cursor: pointer; }
+.ai-bubble a.ai-md-link.busy {
+  opacity: .65;
+  cursor: default;
+  pointer-events: none;
+  text-decoration: none;
+}
+
 /* 等待首个 token 时显示「思考中…」，避免先渲染一个空的大气泡 */
 .ai-thinking {
   display: inline-flex;
