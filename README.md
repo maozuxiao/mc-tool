@@ -4,7 +4,7 @@
 
 - 仓库：https://github.com/maozuxiao/mc-tool
 - 技术栈：Electron 33 + electron-vite + React 18 + TypeScript + Zustand，UI 组件库 [`animal-island-ui`](https://www.npmjs.com/package/animal-island-ui)
-- 当前版本：`1.0.24`（`package.json` 的 `version` 为准）
+- 当前版本：`1.0.27`（`package.json` 的 `version` 为准）
 
 ---
 
@@ -35,6 +35,7 @@
 | 🌳 **BOM 查询** | 按完整料号查物料清单，支持层级展示、组件展开、查看子件 BOM / 规格文件。 |
 | 📎 **规格文件查询** | 按料号列出附件并**在应用内下载**（复用已登录会话，不会跳到浏览器提示未登录）。 |
 | 📤 **CSV 导出** | 任意结果表一键导出 CSV（含 BOM，便于 Excel 打开）。 |
+| 🤖 **AI 助手** | 内置对话页，接 OpenAI 兼容 / Anthropic 协议的大模型；可调用本地 **MC Skill** 直接查物料、库存、BOM、规格文件，结果由模型总结成 Markdown 表格。 |
 | 🆕 **自动更新** | 启动 3 秒后后台检查 GitHub Releases，顶部更新条显示下载进度，下载完成后以 NSIS 向导模式非静默安装。 |
 | 🌐 **其他** | 中英双语切换；`Ctrl + 滚轮` 缩放、`Ctrl + 0` 复位；输入框历史记录；列宽可拖拽并记忆。 |
 
@@ -104,7 +105,50 @@
 - **展开**：结果行手风琴式互斥展开查看全部字段；展开状态在切换标签页后保持。
 - **导出**：点「导出 CSV」，选择保存位置即可。
 
-### 3.5 其他操作
+### 3.5 AI 助手
+
+右下角切换「物料查询 / AI 助手」进入。对话页左侧是历史会话，右侧是对话区。
+
+**① 配置模型（只需做一次）**
+
+1. 点工具栏「配置」展开 API 设置。
+2. 选择服务商（下拉框），内置预设：
+
+   | 服务商 | 说明 |
+   |---|---|
+   | OpenAI | `api.openai.com` |
+   | OpenCode Go / OpenCode Zen | OpenCode 官方网关，Zen 提供若干限时免费模型 |
+   | DeepSeek / 智谱 GLM / 阿里 Qwen / Kimi / SiliconFlow / OpenRouter | 国内与聚合平台 |
+   | Anthropic Claude | 走 Anthropic 原生协议 |
+   | Ollama（本地） | `127.0.0.1:11434`，本地模型，无需 API Key |
+
+3. 填 **API Key**（Ollama 可留空），可改 **Base URL** 与 **模型名**。
+4. 点「测试连接」确认可用，再点「保存配置」。
+
+> API Key 用 Electron `safeStorage` 加密后存到 `userData/ai-providers.json`；若系统不可用加密则明文落盘（带 `plain:` 前缀）。**密钥只保存在本机，不上传任何服务器。**
+
+**② 开始对话**
+
+- 输入框 `Enter` 发送，`Shift + Enter` 换行。
+- 回复为流式输出，Markdown 渲染（表格、代码高亮）；生成中可点「停止」中断。
+- 左侧「+ 新对话」开新会话，点击历史记录可回看，`×` 删除。历史存在 `userData/ai-history.json`。
+
+**③ 让 AI 查物料（MC Skill）**
+
+勾选工具栏的 **MC Skill** 后，模型可调用内置的 `mc_query` 工具，直接查物料、库存、生命周期、BOM、规格文件，并把结果总结成 Markdown 表格。
+
+- 复用当前已登录的 OA 会话，**不需要二次扫码**；未登录 OA 时输入框会提示先登录。
+- 每次工具调用在气泡里显示状态卡片，展开可看请求参数与原始返回。
+- 生命周期为退市 / 禁购 / 禁用时，模型会给出风险提示。
+- 首次调用会自动准备 Node 22 运行时（`resources/skills/.../ensure_node.ps1`），需联网下载一次，约 1~2 分钟。
+
+**④ 注意事项**
+
+- 规格文件默认**只列清单不下载**；需要下载时先与模型确认保存位置。
+- 查询结果由模型总结，关键料号请对照气泡里的原始返回核对。
+- 查询内部物料数据时，建议避免使用标注「免费」的模型（部分免费端点会收集数据用于改进模型）。
+
+### 3.6 其他操作
 
 | 操作 | 说明 |
 |---|---|
@@ -126,7 +170,14 @@ mc-tool/
 │  ├─ main/                     # 主进程（Node 环境）
 │  │  ├─ index.ts               # 入口：窗口、OA 登录/SSO/二维码、Cookie 持久化与备份恢复、
 │  │  │                         #        HTTP 代理、文件下载、全部 IPC handler、安装更新
-│  │  └─ updater.ts             # electron-updater 封装：手动下载策略、版本比较、事件转发
+│  │  ├─ updater.ts             # electron-updater 封装：手动下载策略、版本比较、事件转发
+│  │  └─ ai/                    # AI 助手主进程侧
+│  │     ├─ aiIpc.ts            # AI 相关 IPC handler 注册
+│  │     ├─ chatService.ts      # 对话编排：流式请求、工具调用循环、事件推送
+│  │     ├─ providerApi.ts      # OpenAI 兼容 / Anthropic 协议适配
+│  │     ├─ providerStore.ts    # 服务商预设与 API Key 加密存储
+│  │     ├─ historyStore.ts     # 会话历史（JSON 持久化到 userData）
+│  │     └─ mcSkill.ts          # 内置 MC 查询工具（调用 resources/skills 的脚本）
 │  ├─ preload/index.ts          # contextBridge 桥接，向渲染层暴露 window.mcApi
 │  └─ renderer/                 # 渲染进程（React）
 │     ├─ index.html
@@ -145,13 +196,22 @@ mc-tool/
 │        │  ├─ FileTable.tsx        # 规格文件表
 │        │  ├─ LoginOverlay.tsx     # 钉钉扫码登录层
 │        │  ├─ UpdateBar.tsx        # 顶部更新条（检查/下载/安装）
+│        │  ├─ ai/ChatPanel.tsx     # AI 对话页（会话列表、模型选择、Markdown 渲染）
+│        │  ├─ ai/ai-chat.css
 │        │  └─ nookIcon.ts          # NOOK 图标
 │        └─ assets/nook.svg
 ├─ shared/                      # 主进程 / 渲染进程共享（纯逻辑，无副作用）
 │  ├─ constants.ts              # OA 地址、组织号、生命周期→样式映射
 │  ├─ types.ts                  # 数据类型 + IPC 通道名常量
 │  ├─ query.ts                  # URL 构造、结果归一化、批量合并、筛选排序去重、CSV
+│  ├─ ai-types.ts               # AI IPC 通道名 + 会话/消息/工具调用类型
 │  └─ i18n.ts                   # 中英文文案字典
+├─ resources/skills/
+│  └─ mc-material-query-local/  # 内置 MC 查询 Skill（随安装包分发到 resources/）
+│     ├─ SKILL.md               # 工具说明，作为 system prompt 的一部分
+│     ├─ scripts/mc_query.js    # 查询脚本（search/item/batch/bom/spec）
+│     ├─ scripts/ensure_node.ps1# 准备 Node 22 运行时
+│     └─ data/                  # 摄像机机型表、IMX307 替代料映射
 ├─ build/                       # 打包资源（图标：icon.png / icon-512.png / icon.svg）
 ├─ electron.vite.config.ts      # main / preload / renderer 三端构建配置
 ├─ electron-builder.yml         # 打包与发布配置
@@ -169,6 +229,8 @@ mc-tool/
 - **登录态怎么保持？** 主窗口使用持久化 partition `persist:mc-query`；由于 OA 的 `route`/`SESSION` 是 session 级 cookie（跨启动落盘不可靠），主进程额外把 OA 会话 cookie 备份到 `userData/oa-session-backup.json`，启动时若 partition 为空则恢复并补齐过期时间。
 - **登录判定以真实探测为准。** `probeOaSession` 的结果（200/ok）是唯一权威；只有网络级错误（如 `-118` 超时）才信任 cookie 兜底，避免携带过期 cookie 被 OA 302 踢回 IAM 却误判为已登录。
 - **Cookie 互通**：登录成功后会把全量 streamax cookie 导出到 `~/.cache/oa-mc-cookies.json`，与脚本 `mc_query.js` 共享同一份票据。
+- **AI 助手为什么要自己实现历史存储？** 早期版本用 `better-sqlite3`，但它是原生模块：主进程打包要额外 external、electron-builder 会触发 node-gyp 重建（本机无 VS 生成工具直接失败），且 v13 要求 Node ≥ 22 而 Electron 33 内置 Node 20。历史记录的操作只有「按会话取消息 / 追加 / 改名 / 删除」，JSON 文件完全够用，也与项目其余持久化方式一致。
+- **AI 请求全部走主进程。** 渲染层不直接访问模型 API：`preload` 只暴露 `window.mcApi.ai.*`，主进程发请求、解析 SSE、执行 `mc_query` 工具，再通过事件通道把 `delta` / `tool-start` / `tool-end` / `done` 推送给渲染层。这样 API Key 不出主进程，工具脚本也能复用 OA Cookie。
 
 ---
 
@@ -229,9 +291,9 @@ npm run pack:all   # 全平台
 ```
 dist/
 ├─ latest.yml                            # 自动更新元数据
-├─ MC物料查询 Setup 1.0.24.exe            # NSIS 安装包
-├─ MC物料查询 Setup 1.0.24.exe.blockmap  # 增量更新块映射
-└─ MC物料查询 1.0.24.exe                  # 便携版
+├─ MC物料查询 Setup 1.0.27.exe            # NSIS 安装包
+├─ MC物料查询 Setup 1.0.27.exe.blockmap  # 增量更新块映射
+└─ MC物料查询 1.0.27.exe                  # 便携版
 ```
 
 > macOS 交叉编译在 Windows 上不可靠，DMG 请在 macOS 上打包。
