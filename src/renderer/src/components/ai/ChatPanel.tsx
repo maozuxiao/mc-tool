@@ -45,6 +45,9 @@ export function ChatPanel({ disabled }: Props) {
   const messagesRef = useRef<HTMLDivElement | null>(null)
   // 每次发送生成，新会话还没拿到 conversationId 时也能靠它取消
   const requestIdRef = useRef<string>('')
+  // 切换会话时保存/恢复滚动位置，避免每次切回来都强制滚到最底部
+  const scrollPositionsRef = useRef<Map<string, number>>(new Map())
+  const pendingScrollRef = useRef<{ id: string | null }>({ id: null })
   // 是否已完成「按上次配置初始化」：AI 配置是全局的，只恢复一次，
   // 之后切换会话不再改动 provider / model。
   const initializedRef = useRef(false)
@@ -188,7 +191,19 @@ export function ChatPanel({ disabled }: Props) {
     }
   }, [providerId])  // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
+  // 消息变化时：
+  // - 切换会话后第一次渲染：恢复该会话上次保存的滚动位置，没有则保持在顶部
+  //   （避免每次切回来都自动滚到最底部）。
+  // - 普通流式 / 发送消息：自动滚到最底部。
+  useEffect(() => {
+    if (pendingScrollRef.current.id && messagesRef.current) {
+      const saved = scrollPositionsRef.current.get(pendingScrollRef.current.id)
+      messagesRef.current.scrollTop = saved ?? 0
+      pendingScrollRef.current.id = null
+      return
+    }
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
 
   // 切到物料查询时本页被 display:none 隐藏，浏览器的滚动位置会丢；
   // 重新显示时回到最新一条，避免用户每次切回来都停在会话开头。
@@ -207,9 +222,14 @@ export function ChatPanel({ disabled }: Props) {
 
   const openConversation = async (id: string) => {
     try {
+      // 切走前保存当前会话的滚动位置
+      if (conversationIdRef.current && messagesRef.current) {
+        scrollPositionsRef.current.set(conversationIdRef.current, messagesRef.current.scrollTop)
+      }
       const data = await window.mcApi.ai.getConversation(id)
       setActiveConversation(id)
       setMessages(data.messages)
+      pendingScrollRef.current = { id }
       // 注意：AI 配置（服务商 / 模型）是全局的，不随会话切换而改变。
       // 历史会话仍然用它当时记录的服务商与模型，只有「当前工具栏选择」保持全局。
     } catch (e: any) { setNotice(e.message) }
