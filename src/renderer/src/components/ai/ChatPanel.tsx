@@ -18,6 +18,7 @@ interface Props {
 
 export function ChatPanel({ disabled }: Props) {
   const t = useStore(s => s.t)
+  const lang = useStore(s => s.lang)
   const [providers, setProviders] = useState<ProviderBundle>({ providers: [], suggestions: {} })
   const [providerId, setProviderId] = useState('')
   const [modelId, setModelId] = useState('')
@@ -167,7 +168,8 @@ export function ChatPanel({ disabled }: Props) {
         providerId,
         modelId,
         content,
-        useMcSkill: useSkill
+        useMcSkill: useSkill,
+        lang
       })
       if (!res.ok) { setNotice(res.error); setStreaming(false) }
       await refreshConversations()

@@ -2,7 +2,7 @@ import { BrowserWindow, net } from 'electron'
 import { randomUUID } from 'crypto'
 import type { AISendPayload } from '@shared/ai-types'
 import { getProvider } from './providerStore'
-import { MC_QUERY_TOOL_DEFINITION, MC_SKILL_SYSTEM_PROMPT, runMcQuery } from './mcSkill'
+import { MC_QUERY_TOOL_DEFINITION, mcSkillSystemPrompt, runMcQuery } from './mcSkill'
 import {
   appendMessage, appendToolRun, completeToolRun, createConversation,
   getConversation, updateMessage
@@ -83,7 +83,7 @@ function withAbort<T>(promise: Promise<T>, signal: AbortSignal, timeoutMs?: numb
 }
 
 function openAIToolMessages(messages: any[], toolsEnabled: boolean) {
-  const payload: any[] = [{ role: 'system', content: MC_SKILL_SYSTEM_PROMPT }]
+  const payload: any[] = [{ role: 'system', content: mcSkillSystemPrompt('zh') }]
   for (const m of messages) {
     if (m.role === 'user') payload.push({ role: 'user', content: m.content })
     else if (m.role === 'assistant' && m.content) payload.push({ role: 'assistant', content: m.content })
@@ -112,7 +112,7 @@ async function streamOpenAICompatible(input: {
       model: payload.modelId,
       stream: true,
       messages: [
-        { role: 'system', content: MC_SKILL_SYSTEM_PROMPT },
+        { role: 'system', content: mcSkillSystemPrompt(payload.lang === 'en' ? 'en' : 'zh') },
         ...conversation.map(m => {
           if (m.role === 'tool') return { role: 'tool', tool_call_id: m.tool_call_id, content: m.content }
           if (m.tool_calls) return { role: 'assistant', content: m.content || '', tool_calls: m.tool_calls }

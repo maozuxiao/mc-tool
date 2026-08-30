@@ -71,6 +71,8 @@ export interface AISendPayload {
   modelId: string
   content: string
   useMcSkill: boolean
+  // 应用界面语言（zh / en），仅作为「提问语言无法判断时」的兜底
+  lang?: string
 }
 
 export const AI_IPC = {
