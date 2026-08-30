@@ -39,6 +39,7 @@ export function ChatPanel({ disabled }: Props) {
   const [useSkill, setUseSkill] = useState(true)
   const [notice, setNotice] = useState('')
   const bottomRef = useRef<HTMLDivElement | null>(null)
+  const messagesRef = useRef<HTMLDivElement | null>(null)
   // 每次发送生成，新会话还没拿到 conversationId 时也能靠它取消
   const requestIdRef = useRef<string>('')
   // 是否已完成「按上次配置初始化」：AI 配置是全局的，只恢复一次，
@@ -133,6 +134,21 @@ export function ChatPanel({ disabled }: Props) {
   }, [providerId])  // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
+
+  // 切到物料查询时本页被 display:none 隐藏，浏览器的滚动位置会丢；
+  // 重新显示时回到最新一条，避免用户每次切回来都停在会话开头。
+  useEffect(() => {
+    const el = messagesRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    let wasVisible = el.offsetParent !== null
+    const ro = new ResizeObserver(() => {
+      const visible = el.offsetParent !== null
+      if (visible && !wasVisible) el.scrollTop = el.scrollHeight
+      wasVisible = visible
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
 
   const openConversation = async (id: string) => {
     try {
@@ -338,7 +354,7 @@ export function ChatPanel({ disabled }: Props) {
           </div>
         )}
 
-        <div className="ai-messages">
+        <div className="ai-messages" ref={messagesRef}>
           {messages.length === 0 && (
             <div className="ai-empty">
               <div className="ai-empty-icon">AI</div>

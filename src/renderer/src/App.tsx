@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useStore } from './store'
 import { LoginOverlay } from './components/LoginOverlay'
 import { QueryPanel } from './components/QueryPanel'
@@ -20,6 +20,10 @@ export function App() {
   const setQrRefetchSeq = useStore(s => s.setQrRefetchSeq)
   const setUpdateInfo = useStore(s => s.setUpdateInfo)
   const [view, setView] = useState<MainView>('query')
+  // ChatPanel 一旦挂载就不再卸载：切到物料查询只是用 CSS 隐藏。
+  // 否则来回切页面会丢失本地状态（当前会话 id、已加载的消息、流式进度）。
+  const aiMountedRef = useRef(false)
+  if (view === 'ai') aiMountedRef.current = true
 
   useEffect(() => {
     window.mcApi.onLoginChecked((s: { loggedIn: boolean; reason?: string }) => {
@@ -70,7 +74,14 @@ export function App() {
     <div className="app-root">
       <UpdateBar />
       {!loggedIn && !landing && <LoginOverlay loginState={loginState} />}
-      {view === 'query' ? <QueryPanel disabled={!loggedIn} /> : <ChatPanel disabled={!loggedIn} />}
+      <div className={`view-pane${view === 'query' ? '' : ' is-hidden'}`}>
+        <QueryPanel disabled={!loggedIn} />
+      </div>
+      {aiMountedRef.current && (
+        <div className={`view-pane${view === 'ai' ? '' : ' is-hidden'}`}>
+          <ChatPanel disabled={!loggedIn} />
+        </div>
+      )}
       {landing && (
         <div className="sso-loading-overlay">
           <div className="sso-loading-box">

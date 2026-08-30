@@ -323,6 +323,12 @@ body {
 }
 
 /* ── 主面板 ── */
+/* 视图容器：两个页面都常驻挂载，非当前页用 display:none 隐藏，
+   这样切走再切回来不会丢掉本地状态（当前会话、消息、流式进度）。 */
+.view-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.view-pane.is-hidden { display: none; }
+.view-pane > .panel,
+.view-pane > .ai-page { flex: 1; min-height: 0; }
 .panel { flex: 1; display: flex; flex-direction: column; min-height: 0; position: relative; }
 .panel-locked { filter: blur(2px); }
 .panel-lock-mask { position: absolute; inset: 0; z-index: 10; cursor: not-allowed; }
