@@ -28,17 +28,32 @@ export function getMcSkillDescription(): string {
   try { return readFileSync(path, 'utf8') } catch { return '' }
 }
 
-async function getNodePath(): Promise<string> {
+function abortable<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) return reject(new DOMException('Aborted', 'AbortError'))
+    const onAbort = () => reject(new DOMException('Aborted', 'AbortError'))
+    signal.addEventListener('abort', onAbort, { once: true })
+    promise.then(
+      (v) => { signal.removeEventListener('abort', onAbort); resolve(v) },
+      (e) => { signal.removeEventListener('abort', onAbort); reject(e) }
+    )
+  })
+}
+
+async function getNodePath(signal?: AbortSignal): Promise<string> {
   if (process.platform === 'win32') {
     try {
-      const out = await execFileAsync('powershell.exe', [
+      const out = await abortable(execFileAsync('powershell.exe', [
         '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
         join(getSkillRoot(), 'scripts', 'ensure_node.ps1')
-      ], { timeout: 120000 })
+      ], { timeout: 120000 }), signal)
       const lines = String(out.stdout).trim().split(/\r?\n/)
       const nodePath = lines.filter(Boolean).pop()
       if (nodePath && existsSync(nodePath)) return nodePath
-    } catch {}
+    } catch (e: any) {
+      if (e.name === 'AbortError') throw e
+    }
   }
   return process.execPath
 }
@@ -74,7 +89,7 @@ function validateInput(input: any): { command: string; args: string[] } {
 // 后续调用传入带 id 的完整 run 做更新。因此入参允许可选 id，返回值保证带 id。
 type McRunSink = (run: Omit<AIToolRun, 'id'> & { id?: string }) => { id: string }
 
-export async function runMcQuery(input: any, onRun?: McRunSink): Promise<any> {
+export async function runMcQuery(input: any, onRun?: McRunSink, signal?: AbortSignal): Promise<any> {
   const { command, args } = validateInput(input)
   const started = Date.now()
   const run = {
@@ -84,23 +99,45 @@ export async function runMcQuery(input: any, onRun?: McRunSink): Promise<any> {
     summary: `正在查询 MC：${command} ${args.join(' ')}`
   }
   const persisted = onRun ? { ...run, ...onRun({ ...run }) } : { ...run, id: 'temp' }
+  if (signal?.aborted) {
+    const patch = { output: { error: '已取消' }, summary: '已取消', status: 'error' as const, durationMs: 0 }
+    if (onRun) onRun({ ...persisted, ...patch })
+    throw new DOMException('Aborted', 'AbortError')
+  }
   try {
-    const node = await getNodePath()
+    const node = await getNodePath(signal)
     const script = join(getSkillRoot(), 'scripts', 'mc_query.js')
     if (!existsSync(script)) throw new Error('内置 MC 查询脚本不存在')
+
     const child = spawn(node, [script, command, ...args, '--json'], {
       cwd: getSkillRoot(),
       windowsHide: true,
       env: { ...process.env, MC_TOOL_AUTH_MODE: 'app' }
     })
+
     let stdout = ''
     let stderr = ''
     child.stdout.on('data', chunk => { stdout += chunk.toString() })
     child.stderr.on('data', chunk => { stderr += chunk.toString() })
+
+    const cleanupAbort = () => {
+      if (!child.killed) {
+        child.kill('SIGTERM')
+        setTimeout(() => { if (!child.killed) child.kill('SIGKILL') }, 5000)
+      }
+    }
+    signal?.addEventListener('abort', cleanupAbort, { once: true })
+
     const exitCode = await new Promise<number>((resolve, reject) => {
       child.on('error', reject)
       child.on('close', resolve)
     })
+
+    signal?.removeEventListener('abort', cleanupAbort)
+    if (signal?.aborted) {
+      throw new DOMException('Aborted', 'AbortError')
+    }
+
     const match = stdout.match(/===JSON_BEGIN===\s*([\s\S]*?)\s*===JSON_END===/)
     if (exitCode !== 0 || !match) {
       const errorText = `${stderr}\n${stdout}`.trim()
@@ -113,6 +150,11 @@ export async function runMcQuery(input: any, onRun?: McRunSink): Promise<any> {
     if (onRun) onRun({ ...persisted, ...patch })
     return { result, toolRunId: persisted.id, summary }
   } catch (e: any) {
+    if (e.name === 'AbortError') {
+      const patch = { output: { error: '已取消' }, summary: '已取消', status: 'error' as const, durationMs: Date.now() - started }
+      if (onRun) onRun({ ...persisted, ...patch })
+      throw e
+    }
     const patch = { output: { error: e.message }, summary: e.message, status: 'error' as const, durationMs: Date.now() - started }
     if (onRun) onRun({ ...persisted, ...patch })
     throw e

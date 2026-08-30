@@ -30,9 +30,9 @@ export const PROVIDER_PRESETS: AIProviderPreset[] = [
   {
     // OpenCode Zen：官方 AI 网关，OpenAI 兼容端点，模型列表 GET /v1/models。
     // 与上面的 opencode-go（/zen/go/v1，订阅制）不是同一套：Zen 走按量付费，
-    // 并提供 6 个限时免费模型（名称带 free，以及隐身模型 Big Pickle）。
-    // 未列入 muse-spark-1.2-contributor-free：它走 /responses 而非 /chat/completions，
-    // 本应用目前只实现 chat/completions，选它会请求失败。
+    // 并提供若干限时免费模型（名称带 free / Free）。
+    // 免费模型由上游动态调度，常见报错「Model is unavailable」通常表示该模型
+    // 当前无可用额度或临时下架；点「获取模型」可拉取实时列表，换其它模型即可。
     // ⚠️ 隐私提示：免费模型的服务方可能在免费期内收集数据用于改进模型，
     // NVIDIA 的免费端点更明确写着「请勿提交个人或机密数据」。查询物料、BOM
     // 等内部数据时请改用付费模型。
@@ -41,16 +41,17 @@ export const PROVIDER_PRESETS: AIProviderPreset[] = [
     name: 'OpenCode Zen（含免费模型）',
     protocol: 'openai-compatible',
     baseUrl: 'https://opencode.ai/zen/v1',
-    defaultModel: 'big-pickle',
+    defaultModel: 'deepseek-v4-flash',
     suggestedModels: [
-      // ── 免费 ──
-      'big-pickle', 'mimo-v2.5-free', 'ling-3.0-flash-fin-free',
-      'nemotron-3-ultra-free', 'nemotron-3.5-lightning-free',
-      // ── 付费（常用）──
+      // ── 付费（常用，默认推荐）──
       'deepseek-v4-flash', 'deepseek-v4-pro',
       'glm-5.2', 'glm-5.1',
       'kimi-k3', 'kimi-k2.7-code',
-      'minimax-m3', 'grok-4.6'
+      'minimax-m3', 'grok-4.6',
+      // ── 限时免费（不稳定，可能报 unavailable）──
+      'big-pickle', 'mimo-v2.5-free', 'ox-alpha-free', 'hy3-free',
+      'nemotron-3-ultra-free', 'nemotron-3.5-lightning-free',
+      'x-preview-f-free'
     ]
   },
   {
