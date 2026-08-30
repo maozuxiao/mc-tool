@@ -8,20 +8,35 @@ import type { AIToolRun } from '@shared/ai-types'
 
 const execFileAsync = promisify(execFile)
 
-// 系统提示语。uiLang 只作为「提问语言无法判断时」的兜底，
-// 主规则是「回复语言跟随提问语言」，所以英文提问就该英文回复。
-export function mcSkillSystemPrompt(uiLang: 'zh' | 'en' = 'zh'): string {
+// 系统提示语。
+// - uiLang 只作为「提问语言无法判断时」的兜底，主规则是「回复语言跟随提问语言」，
+//   所以英文提问就该英文回复。
+// - useTool 为 false（未勾选 MC Skill）时不能提 mc_query，否则模型会「调用」一个
+//   并不存在的工具、甚至凭空编造查询结果，所以提示语要分成两套。
+export function mcSkillSystemPrompt(uiLang: 'zh' | 'en' = 'zh', useTool = true): string {
   const uiLangName = uiLang === 'en' ? 'English' : '中文'
+  const languageRule = `回复语言：默认与用户提问所用语言保持一致（英文提问用英文回复，中文提问用中文回复）。
+- 用户明确指定回复语言时，以用户指定为准。
+- 提问语言无法判断时（例如只有一个料号、一串编码），使用应用界面语言：${uiLangName}。
+- 物料字段值（生命周期状态、单位、型号等）保留原始返回值，必要时在括号中给出翻译。`
+
+  if (!useTool) {
+    return `你是 MC Tool 的 AI 助手。当前为普通对话模式（未启用 MC Skill 工具）。请遵守：
+1. ${languageRule}
+2. 结果适合业务人员阅读；表格使用 Markdown。
+3. 你现在无法查询 OA 物料系统，因此不要编造料号、库存、BOM、规格文件等真实数据；
+   遇到需要真实数据的提问，请说明当前未启用 MC Skill，并提示用户勾选后重试。
+
+再次强调：除用户明确指定外，回复语言必须与用户本轮提问的语言一致。`
+  }
+
   return `你是 MC Tool 的 AI 物料助手。
 你可以调用 mc_query 工具查询锐明 OA MC 物料数据。请遵守：
 1. 涉及料号、物料描述、库存、生命周期、BOM、规格文件、物料对比时，必须优先调用 mc_query，不要凭记忆编造。
 2. 生命周期为退市、禁购、禁用时，必须给出明显风险警告。
 3. 描述含 IMX307 的物料，必须提示替代料号信息；如果查询结果中 imx307_replacement 为空数组，要明确说明未找到映射记录。
 4. 批量查询时不要并发，一次 mc_query 可传入多个料号参数。
-5. 回复语言：默认与用户提问所用语言保持一致（英文提问用英文回复，中文提问用中文回复）。
-   - 用户明确指定回复语言时，以用户指定为准。
-   - 提问语言无法判断时（例如只有一个料号、一串编码），使用应用界面语言：${uiLangName}。
-   - 物料字段值（生命周期状态、单位、型号等）保留原始返回值，必要时在括号中给出翻译。
+5. ${languageRule}
 6. 结果适合业务人员阅读；表格使用 Markdown。
 7. 规格文件默认只查询列表，不主动下载；如需下载，先向用户确认保存位置。
 

@@ -34,7 +34,10 @@ export function ChatPanel({ disabled }: Props) {
   const [conversationId, setConversationId] = useState<string | null>(null)
   const [messages, setMessages] = useState<AIMessage[]>([])
   const [input, setInput] = useState('')
-  const [streaming, setStreaming] = useState(false)
+  // 正在生成的会话 id 列表：支持多个会话并发，各会话独立流式推进
+  const [streamingIds, setStreamingIds] = useState<string[]>([])
+  // 新会话在 conversation-created 回来之前还没有 id，单独记一个生成态
+  const [pendingNewStream, setPendingNewStream] = useState(false)
   const [stopping, setStopping] = useState(false)
   const [useSkill, setUseSkill] = useState(true)
   const [notice, setNotice] = useState('')
@@ -50,6 +53,21 @@ export function ChatPanel({ disabled }: Props) {
   const skipModelResetRef = useRef<string | null>(null)
 
   const selectedProvider = providers.providers.find(p => p.id === providerId)
+
+  // 当前视图展示的会话。事件必须按会话过滤：别的会话在后台继续生成，
+  // 不能把它们的增量内容塞进当前视图。
+  const conversationIdRef = useRef<string | null>(null)
+  const setActiveConversation = useCallback((id: string | null) => {
+    conversationIdRef.current = id
+    setConversationId(id)
+  }, [])
+  const markStreaming = useCallback((id: string, on: boolean) => {
+    setStreamingIds(prev => (on
+      ? (prev.includes(id) ? prev : [...prev, id])
+      : prev.filter(x => x !== id)))
+  }, [])
+  // 只有「当前打开的会话」在生成时才锁输入；切到别的会话/新会话即可继续提问
+  const streaming = pendingNewStream || (!!conversationId && streamingIds.includes(conversationId))
 
   const refreshConversations = useCallback(async () => {
     try { setConversations(await window.mcApi.ai.listConversations()) } catch {}
@@ -78,11 +96,25 @@ export function ChatPanel({ disabled }: Props) {
     refreshProviders()
     refreshConversations()
     return window.mcApi.ai.onEvent(event => {
+      const activeId = conversationIdRef.current
+      // 是否属于当前打开的会话。新会话首条消息时 activeId 还是 null，
+      // 由 conversation-created 先补上 id，随后的事件就能对上号。
+      const isActive = activeId !== null && event.conversationId === activeId
+
       if (event.type === 'conversation-created') {
-        setConversationId(event.conversationId)
+        // 只有停留在「新对话」视图时才接管这个新会话；
+        // 若用户已经切到别的会话，就让它在后台生成，不打断当前视图。
+        if (activeId === null) {
+          setActiveConversation(event.conversationId)
+          setPendingNewStream(false)
+          markStreaming(event.conversationId, true)
+        }
         refreshConversations()
+        return
       }
+
       if (event.type === 'message-created') {
+        if (!isActive) return
         setMessages(prev => [...prev, {
           id: event.messageId!,
           conversationId: event.conversationId,
@@ -91,31 +123,54 @@ export function ChatPanel({ disabled }: Props) {
           createdAt: Date.now(),
           toolRuns: []
         }])
+        return
       }
+
       if (event.type === 'delta') {
+        if (!isActive) return
         setMessages(prev => prev.map(m => m.id === event.messageId ? { ...m, content: m.content + (event.content || '') } : m))
+        return
       }
+
       if (event.type === 'tool-start') {
+        if (!isActive) return
         setMessages(prev => prev.map(m => {
           if (m.id !== event.messageId) return m
           return { ...m, toolRuns: [...(m.toolRuns || []), event.run as AIToolRun] }
         }))
+        return
       }
+
       if (event.type === 'tool-end') {
+        if (!isActive) return
         setMessages(prev => prev.map(m => {
           if (m.id !== event.messageId) return m
           return { ...m, toolRuns: (m.toolRuns || []).map(r => r.id === event.run.id ? { ...r, ...event.run } : r) }
         }))
+        return
       }
-      if (event.type === 'error') { setNotice(event.message || t('aiRequestFailed')); setStreaming(false); setStopping(false) }
+
+      if (event.type === 'error') {
+        markStreaming(event.conversationId, false)
+        if (isActive) {
+          setNotice(event.message || t('aiRequestFailed'))
+          setStopping(false)
+        }
+        refreshConversations()
+        return
+      }
+
       if (event.type === 'done') {
-        setStreaming(false)
-        setStopping(false)
-        if (event.reason === 'timeout') setNotice(t('aiTimeout'))
-        else if (event.reason === 'stopped') setNotice(t('aiStopped'))
+        markStreaming(event.conversationId, false)
+        if (isActive) {
+          setStopping(false)
+          if (event.reason === 'timeout') setNotice(t('aiTimeout'))
+          else if (event.reason === 'stopped') setNotice(t('aiStopped'))
+        }
+        refreshConversations()
       }
     })
-  }, [refreshConversations, refreshProviders])
+  }, [refreshConversations, refreshProviders, setActiveConversation, markStreaming, t])
 
   useEffect(() => {
     if (!providerId) return
@@ -153,7 +208,7 @@ export function ChatPanel({ disabled }: Props) {
   const openConversation = async (id: string) => {
     try {
       const data = await window.mcApi.ai.getConversation(id)
-      setConversationId(id)
+      setActiveConversation(id)
       setMessages(data.messages)
       // 注意：AI 配置（服务商 / 模型）是全局的，不随会话切换而改变。
       // 历史会话仍然用它当时记录的服务商与模型，只有「当前工具栏选择」保持全局。
@@ -197,7 +252,9 @@ export function ChatPanel({ disabled }: Props) {
       return
     }
     setInput('')
-    setStreaming(true)
+    // 只标记「当前会话」进入生成态：别的会话仍可继续提问（并发）
+    if (conversationId) markStreaming(conversationId, true)
+    else setPendingNewStream(true)
     setStopping(false)
     setNotice('')
     setMessages(prev => [...prev, {
@@ -211,6 +268,11 @@ export function ChatPanel({ disabled }: Props) {
     // 只有 requestId 能立刻把这次请求停掉。
     const requestId = `req_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
     requestIdRef.current = requestId
+    // 结束/失败时统一清理本次生成态
+    const clearStreaming = () => {
+      if (conversationId) markStreaming(conversationId, false)
+      else setPendingNewStream(false)
+    }
     try {
       const res = await window.mcApi.ai.sendMessage({
         conversationId: conversationId || undefined,
@@ -221,21 +283,26 @@ export function ChatPanel({ disabled }: Props) {
         useMcSkill: useSkill,
         lang
       })
-      if (!res.ok) { setNotice(res.error); setStreaming(false) }
+      // 请求在发出事件之前就失败（如 API Key 缺失），事件不会来，这里兜底清理
+      if (!res.ok) { setNotice(res.error); clearStreaming() }
       await refreshConversations()
     } catch (e: any) {
       setNotice(e.message)
-      setStreaming(false)
+      clearStreaming()
     } finally {
       setStopping(false)
     }
   }
 
   const stopGenerating = async () => {
-    const id = requestIdRef.current || conversationId
+    // 当前会话已有 id 且在生成中，优先按 id 停；否则退回 requestId（新会话首条）
+    const id = (conversationId && streamingIds.includes(conversationId))
+      ? conversationId
+      : requestIdRef.current
     if (!id) {
       // 兜底：实在拿不到 id 也要放开 UI，避免卡在「停止」状态
-      setStreaming(false)
+      if (conversationId) markStreaming(conversationId, false)
+      else setPendingNewStream(false)
       setStopping(false)
       return
     }
@@ -253,7 +320,7 @@ export function ChatPanel({ disabled }: Props) {
   const removeConversation = async (id: string) => {
     await window.mcApi.ai.deleteConversation(id)
     if (id === conversationId) {
-      setConversationId(null)
+      setActiveConversation(null)
       setMessages([])
     }
     refreshConversations()
@@ -272,7 +339,7 @@ export function ChatPanel({ disabled }: Props) {
       <aside className="ai-sidebar">
         <div className="ai-sidebar-head">
           <span>{t('viewAi')}</span>
-          <button className="mq-btn" onClick={() => { setConversationId(null); setMessages([]) }}>{t('aiNewChat')}</button>
+          <button className="mq-btn" onClick={() => { setActiveConversation(null); setMessages([]) }}>{t('aiNewChat')}</button>
         </div>
         <div className="ai-history">
           {conversations.map(c => (
@@ -361,7 +428,14 @@ export function ChatPanel({ disabled }: Props) {
               <div>{t('aiEmpty')}</div>
             </div>
           )}
-          {messages.map(m => <MessageItem key={m.id} message={m} />)}
+          {messages.map((m, i) => (
+            <MessageItem
+              key={m.id}
+              message={m}
+              // 最后一条助手消息还没收到任何内容时，显示「思考中…」而不是一个空气泡
+              thinking={streaming && i === messages.length - 1 && m.role === 'assistant' && !m.content}
+            />
+          ))}
           <div ref={bottomRef} />
         </div>
 
@@ -452,7 +526,7 @@ async function copyText(text: string): Promise<boolean> {
   } catch { return false }
 }
 
-function MessageItem({ message }: { message: AIMessage }) {
+function MessageItem({ message, thinking }: { message: AIMessage; thinking?: boolean }) {
   const t = useStore(s => s.t)
   const [copied, setCopied] = useState(false)
   const copyTimer = useRef<number | null>(null)
@@ -474,7 +548,17 @@ function MessageItem({ message }: { message: AIMessage }) {
         <div className="ai-bubble">
           {(message.toolRuns || []).map(run => <ToolRunCard key={run.id} run={run} />)}
           {message.role === 'assistant'
-            ? <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize, rehypeHighlight]} components={{ a: MarkdownLink }}>{message.content}</ReactMarkdown>
+            ? (
+              <>
+                <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize, rehypeHighlight]} components={{ a: MarkdownLink }}>{message.content}</ReactMarkdown>
+                {thinking && (
+                  <div className="ai-thinking">
+                    <span className="ai-thinking-dots"><i /><i /><i /></span>
+                    {t('aiThinking')}
+                  </div>
+                )}
+              </>
+            )
             : <div className="ai-plain">{message.content}</div>}
         </div>
         <div className="ai-message-actions">

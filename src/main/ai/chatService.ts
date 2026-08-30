@@ -119,7 +119,7 @@ async function streamOpenAICompatible(input: {
       model: payload.modelId,
       stream: true,
       messages: [
-        { role: 'system', content: mcSkillSystemPrompt(payload.lang === 'en' ? 'en' : 'zh') },
+        { role: 'system', content: mcSkillSystemPrompt(payload.lang === 'en' ? 'en' : 'zh', !!payload.useMcSkill) },
         ...conversation.map(m => {
           if (m.role === 'tool') return { role: 'tool', tool_call_id: m.tool_call_id, content: m.content }
           if (m.tool_calls) return { role: 'assistant', content: m.content || '', tool_calls: m.tool_calls }
