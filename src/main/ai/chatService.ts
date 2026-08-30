@@ -20,6 +20,11 @@ export interface AIStreamEvent {
 const controllers = new Map<string, AbortController>()
 const toolControllers = new Map<string, AbortController>()
 const activeMessageIds = new Map<string, AbortController>()
+// requestId -> conversationId。新会话在返回 conversation-created 之前，
+// 渲染层手里只有 requestId，靠这张表才能把「停止」映射到正确的会话。
+const requestToConversation = new Map<string, string>()
+// 用户点停止时请求可能还没开始（IPC 竞态），先记下来，等请求注册时立刻取消
+const pendingStops = new Set<string>()
 
 function send(event: AIStreamEvent) {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -40,9 +45,14 @@ function createAbortController(conversationId: string): AbortController {
   return controller
 }
 
-export function stopMessage(conversationId: string): void {
-  controllers.get(conversationId)?.abort()
+export function stopMessage(id: string): void {
+  // 允许传 requestId 或 conversationId
+  const conversationId = requestToConversation.get(id) || id
+  const controller = controllers.get(conversationId)
+  if (controller) controller.abort()
+  else pendingStops.add(id) // 请求尚未注册，等它注册时立即取消
   toolControllers.get(conversationId)?.abort()
+  requestToConversation.delete(id)
 }
 
 // 将 Promise 与 AbortSignal / 超时绑定
@@ -264,6 +274,12 @@ export async function sendMessage(payload: AISendPayload): Promise<void> {
   })
   const controller = createAbortController(conversationId)
   activeMessageIds.set(assistant.id, controller)
+  if (payload.requestId) requestToConversation.set(payload.requestId, conversationId)
+  // 竞态兜底：用户在请求注册前就点了停止
+  if (payload.requestId && pendingStops.has(payload.requestId)) {
+    pendingStops.delete(payload.requestId)
+    controller.abort()
+  }
   send({ type: 'message-created', conversationId, messageId: assistant.id, message: assistant.id })
 
   try {
@@ -287,7 +303,12 @@ export async function sendMessage(payload: AISendPayload): Promise<void> {
     send({ type: 'error', conversationId, messageId: assistant.id, message: e.message })
   } finally {
     controllers.delete(conversationId)
+    toolControllers.delete(conversationId)
     activeMessageIds.delete(assistant.id)
+    if (payload.requestId) {
+      requestToConversation.delete(payload.requestId)
+      pendingStops.delete(payload.requestId)
+    }
   }
 }
 

@@ -64,6 +64,9 @@ export interface AIMessage {
 
 export interface AISendPayload {
   conversationId?: string
+  // 渲染层为每次发送生成的 id。新会话在服务端落地前 conversationId 还是空的，
+  // 用 requestId 才能立刻定位到这次请求并取消（否则「停止」点不动）。
+  requestId?: string
   providerId: string
   modelId: string
   content: string

@@ -30,9 +30,12 @@ export function ChatPanel({ disabled }: Props) {
   const [messages, setMessages] = useState<AIMessage[]>([])
   const [input, setInput] = useState('')
   const [streaming, setStreaming] = useState(false)
+  const [stopping, setStopping] = useState(false)
   const [useSkill, setUseSkill] = useState(true)
   const [notice, setNotice] = useState('')
   const bottomRef = useRef<HTMLDivElement | null>(null)
+  // 每次发送生成，新会话还没拿到 conversationId 时也能靠它取消
+  const requestIdRef = useRef<string>('')
 
   const selectedProvider = providers.providers.find(p => p.id === providerId)
 
@@ -81,8 +84,8 @@ export function ChatPanel({ disabled }: Props) {
           return { ...m, toolRuns: (m.toolRuns || []).map(r => r.id === event.run.id ? { ...r, ...event.run } : r) }
         }))
       }
-      if (event.type === 'error') setNotice(event.message || t('aiRequestFailed'))
-      if (event.type === 'done') setStreaming(false)
+      if (event.type === 'error') { setNotice(event.message || t('aiRequestFailed')); setStreaming(false); setStopping(false) }
+      if (event.type === 'done') { setStreaming(false); setStopping(false) }
     })
   }, [refreshConversations, refreshProviders])
 
@@ -144,6 +147,7 @@ export function ChatPanel({ disabled }: Props) {
     }
     setInput('')
     setStreaming(true)
+    setStopping(false)
     setNotice('')
     setMessages(prev => [...prev, {
       id: `local_user_${Date.now()}`,
@@ -152,9 +156,14 @@ export function ChatPanel({ disabled }: Props) {
       content,
       createdAt: Date.now()
     }])
+    // 生成 requestId：新会话落地前 conversationId 还是 null，
+    // 只有 requestId 能立刻把这次请求停掉。
+    const requestId = `req_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+    requestIdRef.current = requestId
     try {
       const res = await window.mcApi.ai.sendMessage({
         conversationId: conversationId || undefined,
+        requestId,
         providerId,
         modelId,
         content,
@@ -165,6 +174,27 @@ export function ChatPanel({ disabled }: Props) {
     } catch (e: any) {
       setNotice(e.message)
       setStreaming(false)
+    } finally {
+      setStopping(false)
+    }
+  }
+
+  const stopGenerating = async () => {
+    const id = requestIdRef.current || conversationId
+    if (!id) {
+      // 兜底：实在拿不到 id 也要放开 UI，避免卡在「停止」状态
+      setStreaming(false)
+      setStopping(false)
+      return
+    }
+    setStopping(true)
+    setNotice('')
+    try {
+      await window.mcApi.ai.stopMessage(id)
+    } catch (e: any) {
+      setNotice(e.message)
+    } finally {
+      setStopping(false)
     }
   }
 
@@ -286,7 +316,9 @@ export function ChatPanel({ disabled }: Props) {
           <div className="ai-composer-actions">
             <span className="ai-title">{title}</span>
             {streaming
-              ? <button className="mq-btn" onClick={() => conversationId && window.mcApi.ai.stopMessage(conversationId)}>{t('aiStop')}</button>
+              ? <button className="mq-btn" onClick={stopGenerating} disabled={stopping}>
+                  {stopping ? t('aiStopping') : t('aiStop')}
+                </button>
               : <button className="mq-btn accent" onClick={send} disabled={disabled || !input.trim()}>{t('aiSend')}</button>}
           </div>
         </div>

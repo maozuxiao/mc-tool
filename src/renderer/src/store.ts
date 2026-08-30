@@ -149,8 +149,14 @@ async function fetchJSON(url: string, _retry = true): Promise<any> {
   }
 }
 
+// t 必须是「随语言变化而换新引用」的函数：zustand 的选择器靠引用比较决定是否重渲染，
+// 若 t 永远是同一个闭包，useStore(s => s.t) 的组件在切换语言时不会重渲染，
+// 表现为「切了语言但界面还是旧文案，要切个页面才刷新」。
+const initialLang: Lang = (localStorage.getItem('mc-lang') as Lang) || 'zh'
+const makeT = (lang: Lang) => (key: string, vars?: Record<string, string | number>) => translate(lang, key, vars)
+
 export const useStore = create<State>((set, get) => ({
-  lang: (localStorage.getItem('mc-lang') as Lang) || 'zh',
+  lang: initialLang,
   loggedIn: false,
   checkingLogin: true,
   landing: false,
@@ -171,8 +177,8 @@ export const useStore = create<State>((set, get) => ({
   // 软件版本号：从主进程 app.getVersion() 实时读取，保持与 package.json 一致
   appVersion: (() => { try { return window.mcApi.appVersion() } catch { return '1.0.10' } })(),
 
-  t: (key, vars) => translate(get().lang, key, vars),
-  setLang: (l) => { localStorage.setItem('mc-lang', l); set({ lang: l }) },
+  t: makeT(initialLang),
+  setLang: (l) => { localStorage.setItem('mc-lang', l); set({ lang: l, t: makeT(l) }) },
   setLoggedIn: (v) => set({ loggedIn: v }),
   setCheckingLogin: (v) => set({ checkingLogin: v }),
   setLanding: (v) => set({ landing: v }),
