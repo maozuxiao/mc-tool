@@ -9,6 +9,9 @@ dist/
 # electron-vite 构建输出（中间产物）
 out/
 
+# 临时打包目录：build_now.ps1 / 手动 electron-builder --config electron-builder-test.yml 产生
+dist-test*/
+
 *.log
 .DS_Store
 
