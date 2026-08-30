@@ -507,13 +507,12 @@ function MarkdownLink({ href, children }: { href?: string; children?: React.Reac
       const u = new URL(url)
       let filename = u.searchParams.get('fileName') || display || 'spec-file'
       try { filename = decodeURIComponent(filename) } catch { /* 保持原样 */ }
-      void window.mcApi.showMessage({ type: 'info', message: t('fileDownloadStarted', { n: filename }) })
+      // 下载/保存都不弹提示框：链接文案本身会变成「下载中…」，
+      // 只有真正出错（登录失效、网络失败）才提示，避免打扰用户。
       setDownloading(true)
       try {
         const res: any = await window.mcApi.downloadFile({ url, filename })
-        if (res?.ok && !res?.canceled && res?.savedPath) {
-          void window.mcApi.showMessage({ type: 'info', message: t('fileDownloadSuccess', { p: res.savedPath }) })
-        } else if (!res?.ok && !res?.canceled) {
+        if (!res?.ok && !res?.canceled) {
           void window.mcApi.showMessage({
             type: 'error',
             message: res?.error === 'NEED_RELOGIN'
