@@ -1,7 +1,7 @@
 import { ipcMain } from 'electron'
 import { AI_IPC } from '@shared/ai-types'
 import { listModels, testProvider } from './providerApi'
-import { listProviders, saveProvider, getSuggestedModels } from './providerStore'
+import { listProviders, saveProvider, getSuggestedModels, getPreferences, savePreferences } from './providerStore'
 import {
   createConversation, deleteConversation, getConversation,
   listConversations, renameConversation
@@ -9,12 +9,22 @@ import {
 import { sendMessage, stopMessage } from './chatService'
 
 export function registerAIIPC(): void {
-  ipcMain.handle(AI_IPC.GET_PROVIDERS, () => ({
-    providers: listProviders(),
-    suggestions: Object.fromEntries(listProviders().map(p => [p.id, getSuggestedModels(p.id)]))
-  }))
+  ipcMain.handle(AI_IPC.GET_PROVIDERS, () => {
+    const providers = listProviders()
+    return {
+      providers,
+      suggestions: Object.fromEntries(providers.map(p => [p.id, getSuggestedModels(p.id)])),
+      // 上次使用的服务商 / 模型，作为全局配置在下一次启动时恢复
+      preferences: getPreferences()
+    }
+  })
 
-  ipcMain.handle(AI_IPC.SAVE_PROVIDER, (_e, input: any) => saveProvider(input))
+  ipcMain.handle(AI_IPC.SAVE_PROVIDER, (_e, input: any) => {
+    const saved = saveProvider(input)
+    // 保存配置的同时记住这次选择，下次打开 app 直接回到这套配置
+    savePreferences({ lastProviderId: input.id, lastModelId: input.defaultModel || saved.defaultModel })
+    return saved
+  })
   ipcMain.handle(AI_IPC.LIST_MODELS, async (_e, providerId: string) => {
     try {
       return { ok: true, models: await listModels(providerId), suggestions: getSuggestedModels(providerId) }

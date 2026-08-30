@@ -1,7 +1,7 @@
 import { BrowserWindow, net } from 'electron'
 import { randomUUID } from 'crypto'
 import type { AISendPayload } from '@shared/ai-types'
-import { getProvider } from './providerStore'
+import { getProvider, savePreferences } from './providerStore'
 import { MC_QUERY_TOOL_DEFINITION, mcSkillSystemPrompt, runMcQuery } from './mcSkill'
 import {
   appendMessage, appendToolRun, completeToolRun, createConversation,
@@ -15,6 +15,13 @@ export interface AIStreamEvent {
   content?: string
   run?: any
   message?: string
+  // done 的原因：用户手动停止 / 请求超时。用于前端给出不同提示。
+  reason?: 'stopped' | 'timeout'
+}
+
+// 在 controller 上带一个标记，区分「用户点停止」与「请求超时」
+interface StreamController extends AbortController {
+  timedOut?: boolean
 }
 
 const controllers = new Map<string, AbortController>()
@@ -32,7 +39,7 @@ function send(event: AIStreamEvent) {
   }
 }
 
-function createAbortController(conversationId: string): AbortController {
+function createAbortController(conversationId: string): StreamController {
   const old = controllers.get(conversationId)
   old?.abort()
   // 同时清掉旧的工具取消器，防止 stop 时误杀后续会话
@@ -100,7 +107,7 @@ async function streamOpenAICompatible(input: {
   conversationId: string
   messages: any[]
   assistantMessageId: string
-  controller: AbortController
+  controller: StreamController
 }): Promise<void> {
   const { payload, conversationId, messages, assistantMessageId, controller } = input
   const { preset, config, apiKey } = getProvider(payload.providerId)
@@ -126,7 +133,11 @@ async function streamOpenAICompatible(input: {
     const fetchController = new AbortController()
     const onParentAbort = () => fetchController.abort()
     controller.signal.addEventListener('abort', onParentAbort, { once: true })
-    const fetchTimeout = setTimeout(() => fetchController.abort(), 60000)
+    // 超时要把 timedOut 打上标记，才能在前端区分「用户停止」与「请求超时」
+    const fetchTimeout = setTimeout(() => {
+      controller.timedOut = true
+      fetchController.abort()
+    }, 60000)
 
     let res: Response
     try {
@@ -139,6 +150,7 @@ async function streamOpenAICompatible(input: {
         },
         body: JSON.stringify(body)
       })
+      controller.timedOut = false
     } finally {
       clearTimeout(fetchTimeout)
       controller.signal.removeEventListener('abort', onParentAbort)
@@ -256,6 +268,9 @@ export async function sendMessage(payload: AISendPayload): Promise<void> {
   const provider = getProvider(payload.providerId)
   if (!provider.apiKey && payload.providerId !== 'ollama') throw new Error('请先配置 API Key')
 
+  // AI 配置是全局的：记住本次使用的服务商 / 模型，下次打开 app 直接回来
+  savePreferences({ lastProviderId: payload.providerId, lastModelId: payload.modelId })
+
   let conversationId = payload.conversationId
   if (!conversationId) {
     const title = payload.content.slice(0, 30).replace(/\s+/g, ' ') || '新对话'
@@ -297,7 +312,8 @@ export async function sendMessage(payload: AISendPayload): Promise<void> {
     send({ type: 'done', conversationId, messageId: assistant.id })
   } catch (e: any) {
     if (e.name === 'AbortError') {
-      send({ type: 'done', conversationId, messageId: assistant.id, message: '已停止生成' })
+      const reason: 'stopped' | 'timeout' = controller.timedOut ? 'timeout' : 'stopped'
+      send({ type: 'done', conversationId, messageId: assistant.id, reason })
       return
     }
     send({ type: 'error', conversationId, messageId: assistant.id, message: e.message })

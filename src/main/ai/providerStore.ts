@@ -8,6 +8,38 @@ interface StoredProvider extends AIProviderConfig {
 }
 
 const SETTINGS_PATH = () => join(app.getPath('userData'), 'ai-providers.json')
+// 全局偏好（上次使用的服务商 / 模型）。与 ai-providers.json 分开存，
+// 避免和 preset id 撞键，也便于单独读写。
+const PREFS_PATH = () => join(app.getPath('userData'), 'ai-prefs.json')
+
+export interface AIPreferences {
+  lastProviderId?: string
+  lastModelId?: string
+}
+
+function readPrefs(): AIPreferences {
+  try {
+    if (!existsSync(PREFS_PATH())) return {}
+    const parsed = JSON.parse(readFileSync(PREFS_PATH(), 'utf8'))
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch { return {} }
+}
+
+function writePrefs(prefs: AIPreferences): void {
+  try { writeFileSync(PREFS_PATH(), JSON.stringify(prefs, null, 2), 'utf8') } catch { /* 忽略写入失败 */ }
+}
+
+export function getPreferences(): AIPreferences {
+  return readPrefs()
+}
+
+export function savePreferences(patch: AIPreferences): AIPreferences {
+  const next = { ...readPrefs() }
+  if (patch.lastProviderId) next.lastProviderId = patch.lastProviderId
+  if (patch.lastModelId) next.lastModelId = patch.lastModelId
+  writePrefs(next)
+  return next
+}
 
 export const PROVIDER_PRESETS: AIProviderPreset[] = [
   {

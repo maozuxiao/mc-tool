@@ -29,8 +29,36 @@
   border-bottom: 1px solid var(--animal-line);
   font-weight: 700;
 }
-.ai-sidebar-head button { height: 30px; white-space: nowrap; }
+/* .mq-btn 自带 padding: 9px 15px，直接加 height:30px 会让内容区被压成 12px、
+   文字挤在顶部（总高被撑到 48px）。这里显式改成 flex 居中 + border-box。 */
+.ai-sidebar-head button {
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 14px;
+  box-sizing: border-box;
+  line-height: 1;
+  white-space: nowrap;
+}
 .ai-history { flex: 1; overflow-y: auto; padding: 8px; }
+/* 左下角固定放 Markdown 编辑器入口，不随历史列表滚动 */
+.ai-sidebar-foot {
+  border-top: 1px solid var(--animal-line);
+  padding: 10px;
+  display: flex;
+}
+.ai-md-editor-btn {
+  flex: 1;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
+  box-sizing: border-box;
+  line-height: 1;
+  font-size: 12.5px;
+}
 .ai-history-item {
   display: flex;
   align-items: center;
@@ -157,6 +185,23 @@
 }
 .ai-message { display: flex; gap: 10px; max-width: 92%; }
 .ai-message.user { align-self: flex-end; flex-direction: row-reverse; }
+/* 气泡 + 复制按钮竖排，复制按钮不会挤到头像那一列 */
+.ai-message-body { display: flex; flex-direction: column; gap: 5px; min-width: 0; flex: 1; }
+.ai-message-actions { display: flex; }
+.ai-message.user .ai-message-actions { justify-content: flex-end; }
+.ai-copy-btn {
+  border: 0;
+  background: transparent;
+  color: var(--animal-text-soft);
+  font-size: 11.5px;
+  padding: 2px 6px;
+  border-radius: 8px;
+  cursor: pointer;
+  opacity: .75;
+  transition: opacity .12s, background .12s;
+}
+.ai-copy-btn:hover:not(:disabled) { background: #f2ecdf; opacity: 1; }
+.ai-copy-btn:disabled { opacity: .35; cursor: not-allowed; }
 .ai-avatar {
   width: 34px;
   height: 34px;

@@ -10,7 +10,11 @@ import { useStore } from '../../store'
 interface ProviderBundle {
   providers: AIProviderConfig[]
   suggestions: Record<string, string[]>
+  // 全局偏好：上次使用的服务商 / 模型，跨会话、跨启动恢复
+  preferences?: { lastProviderId?: string; lastModelId?: string }
 }
+
+const MD_EDITOR_URL = 'https://maozuxiao.github.io/Streamax/Tools/KattyBB_MD_Editor/'
 
 interface Props {
   disabled: boolean
@@ -37,6 +41,12 @@ export function ChatPanel({ disabled }: Props) {
   const bottomRef = useRef<HTMLDivElement | null>(null)
   // 每次发送生成，新会话还没拿到 conversationId 时也能靠它取消
   const requestIdRef = useRef<string>('')
+  // 是否已完成「按上次配置初始化」：AI 配置是全局的，只恢复一次，
+  // 之后切换会话不再改动 provider / model。
+  const initializedRef = useRef(false)
+  // 刚恢复出来的 providerId：切换 provider 的副作用会重置模型，
+  // 恢复出来的模型不能被它覆盖掉。
+  const skipModelResetRef = useRef<string | null>(null)
 
   const selectedProvider = providers.providers.find(p => p.id === providerId)
 
@@ -48,7 +58,18 @@ export function ChatPanel({ disabled }: Props) {
     try {
       const data = await window.mcApi.ai.getProviders() as ProviderBundle
       setProviders(data)
-      setProviderId(prev => prev || data.providers.find(p => p.hasApiKey)?.id || data.providers[0]?.id || '')
+      if (!initializedRef.current && data.providers.length) {
+        const prefId = data.preferences?.lastProviderId
+        // 上次使用的服务商必须仍然在预设列表里（预设可能被改名/移除）
+        const restored = prefId ? data.providers.find(p => p.id === prefId) : undefined
+        const fallback = data.providers.find(p => p.hasApiKey) || data.providers[0]
+        const nextProviderId = restored?.id || fallback?.id || ''
+        setProviderId(nextProviderId)
+        const prefModel = data.preferences?.lastModelId
+        setModelId(prefModel && restored ? prefModel : (restored?.defaultModel || fallback?.defaultModel || ''))
+        skipModelResetRef.current = nextProviderId
+        initializedRef.current = true
+      }
     } catch (e: any) { setNotice(e.message) }
   }, [])
 
@@ -86,12 +107,25 @@ export function ChatPanel({ disabled }: Props) {
         }))
       }
       if (event.type === 'error') { setNotice(event.message || t('aiRequestFailed')); setStreaming(false); setStopping(false) }
-      if (event.type === 'done') { setStreaming(false); setStopping(false) }
+      if (event.type === 'done') {
+        setStreaming(false)
+        setStopping(false)
+        if (event.reason === 'timeout') setNotice(t('aiTimeout'))
+        else if (event.reason === 'stopped') setNotice(t('aiStopped'))
+      }
     })
   }, [refreshConversations, refreshProviders])
 
   useEffect(() => {
-    if (providerId && selectedProvider) {
+    if (!providerId) return
+    // 初始化恢复出来的这一次，模型已按上次配置设好，不能再被默认模型覆盖
+    if (skipModelResetRef.current === providerId) {
+      skipModelResetRef.current = null
+      setModelOptions((providers.suggestions[providerId] || []).slice())
+      setApiKey('')
+      return
+    }
+    if (selectedProvider) {
       setModelId(selectedProvider.defaultModel)
       setModelOptions((providers.suggestions[providerId] || []).slice())
       setApiKey('')
@@ -105,8 +139,8 @@ export function ChatPanel({ disabled }: Props) {
       const data = await window.mcApi.ai.getConversation(id)
       setConversationId(id)
       setMessages(data.messages)
-      setProviderId(data.conversation.providerId)
-      setModelId(data.conversation.modelId)
+      // 注意：AI 配置（服务商 / 模型）是全局的，不随会话切换而改变。
+      // 历史会话仍然用它当时记录的服务商与模型，只有「当前工具栏选择」保持全局。
     } catch (e: any) { setNotice(e.message) }
   }
 
@@ -232,6 +266,15 @@ export function ChatPanel({ disabled }: Props) {
             </div>
           ))}
         </div>
+        <div className="ai-sidebar-foot">
+          <button
+            className="mq-btn ai-md-editor-btn"
+            title={t('aiMdEditorTip')}
+            onClick={() => window.mcApi.openExternal(MD_EDITOR_URL)}
+          >
+            {t('aiMdEditor')}
+          </button>
+        </div>
       </aside>
 
       <section className="ai-main card">
@@ -267,7 +310,9 @@ export function ChatPanel({ disabled }: Props) {
             <input type="checkbox" checked={useSkill} onChange={e => setUseSkill(e.target.checked)} />
             MC Skill
           </label>
-          <button className="mq-btn accent" onClick={() => setShowSettings(v => !v)}>{t('aiSettings')}</button>
+          <button className="mq-btn accent" onClick={() => setShowSettings(v => !v)}>
+            {showSettings ? t('aiCollapseSettings') : t('aiSettings')}
+          </button>
         </div>
 
         {showSettings && (
@@ -370,16 +415,57 @@ function MarkdownLink({ href, children }: { href?: string; children?: React.Reac
   return <a href={href} onClick={handleClick}>{children}</a>
 }
 
+// 复制优先用 Clipboard API；file:// 协议下它可能不可用，回退到 execCommand
+async function copyText(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+      return true
+    }
+  } catch { /* 继续走回退方案 */ }
+  try {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.style.position = 'fixed'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.select()
+    const ok = document.execCommand('copy')
+    document.body.removeChild(ta)
+    return ok
+  } catch { return false }
+}
+
 function MessageItem({ message }: { message: AIMessage }) {
   const t = useStore(s => s.t)
+  const [copied, setCopied] = useState(false)
+  const copyTimer = useRef<number | null>(null)
+
+  useEffect(() => () => { if (copyTimer.current) window.clearTimeout(copyTimer.current) }, [])
+
+  const handleCopy = async () => {
+    const ok = await copyText(message.content || '')
+    if (!ok) return
+    setCopied(true)
+    if (copyTimer.current) window.clearTimeout(copyTimer.current)
+    copyTimer.current = window.setTimeout(() => setCopied(false), 1500)
+  }
+
   return (
     <div className={`ai-message ${message.role}`}>
       <div className="ai-avatar">{message.role === 'user' ? t('aiRoleUser') : 'AI'}</div>
-      <div className="ai-bubble">
-        {(message.toolRuns || []).map(run => <ToolRunCard key={run.id} run={run} />)}
-        {message.role === 'assistant'
-          ? <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize, rehypeHighlight]} components={{ a: MarkdownLink }}>{message.content}</ReactMarkdown>
-          : <div className="ai-plain">{message.content}</div>}
+      <div className="ai-message-body">
+        <div className="ai-bubble">
+          {(message.toolRuns || []).map(run => <ToolRunCard key={run.id} run={run} />)}
+          {message.role === 'assistant'
+            ? <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize, rehypeHighlight]} components={{ a: MarkdownLink }}>{message.content}</ReactMarkdown>
+            : <div className="ai-plain">{message.content}</div>}
+        </div>
+        <div className="ai-message-actions">
+          <button className="ai-copy-btn" onClick={handleCopy} disabled={!message.content}>
+            {copied ? `✓ ${t('aiCopied')}` : `⧉ ${t('aiCopy')}`}
+          </button>
+        </div>
       </div>
     </div>
   )
