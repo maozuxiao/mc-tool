@@ -1,6 +1,6 @@
 {
   "name": "mc-material-query",
-  "version": "1.0.26",
+  "version": "1.0.27",
   "description": "MC物料查询桌面端",
   "author": "Sean Mao",
   "main": "out/main/index.js",
@@ -15,12 +15,18 @@
   },
   "dependencies": {
     "animal-island-ui": "^1.4.0",
+    "better-sqlite3": "^13.0.3",
     "electron-updater": "^6.3.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "react-markdown": "^10.1.0",
+    "rehype-highlight": "^7.0.2",
+    "rehype-sanitize": "^6.0.0",
+    "remark-gfm": "^4.0.1",
     "zustand": "^4.5.5"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.3",

@@ -4,6 +4,7 @@ import { App } from './App'
 import { ErrorBoundary } from './ErrorBoundary'
 import 'animal-island-ui/style'
 import './styles.css'
+import './components/ai/ai-chat.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

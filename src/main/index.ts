@@ -8,6 +8,7 @@ import zlib from 'zlib'
 import { OA_LOGIN_URL, OA_ORIGIN } from '@shared/constants'
 import { IPC } from '@shared/types'
 import { initAutoUpdater } from './updater'
+import { registerAIIPC } from './ai/aiIpc'
 
 let mainWindow: BrowserWindow | null = null
 // 使用持久化 partition，让 OA 登录 Cookie 自动写入磁盘并跨启动保留。
@@ -572,6 +573,7 @@ app.whenReady().then(() => {
   app.setAppUserModelId(APP_ID)
   app.setName('MC物料查询')
   createWindow()
+  registerAIIPC()
   initAutoUpdater(mainWindow!)
 
   app.on('activate', () => {
@@ -902,7 +904,8 @@ async function landOaViaHttp(sess: Electron.Session, loginToken: string): Promis
         /SESSION|ROUTE|J_LANG|LTPATOKEN|TOKEN|UID|USER|LOGIN|SSO|OA_/.test(name)
     })
     for (const c of staleOa) {
-      try { await sess.cookies.remove(`https://${c.domain.replace(/^\./, '')}${c.path || '/'}`, c.name) } catch {}
+      // Electron 的 Cookie.domain 是 string | undefined，取值时需要兜底
+      try { await sess.cookies.remove(`https://${(c.domain || '').replace(/^\./, '')}${c.path || '/'}`, c.name) } catch {}
     }
     debugLog(`[HTTP-LAND] cleared ${staleOa.length} stale OA session cookies (kept IAM): [${staleOa.map(c => c.name + '@' + c.domain).join(',')}]`)
 

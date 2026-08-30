@@ -1,0 +1,3949 @@
+{
+ "source": "E:\\毛祖潇的知识库\\产品资料\\产品线\\摄像机\\AHD\\IMX307替代料号明细_260529.xlsx",
+ "note": "IMX307方案料号 -> F355等替代料号 映射表（静态参考，生命周期/库存以MC服务器为准）",
+ "count": 438,
+ "mapping": [
+  {
+   "original": "5051003100084",
+   "original_desc": null,
+   "replacement": "5151072100086",
+   "replacement_desc": "SVT-30F-AHD355-N-WIR6mm-A|CA4|V1.0|1080P|N制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|带红外|6mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用|配Z2支架和灯板",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA4",
+   "customer_code": null
+  },
+  {
+   "original": "5151001100019",
+   "original_desc": null,
+   "replacement": "5151070100054",
+   "replacement_desc": "SVT-A7620CP-1W1C-AIR2.8mm-A|CA1|V1.0|1080P|P制|锐明中文LOGO|白色|标准4芯航空头|0.5米|带音频|带红外|2.8mm镜头|配中文说明书|带独立包装|F355方案|C0001|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA1",
+   "customer_code": null
+  },
+  {
+   "original": "5151001100020",
+   "original_desc": null,
+   "replacement": "5151070100055",
+   "replacement_desc": "SVT-A7620CP-1W1C-AU2.8mm-A|CA1|V1.0|1080P|P制|锐明中文LOGO|白色|标准4芯航空头|0.5米|带音频|不带红外|2.8mm镜头|配中文说明书|带独立包装|F355方案|C0001|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA1",
+   "customer_code": null
+  },
+  {
+   "original": "5151001100021",
+   "original_desc": null,
+   "replacement": "5151070100056",
+   "replacement_desc": null,
+   "lifecycle": "[产品]量产",
+   "model": "CA1",
+   "customer_code": null
+  },
+  {
+   "original": "5151001100027",
+   "original_desc": null,
+   "replacement": "5151070100057",
+   "replacement_desc": "SVT-A7620CP-0G1E-AIR2.1mm-A|CA1|V1.0|1080P|P制|不带LOGO|灰绿色|标准4芯航空头|0.5米|带音频|带红外|2.1mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA1",
+   "customer_code": null
+  },
+  {
+   "original": "5151001100040",
+   "original_desc": null,
+   "replacement": "5151070100058",
+   "replacement_desc": "SVT-A7620CP-0G1E-AIR2.8mm-A|CA1|V1.0|1080P|P制|不带LOGO|灰绿色|标准4芯航空头|0.5米|带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA1",
+   "customer_code": null
+  },
+  {
+   "original": "5151001100057",
+   "original_desc": null,
+   "replacement": "5151070100059",
+   "replacement_desc": "SVT-A7620CP-1G1E-AIR2.8mm-A|CA1|V1.0|1080P|P制|锐明英文LOGO|灰绿色|标准4芯航空头|增加防脱松环|0.5米|带音频|带红外|2.8mm镜头|带独立包装|F355方案|E0001|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA1",
+   "customer_code": null
+  },
+  {
+   "original": "5151001100120",
+   "original_desc": null,
+   "replacement": "5151070100060",
+   "replacement_desc": "SVT-A7620CN-0W1E-AIR2.8mm-A|CA1|V1.0|1080P|N制|不带LOGO|白色|标准4芯航空头|0.5米|带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用|带区域标识",
+   "lifecycle": "[产品]量产",
+   "model": "CA1",
+   "customer_code": null
+  },
+  {
+   "original": "5151001100127",
+   "original_desc": null,
+   "replacement": "5151070100061",
+   "replacement_desc": "SVT-A7620CP-FW1C-AIR2.8mm-A|CA1|V1.0|1080P|P制|客户定制LOGO|白色|标准4芯航空头|0.5米|带音频|带红外|2.8mm镜头|配中文说明书|带独立包装|F355方案|C3453|客户定制|定制蓝色智达LOGO",
+   "lifecycle": "[产品]量产",
+   "model": "CA1",
+   "customer_code": null
+  },
+  {
+   "original": "5151001100128",
+   "original_desc": null,
+   "replacement": "5151070100062",
+   "replacement_desc": "SVT-A7620CP-FW1C-AU2.8mm-A|CA1|V1.0|1080P|P制|客户定制LOGO|白色|标准4芯航空头|0.5米|带音频|不带红外|2.8mm镜头|配中文说明书|带独立包装|F355方案|C3453|客户定制|定制蓝色智达LOGO",
+   "lifecycle": "[产品]量产",
+   "model": "CA1",
+   "customer_code": null
+  },
+  {
+   "original": "5151001100133",
+   "original_desc": null,
+   "replacement": "5151070100063",
+   "replacement_desc": "SVT-A7620CP-1B1C-AIR6mm-A|CA1|V1.0|1080P|P制|锐明中文LOGO|灰绿色|标准4芯航空头|0.5米|带音频|带红外|6mm镜头|配中文说明书|带独立包装|F355方案|C0001|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA1",
+   "customer_code": null
+  },
+  {
+   "original": "5151003100011",
+   "original_desc": null,
+   "replacement": "5151072100088",
+   "replacement_desc": "SVT-30F-AHD355-PM-WIR2.8mm-A|CA4|V1.0|1080P|P制|锐明中文LOGO|黑色|标准4芯航空头|0.5米|不带音频|带红外|2.8mm镜头|配中文说明书|带独立包装|F355方案|C0001|通用|镜像|配比亚迪定制支架",
+   "lifecycle": "[产品]量产",
+   "model": "CA4",
+   "customer_code": null
+  },
+  {
+   "original": "5151003100039",
+   "original_desc": null,
+   "replacement": "暂不申请",
+   "replacement_desc": null,
+   "lifecycle": "[产品]量产",
+   "model": "CA4",
+   "customer_code": "3913"
+  },
+  {
+   "original": "5151003100040",
+   "original_desc": null,
+   "replacement": "暂不申请",
+   "replacement_desc": null,
+   "lifecycle": "[产品]量产",
+   "model": "CA4",
+   "customer_code": "7028"
+  },
+  {
+   "original": "5151003100090",
+   "original_desc": null,
+   "replacement": "5151072100087",
+   "replacement_desc": "SVT-30F-AHD355-P-WIR2.8mm-A|CA4|V1.0|1080P|P制|锐明英文LOGO|黑色|标准4芯航空头|0.5米|不带音频|带红外|2.8mm镜头|带独立包装|F355方案|E0001|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA4",
+   "customer_code": null
+  },
+  {
+   "original": "5151003100102",
+   "original_desc": null,
+   "replacement": "5151072100089",
+   "replacement_desc": "SVT-ASM-AHD355-P-WIR2.8mm-A|CA4|V1.0|1080P|P制|锐明英文LOGO|黑色|标准4芯航空头|0.5米|不带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|F355方案|E0001|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA4",
+   "customer_code": null
+  },
+  {
+   "original": "5151003100106",
+   "original_desc": null,
+   "replacement": "5151072100090",
+   "replacement_desc": "SVT-30F-AHD355-N-WIR2.8mm-A|CA4|V1.0|1080P|N制|不带LOGO|黑色|标准4芯航空头|0.5m|不带音频|带红外|2.8mm镜头|带独立包装|F355方案|E1450|客户定制|配比亚迪定制支架",
+   "lifecycle": "[产品]量产",
+   "model": "CA4",
+   "customer_code": null
+  },
+  {
+   "original": "5151003100109",
+   "original_desc": null,
+   "replacement": "5151072100091",
+   "replacement_desc": "SVT-30F-AHD355-N-WIR2.5mm-A|CA4|V1.0|1080P|N制|不带LOGO|黑色|标准4芯航空线|0.5米|不带音频|带红外|2.5mm镜头|配英文说明书|带独立包装|F355方案|E1450|客户定制|配比亚迪定制支架",
+   "lifecycle": "[产品]量产",
+   "model": "CA4",
+   "customer_code": null
+  },
+  {
+   "original": "5151003100127",
+   "original_desc": null,
+   "replacement": "5151072100092",
+   "replacement_desc": "SVT-A7620VN-0B1E-WIR2.8mm-A|CA4|V1.0|1080P|N制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA4",
+   "customer_code": null
+  },
+  {
+   "original": "5151003100136",
+   "original_desc": null,
+   "replacement": "5151072100093",
+   "replacement_desc": "SVT-30F-AHD355-P-WIR2.8mm-A|CA4|V1.0|1080P|P制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|带红外|2.8mm镜头|配中文说明书|带独立包装|F355方案|C0000|通用",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA4",
+   "customer_code": null
+  },
+  {
+   "original": "5151010100020",
+   "original_desc": null,
+   "replacement": "5151095100030",
+   "replacement_desc": "SVT-A7620AN-0W1E-AIR2.5mm-A|CA2|V1.0|1080P|N制|不带LOGO|白色|标准4芯航空头|0.5米|带音频|带红外|2.5mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA2",
+   "customer_code": null
+  },
+  {
+   "original": "5151010100034",
+   "original_desc": null,
+   "replacement": "5151095100029",
+   "replacement_desc": "SVT-A7620AN-1W1E-AIR2.8mm-A|CA2|V1.0|1080P|N制|客户定制LOGO|白色|标准4芯航空头|0.5米|带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|F355方案|E4028|客户定制",
+   "lifecycle": "[产品]量产",
+   "model": "CA2",
+   "customer_code": null
+  },
+  {
+   "original": "5151010100035",
+   "original_desc": null,
+   "replacement": "5151095100026",
+   "replacement_desc": "SVT-A7620AP-0W1E-AU2.8mm-A|CA2|V1.0|1080P|P制|不带LOGO|白色|标准4芯航空头|0.5米|带音频|不带红外|2.8mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA2",
+   "customer_code": null
+  },
+  {
+   "original": "5151010100036",
+   "original_desc": null,
+   "replacement": "5151095100028",
+   "replacement_desc": "SVT-A7620AN-1W1E-AIR2.5mm-A|CA2|V1.0|1080P|N制|客户定制LOGO|白色|标准4芯航空头|0.5米|带音频|带红外|2.5mm镜头|配英文说明书|带独立包装|F355方案|E4028|客户定制",
+   "lifecycle": "[产品]量产",
+   "model": "CA2",
+   "customer_code": null
+  },
+  {
+   "original": "5151010100037",
+   "original_desc": null,
+   "replacement": "5151095100027",
+   "replacement_desc": "SVT-A7620AN-1W1E-AIR2.5mm-A|CA2|V1.0|1080P|N制|不带LOGO|白色|标准4芯航空头|0.5米|带音频|带红外|2.5mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA2",
+   "customer_code": null
+  },
+  {
+   "original": "5151010100038",
+   "original_desc": null,
+   "replacement": "5151095100031",
+   "replacement_desc": "SVT-A7620AN-1W1E-AIR2.5mm-A|CA2|V1.0|1080P|N制|锐明英文LOGO|白色|标准4芯航空头|0.5米|带音频|带红外|2.5mm镜头|配英文说明书|带独立包装|F355方案|E0001|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA2",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100041",
+   "original_desc": null,
+   "replacement": "5151014100399",
+   "replacement_desc": "SVT-A7620GP-0W1ND-WIR3.6mm-A|MINI C24|V1.0|1080P|P制|不带LOGO|白色|标准4芯航空头|0.5米|不带音频|带红外|3.6mm镜头|无说明书|带独立包装|D面安装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100047",
+   "original_desc": null,
+   "replacement": "5151014100400",
+   "replacement_desc": "SVT-A7620GP-0W1CA-WIR3.6mm-A|MINI C24|V1.0|1080P|P制|不带LOGO|白色|标准4芯航空头|0.5米|不带音频|带红外|3.6mm镜头|配中文说明书|带独立包装|A面安装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100048",
+   "original_desc": null,
+   "replacement": "5151014100401",
+   "replacement_desc": "SVT-A7620GP-0W1CB-WIR3.6mm-A|MINI C24|V1.0|1080P|P制|不带LOGO|白色|标准4芯航空头|0.5米|不带音频|带红外|3.6mm镜头|配中文说明书|带独立包装|B面安装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100061",
+   "original_desc": null,
+   "replacement": "5151014100402",
+   "replacement_desc": "SVT-A7620GP-1Y1ED-WIR2.8mm-A|MINI C24|V1.0|1080P|P制|锐明英文LOGO|中东定制黄色|标准4芯航空头|0.5|不带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|D面安装|F355方案|E6049|客户定制",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100064",
+   "original_desc": null,
+   "replacement": "5151014100403",
+   "replacement_desc": "SVT-A7620GP-1W1ED-WIR2.1mm-A|MINI C24|V1.0|1080P|P制|锐明英文LOGO|白色|标准4芯航空头|0.5米|不带音频|带红外|2.1mm镜头|配英文说明书|带独立包装|D面安装|F355方案|E0001|通用",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100066",
+   "original_desc": null,
+   "replacement": "5151014100404",
+   "replacement_desc": "SVT-A7620GP-1W1CD-WIR2.8mm-A|MINI C24|V1.0|1080P|P制|锐明英文LOGO|白色|标准4芯航空头|0.5米|带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|D面安装|F355方案|E0001|通用",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100080",
+   "original_desc": null,
+   "replacement": "5151014100405",
+   "replacement_desc": "SVT-A7620GN-0W2EC-AIR2.1mm-A|MINI C24|V1.0|1080P|N制|不带LOGO|白色|标准4芯航空头|0.5米|带音频|带红外|2.1mm镜头|定制说明书|带独立包装|定制包装盒及标贴|C面安装|F355方案|E3927|客户定制",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": "3927"
+  },
+  {
+   "original": "5151014100084",
+   "original_desc": null,
+   "replacement": "5151014100406",
+   "replacement_desc": "SVT-A7620GP-0W1ED-WIR2.1mm-A|MINI C24|V1.0|1080P|P制|不带LOGO|白色|标准4芯航空头|0.5米|不带音频|带红外|2.1mm镜头|配英文说明书|带独立包装|D面安装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100086",
+   "original_desc": null,
+   "replacement": "5151014100407",
+   "replacement_desc": "SVT-A7620GN-0W1EDM-WIR3.6mm-A|MINI C24|V1.0|1080P|N制|不带LOGO|白色|标准4芯航空头|0.5米|不带音频|带红外|3.6mm镜头|带独立包装|D面安装|F355方案|E0000|通用|镜像",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100094",
+   "original_desc": null,
+   "replacement": "5151014100408",
+   "replacement_desc": "SVT-A7620GP-0W1CA-WIR2.8mm-A|MINI C24|V1.0|1080P|P制|不带LOGO|白色|标准4芯航空头|0.5米|不带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|A面安装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100095",
+   "original_desc": null,
+   "replacement": "5151014100411",
+   "replacement_desc": "SVT-A7620GP-0W1EB-WIR2.8mm-A|MINI C24|V1.0|1080P|P制|不带LOGO|白色|标准4芯航空头|0.5米|不带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|B面安装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100096",
+   "original_desc": null,
+   "replacement": "5151014100409",
+   "replacement_desc": "SVT-A7620GP-0W1EC-WIR2.8mm-A|MINI C24|V1.0|1080P|P制|不带LOGO|白色|标准4芯航空头|0.5米|不带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|C面安装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100097",
+   "original_desc": null,
+   "replacement": "5151014100410",
+   "replacement_desc": "SVT-A7620GP-0W1ED-WIR2.8mm-A|MINI C24|V1.0|1080P|P制|不带LOGO|白色|标准4芯航空头|0.5米|不带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|D面安装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100104",
+   "original_desc": null,
+   "replacement": "5151014100412",
+   "replacement_desc": "(K)SVT-A7620GN-7Y9EA-WIR8mm-A|MINI C24|V1.0|1080P|N制|客户定制LOGO|黄色|190定制航空线|0.5米|不带音频|带红外|8mm镜头|客户定制包装|A面安装|F355方案|E3999|客户定制|客户定制支架",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": "3999"
+  },
+  {
+   "original": "5151014100105",
+   "original_desc": null,
+   "replacement": "5151014100413",
+   "replacement_desc": "(K)SVT-A7620GN-7Y9EB-WIR16mm-A|MINI C24|V1.0|1080P|N制|客户定制LOGO|黄色|190定制航空线|0.5米|不带音频|带红外|16mm镜头|客户定制包装|定制标贴|B面安装|F355方案|E3999|客户定制|带区域标识|客户定制支架|定制标贴型号SV-EXT16-1080S|客户定制支架",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": "3999"
+  },
+  {
+   "original": "5151014100106",
+   "original_desc": null,
+   "replacement": "5151014100414",
+   "replacement_desc": "(K)SVT-A7620GN-7Y9EB-WIR8mm-A|MINI C24|V1.0|1080P|N制|客户定制LOGO|黄色|190定制航空线|0.5米|不带音频|带红外|8mm镜头|客户定制包装|B面安装|F355方案|E3999|客户定制|带区域标识|定制标贴型号SV-EXT8-1080S|客户定制支架",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": "3999"
+  },
+  {
+   "original": "5151014100107",
+   "original_desc": null,
+   "replacement": "5151014100416",
+   "replacement_desc": "(K)SVT-A7620GN-7W9EA-WIR3.6mm-A|MINI C24|V1.0|1080P|N制|客户定制LOGO|白色|4190定制LOGO|0.5米|不带音频|带红外|3.6mm镜头|带独立包装|定制标贴|A面安装|F355方案|E3999|客户定制|带区域标识|客户定制支架",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": "3999"
+  },
+  {
+   "original": "5151014100108",
+   "original_desc": null,
+   "replacement": "5151014100415",
+   "replacement_desc": "(K)SVT-A7620GN-7W9EB-WIR3.6mm-A|MINI C24|V1.0|1080P|N制|客户定制LOGO|白色|190定制航空线|0.5米|不带音频|带红外|3.6mm镜头|定制说明书|带独立包装|定制标贴|B面安装|F355方案|E3999|客户定制|带区域标识|带Made In China标识|客户定制标贴|客户定制支架",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": "3999"
+  },
+  {
+   "original": "5151014100109",
+   "original_desc": null,
+   "replacement": "5151014100417",
+   "replacement_desc": "(K)SVT-A7620GN-7Y9EA-WIR16mm-A|MINI C24|V1.0|1080P|N制|客户定制LOGO|黄色|190定制航空线|0.5米|不带音频|带红外|16mm镜头|客户定制包装|A面安装|F355方案|E3999|客户定制|带区域标识|带客户定制型号：SV-EXT16-1080C|客户定制支架",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": "3999"
+  },
+  {
+   "original": "5151014100119",
+   "original_desc": null,
+   "replacement": "5151014100418",
+   "replacement_desc": "SVT-A7620GP-1W1EC-WIR2.8mm-A|MINI C24|V1.0|1080P|P制|锐明英文LOGO|白色|标准4芯航空头|0.5米|不带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|C面安装|F355方案|E0001|通用",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100122",
+   "original_desc": null,
+   "replacement": "5151014100420",
+   "replacement_desc": "SVT-A7620GP-0W1CD-WIR3.6mm-A|MINI C24|V1.0|1080P|P制|不带LOGO|白色|标准4芯航空头|0.5米|不带音频|带红外|3.6mm镜头|配中文说明书|带独立包装|D面安装|F355方案|C0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100128",
+   "original_desc": null,
+   "replacement": "5151014100419",
+   "replacement_desc": "SVT-A7620GP-1W1EA-WIR2.8mm-A|MINI C24|V1.0|1080P|P制|锐明英文LOGO|白色|标准4芯航空头|0.5米|不带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|A面安装|F355方案|E0001|通用",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100130",
+   "original_desc": null,
+   "replacement": "5151014100421",
+   "replacement_desc": "SVT-A7620GP-1W1ED-WIR2.8mm-A|MINI C24|V1.0|1080P|P制|锐明英文LOGO|白色|标准4芯航空头|0.5米|不带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|D面安装|F355方案|E0001|通用",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100138",
+   "original_desc": null,
+   "replacement": null,
+   "replacement_desc": null,
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": "申请后无出货记录"
+  },
+  {
+   "original": "5151014100139",
+   "original_desc": null,
+   "replacement": null,
+   "replacement_desc": null,
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": "申请后无出货记录"
+  },
+  {
+   "original": "5151014100142",
+   "original_desc": null,
+   "replacement": "5151014100424",
+   "replacement_desc": "SVT-A7620GP-1W1ND-WIR3.6mm-A|MINI C24|V1.0|1080P|P制|客户定制LOGO|白色|标准4芯航空头|0.5米|不带音频|带红外|3.6mm镜头|无说明书|带独立包装|D面安装|F355方案|C1028|客户定制",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100143",
+   "original_desc": null,
+   "replacement": "5151014100425",
+   "replacement_desc": "SVT-A7620GP-1WJCB-WIR6mm-A|MINI C24|V1.0|1080P|P制|锐明中文LOGO|白色|4芯迷你航空头|0.5米|不带音频|带红外|6mm镜头|配中文说明书|带独立包装|B面安装|F355方案|C0001|通用",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100150",
+   "original_desc": null,
+   "replacement": "5151014100426",
+   "replacement_desc": "SVT-A7620GN-0W2EB-WIR8mm-A|MINI C24|V1.0|1080P|N制|不带LOGO|白色|4PIN小5559转接线|0.2米|不带音频|带红外|8mm镜头|定制说明书|带独立包装|定制包装盒及标贴|B面安装|F355方案|E3927|客户定制|带区域标识|定制型号：CAMICAMTXM12AHD-8MM-B",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": "3927"
+  },
+  {
+   "original": "5151014100153",
+   "original_desc": null,
+   "replacement": "5151014100427",
+   "replacement_desc": "(K)SVT-A7620GN-0W2EB-WIR3.6mm-A|MINI C24|V1.0|1080P|N制|不带LOGO|白色|4PIN小5559转接线|0.2米|不带音频|带红外|3.6mm镜头|定制说明书|带独立包装|定制包装盒及标贴|B面安装|F355方案|E3927|客户定制|带区域标识|CAMICAMTXM12AHD-3.6MM-B",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": "3927"
+  },
+  {
+   "original": "5151014100154",
+   "original_desc": null,
+   "replacement": "5151014100428",
+   "replacement_desc": "SVT-A7620GN-0W2EA-WIR3.6mm-A|MINI C24|V1.0|1080P|N制|不带LOGO|白色|4PIN小5559转接线|0.2米|不带音频|带红外|3.6mm镜头|定制说明书|带独立包装|定制包装盒及标贴|A面安装|F355方案|E3927|客户定制|带区域标识|CAMICAMTXM12AHD-3.6MM",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": "3927"
+  },
+  {
+   "original": "5151014100158",
+   "original_desc": null,
+   "replacement": "5151014100429",
+   "replacement_desc": "SVT-A7620GN-0W1EA-WIR3.6mm-A|MINI C24|V1.0|1080P|N制|不带LOGO|白色|标准4芯航空头|0.5米|不带音频|带红外|3.6mm镜头|配英文说明书|带独立包装|A面安装|F355方案|E0000|通用|带区域标识",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100159",
+   "original_desc": null,
+   "replacement": "5151014100430",
+   "replacement_desc": "SVT-A7620GN-0W1EB-WIR3.6mm-A|MINI C24|V1.0|1080P|N制|不带LOGO|白色|标准4芯航空头|0.5米|不带音频|带红外|3.6mm镜头|配英文说明书|带独立包装|B面安装|F355方案|E0000|通用|带区域标识",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100160",
+   "original_desc": null,
+   "replacement": "5151014100432",
+   "replacement_desc": "SVT-A7620GN-0W1EB-WIR2.8mm-A|MINI C24|V1.0|1080P|N制|不带LOGO|白色|标准4芯航空头|0.5米|不带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|B面安装|F355方案|E0000|通用|带区域标识",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100161",
+   "original_desc": null,
+   "replacement": "5151014100431",
+   "replacement_desc": "SVT-A7620GN-0W1EA-WIR2.8mm-A|MINI C24|V1.0|1080P|N制|不带LOGO|白色|标准4芯航空头|0.5米|不带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|A面安装|F355方案|E0000|通用|带区域标识",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100167",
+   "original_desc": null,
+   "replacement": "5151014100433",
+   "replacement_desc": "SVT-A7620GP-1Y1ED-WIR2.8mm-A|MINI C24|V1.0|1080P|P制|锐明英文LOGO|中东黄色|标准4芯航空头|0.5米|不带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|D面安装|F355方案|E0001|通用",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100172",
+   "original_desc": null,
+   "replacement": "5151014100434",
+   "replacement_desc": "(K)SVT-A7620GN-7Y9EA-WIR25mm-A|MINI C24|V1.0|1080P|N制|客户定制LOGO|黄色|190定制航空线|0.5米|不带音频|带红外|25mm|定制说明书|带独立包装|A面安装|F355方案|E3999|客户定制|带区域标识|定制标贴SV-EXT25-1080C|客户定制支架",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": "3999"
+  },
+  {
+   "original": "5151014100173",
+   "original_desc": null,
+   "replacement": "5151014100435",
+   "replacement_desc": "(K)SVT-A7620GN-7Y9EB-WIR25mm-A|MINI C24|V1.0|1080P|N制|客户定制LOGO|黄色|190定制航空线|0.5米|不带音频|带红外|25mm|定制说明书|客户定制包装|B面安装|F355方案|E3999|客户定制|带区域标识|定制标贴SV-EXT25-1080S|客户定制支架",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": "3999"
+  },
+  {
+   "original": "5151014100180",
+   "original_desc": null,
+   "replacement": "5151014100436",
+   "replacement_desc": "(K)SVT-A7620GN-7W9EB-WIR6mm-A|MINI C24|V1.0|1080P|N制|客户定制LOGO|白色|190定制航空线|0.5米|不带音频|带红外|6mm镜头|定制说明书|客户定制包装|定制包装盒|B面安装|F355方案|E3927|客户定制|带区域标识|定制标贴SV-EXT6-1080S|客户定制支架",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": "3999"
+  },
+  {
+   "original": "5151014100186",
+   "original_desc": null,
+   "replacement": "5151014100437",
+   "replacement_desc": "SVT-A7620GN-1B1N-UIR2.8mm-A|MINI C24|V1.0|1080P|N制|锐明英文LOGO|黑色|标准4芯航空头|0.5米|不带音频|带红外|2.8mm镜头|无说明书|带独立包装|D面安装|F355方案|E0001|通用|带镜像",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100191",
+   "original_desc": null,
+   "replacement": "5151014100438",
+   "replacement_desc": "SVT-A7620GP-1B1ED-WIR2.8mm-A|MINI C24|V1.0|1080P|P制|客户定制LOGO|黑色|标准4芯航空头|增加防脱松环|0.5米|不带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|D面安装|F355方案|E136033|客户定制|锐明英文LOGO白色翻转180°",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100192",
+   "original_desc": null,
+   "replacement": "5151014100439",
+   "replacement_desc": "SVT-A7620GP-0WJEB-WIR3.6mm-A|MINI C24|V1.0|1080P|P制|不带LOGO|白色|4芯迷你航空头|0.5米|不带音频|带红外|3.6mm镜头|配英文说明书|带独立包装|B面安装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100193",
+   "original_desc": null,
+   "replacement": "5151014100440",
+   "replacement_desc": "SVT-A7620GP-0W1ED-WU2.8mm-A|MINI C24|V1.0|1080P|P制|不带LOGO|白色|标准4芯航空头|0.5米|不带音频|不带红外|2.8mm镜头|配英文说明书|带独立包装|D面安装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100198",
+   "original_desc": null,
+   "replacement": "5151014100441",
+   "replacement_desc": "SVT-A7620GN-MWJEA-WIR2.8mm-A|MINI C24|V1.0|1080P|N制|客户定制LOGO|白色|标准4芯航空头|0.5米|不带音频|带红外|2.8mm镜头|带独立包装|定制标贴|A面安装|F355方案|E3989|客户定制",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100199",
+   "original_desc": null,
+   "replacement": "5151014100442",
+   "replacement_desc": "SVT-A7620GN-0W1ED-WIR2.8mm-A|MINI C24|V1.0|1080P|N制|不带LOGO|白色|标准4芯航空头|0.5米|不带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|D面安装|F355方案|E0000|通用|带区域标识",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100200",
+   "original_desc": null,
+   "replacement": "5151014100443",
+   "replacement_desc": "SVT-A7620GN-MWJNB-WIR2.8mm-A|MINI C24|V1.0|1080P|N制|客户定制LOGO|白色|标准4芯航空头|0.5米|不带音频|带红外|2.8mm镜头|无说明书|带独立包装|定制标贴|B面安装|F355方案|E3989|客户定制",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100203",
+   "original_desc": null,
+   "replacement": null,
+   "replacement_desc": null,
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": "申请后无出货记录"
+  },
+  {
+   "original": "5151014100209",
+   "original_desc": null,
+   "replacement": "5151014100445",
+   "replacement_desc": "SVT-A7620GP-1B1ED-WIR2.8mm-A|MINI C24|V1.0|1080P|P制|客户定制LOGO|黑色|标准4芯航空头|增加防脱松环|0.5米|不带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|D面安装|F355方案|E136033|客户定制|镜像|锐明英文LOGO白色翻转180°",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100210",
+   "original_desc": null,
+   "replacement": "5151014100446",
+   "replacement_desc": "SVT-A7620GN-0W1EA-WIR8mm-A|MINI C24|V1.0|1080P|N制|不带LOGO|白色|标准4芯航空头|0.5米|不带音频|带红外|8mm镜头|配英文说明书|带独立包装|A面安装|F355方案|E0000|通用|带区域标识",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100211",
+   "original_desc": null,
+   "replacement": "5151014100447",
+   "replacement_desc": "SVT-A7620GN-0W1EB-WIR8mm-A|MINI C24|V1.0|1080P|N制|不带LOGO|白色|标准4芯航空头|0.5米|不带音频|带红外|8mm镜头|配英文说明书|带独立包装|B面安装|F355方案|E0000|通用|带区域标识",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100215",
+   "original_desc": null,
+   "replacement": "5151014100448",
+   "replacement_desc": "(K)SVT-A7620GN-0W2ED-WIR3.6mm-A|MINI C24|V1.0|1080P|N制|不带LOGO|白色|4PIN小5559转接线|0.2米|不带音频|带红外|3.6mm镜头|定制说明书|带独立包装|定制包装盒及标贴|D面安装|F355方案|E3927|客户定制|带区域标识|定制型号CAMICAMTXM12AHD-3.6MM-H",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": "3927"
+  },
+  {
+   "original": "5151014100216",
+   "original_desc": null,
+   "replacement": "5151014100449",
+   "replacement_desc": "SVT-A7620GN-0W1EA-WIR3.6mm-A|MINI C24|V1.0|1080P|N制|不带LOGO|白色|标准4芯航空头|0.5米|不带音频|带红外|3.6mm镜头|配英文说明书|带独立包装|定制标贴|A面安装|F355方案|E4019|客户定制",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100217",
+   "original_desc": null,
+   "replacement": "5151014100450",
+   "replacement_desc": "SVT-A7620GN-0W1EB-WIR3.6mm-A|MINI C24|V1.0|1080P|N制|不带LOGO|白色|标准4芯航空头|0.5米|不带音频|带红外|3.6mm镜头|配英文说明书|带独立包装|定制标贴|B面安装|F355方案|E4019|客户定制",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100218",
+   "original_desc": null,
+   "replacement": "5151014100451",
+   "replacement_desc": "(K)SVT-A7620GN-7W9ED-WIR3.6mm-A|MINI C24|V1.0|1080P|N制|客户定制LOGO|白色|190定制航空线|0.5米|不带音频|带红外|3.6mm镜头|定制说明书|带独立包装|定制包装盒及标贴|D面安装|F355方案|E3999|客户定制|镜像|带区域标识|定制标贴型号SV-EXT4-1080R|客户定制支架",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": "3999"
+  },
+  {
+   "original": "5151014100219",
+   "original_desc": null,
+   "replacement": "5151014100452",
+   "replacement_desc": "SVT-A7620GP-0WJED-WIR3.6mm-A|MINI C24|V1.0|1080P|P制|不带LOGO|白色|M8-4P母头线尾线|带M8-4P公头转标准4芯航空转接线|尾线0.5米|转接线0.2米|不带音频|带红外|3.6mm镜头|配英文说明书|带独立包装|D面安装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100220",
+   "original_desc": null,
+   "replacement": "5151014100453",
+   "replacement_desc": "SVT-A6320GP-0WJEA-WIR3.6mm-A|MINI C24|V1.0|1080P|P制|不带LOGO|白色|M8-4P母头线尾线|带M8-4P公头转标准4芯航空转接线|尾线0.5米|转接线0.2米|不带音频|带红外|3.6mm镜头|配英文说明书|带独立包装|A面安装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100221",
+   "original_desc": null,
+   "replacement": "5151014100454",
+   "replacement_desc": "SVT-A7620GP-0WJEB-WIR3.6mm-A|MINI C24|V1.0|1080P|P制|不带LOGO|白色|M8-4P母头线尾线|带M8-4P公头转标准4芯航空转接线|尾线0.5米|转接线0.2米|不带音频|带红外|3.6mm镜头|配英文说明书|带独立包装|B面安装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100224",
+   "original_desc": null,
+   "replacement": "5151014100455",
+   "replacement_desc": "SVT-A7620GP-0W1CC-WIR8mm-A|MINI C24|V1.0|1080P|P制|不带LOGO|白色|标准4芯航空头|0.5米|不带音频|带红外|8mm镜头|配中文说明书|带独立包装|C面安装|F355方案|E0000|通用|带区域标识",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100226",
+   "original_desc": null,
+   "replacement": "5151014100456",
+   "replacement_desc": "SVT-A7620GP-1W1EA-WIR3.6mm-A|MINI C24|V1.0|1080P|P制|锐明英文LOGO|白色|标准4芯航空头|0.5米|不带音频|带红外|3.6mm镜头|配英文说明书|带独立包装|A面安装|F355方案|E0001|通用",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100227",
+   "original_desc": null,
+   "replacement": "5151014100457",
+   "replacement_desc": "SVT-A7620GP-1W1EB-WIR3.6mm-A|MINI C24|V1.0|1080P|P制|锐明英文LOGO|白色|标准4芯航空头|0.5米|不带音频|带红外|3.6mm镜头|配英文说明书|带独立包装|B面安装|F355方案|E0001|通用",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100228",
+   "original_desc": null,
+   "replacement": "5151014100458",
+   "replacement_desc": "SVT-A7620GP-0WJEA-WIR3.6mm-A|MINI C24|V1.0|1080P|P制|不带LOGO|白色|标准4芯航空头|0.5米|不带音频|带红外|3.6mm镜头|带独立包装|A面安装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100229",
+   "original_desc": null,
+   "replacement": "5151014100459",
+   "replacement_desc": "SVT-A7620GP-0WJEB-WIR3.6mm-A|MINI C24|V1.0|1080P|P制|不带LOGO|白色|标准4芯航空头|0.5米|不带音频|带红外|3.6mm镜头|带独立包装|B面安装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100231",
+   "original_desc": null,
+   "replacement": "5151014100460",
+   "replacement_desc": "SVT-A7620GP-1W1ED-WIR3.6mm-A|MINI C24|V1.0|1080P|P制|锐明英文LOGO|白色|标准4芯航空头|0.5米|不带音频|带红外|3.6mm镜头|配英文说明书|带独立包装|D面安装|F355方案|E0001|通用",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100232",
+   "original_desc": null,
+   "replacement": "5151014100461",
+   "replacement_desc": "SVT-A7620GP-1W1CB-WIR8mm-A|MINI C24|V1.0|1080P|P制|锐明中文LOGO|白色|标准4芯航空线|耐高温尾线|0.5米|不带音频|带红外|8mm镜头|配中文说明书|带独立包装|B面安装|F355方案|C0001|通用|人脸识别专用软件",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100239",
+   "original_desc": null,
+   "replacement": "5151014100462",
+   "replacement_desc": "SVT-A7620GP-1W1ED-WIR2.8mm-A|MINI C24|V1.0|1080P|P制|锐明英文LOGO|白色|标准4芯航空头|增加防脱松环|0.5米|不带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|D面安装|F355方案|E0001|通用",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100242",
+   "original_desc": null,
+   "replacement": "5151014100463",
+   "replacement_desc": "SVT-A7620GP-0W1ED-WIR3.6mm-A|MINI C24|V1.0|1080P|P制|不带LOGO|白色|标准4芯航空头|0.5米|不带音频|带红外|3.6mm镜头|配英文说明书|带独立包装|D面安装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100243",
+   "original_desc": null,
+   "replacement": "5151014100464",
+   "replacement_desc": "SVT-A7620GP-0W1EDM-WIR2.1mm-A|MINI C24|V1.0|1080P|P制|不带LOGO|白色|标准4芯航空头|0.5米|不带音频|带红外|2.1mm镜头|配英文说明书|带独立包装|D面安装|F355方案|E0000|通用|镜像",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100245",
+   "original_desc": null,
+   "replacement": "5151014100465",
+   "replacement_desc": "SVT-A7620GP-0WJED-WIR2.8mm-A|MINI C24|V1.0|1080P|P制|不带LOGO|白色|M8-4P母头线尾线|带M8-4P公头转标准4芯航空转接线|尾线0.5米|转接线0.2米|不带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|D面安装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100246",
+   "original_desc": null,
+   "replacement": "5151014100466",
+   "replacement_desc": "SVT-A7620GP-1W1ED-WIR2.8mm-A|MINI C24|V1.0|1080P|P制|锐明英文LOGO|白色|标准4芯航空头|0.5米|不带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|D面安装|F355方案|E5008|客户定制|客户定制标贴",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100247",
+   "original_desc": null,
+   "replacement": "5151014100467",
+   "replacement_desc": "SVT-A7620GP-0W1EDM-WIR3.6mm-A|MINI C24|V1.0|1080P|P制|不带LOGO|白色|标准4芯航空头|0.5米|不带音频|带红外|3.6mm镜头|配英文说明书|带独立包装|D面安装|F355方案|E0000|通用|镜像",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100248",
+   "original_desc": null,
+   "replacement": "5151014100468",
+   "replacement_desc": "SVT-A7620GP-0WJEC-WIR3.6mm-A|MINI C24|V1.0|1080P|P制|不带LOGO|白色|标准4芯航空头|0.5米|不带音频|带红外|3.6mm镜头|配英文说明书|带独立包装|C面安装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100256",
+   "original_desc": null,
+   "replacement": "5151014100469",
+   "replacement_desc": "SVT-A7620GN-0W1EB-WIR6mm-A|MINI C24|V1.0|1080P|N制|不带LOGO|白色|标准4芯航空头|0.5米|不带音频|带红外|6mm镜头|配英文说明书|带独立包装|B面安装|F355方案|E0000|通用|带区域标识",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100257",
+   "original_desc": null,
+   "replacement": "5151014100470",
+   "replacement_desc": "SVT-A7620GN-0W1EA-WIR6mm-A|MINI C24|V1.0|1080P|N制|不带LOGO|白色|标准4芯航空头|0.5米|不带音频|带红外|6mm镜头|配英文说明书|带独立包装|A面安装|F355方案|E0000|通用|带区域标识",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100258",
+   "original_desc": null,
+   "replacement": "5151014100471",
+   "replacement_desc": "(K)SVT-A7620GN-0W1EA-WIR2.8mm-A|MINI C24|V1.0|1080P|N制|不带LOGO|白色|4PIN车载视频连接器|0.5米|不带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|A面安装|F355方案|E227967|客户定制|带区域标识|增加护线环",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": "227967"
+  },
+  {
+   "original": "5151014100259",
+   "original_desc": null,
+   "replacement": "5151014100472",
+   "replacement_desc": "SVT-A7620GP-0W1ED-WIR16mm-A|MINI C24|V1.0|1080P|P制|不带LOGO|白色|标准4芯航空头|0.5米|不带音频|带红外|16mm镜头|配英文说明书|带独立包装|D面安装|F355方案|E0000|通用|带区域标识",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100260",
+   "original_desc": null,
+   "replacement": "5151014100473",
+   "replacement_desc": "(K)SVT-A7620GN-0W1EA-WIR3.6mm-A|MINI C24|V1.0|1080P|N制|不带LOGO|白色|4PIN车载视频连接器|0.5米|不带音频|带红外|3.6mm镜头|配英文说明书|带独立包装|A面安装|F355方案|E227967|客户定制|带区域标识|增加护线环",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": "227967"
+  },
+  {
+   "original": "5151014100261",
+   "original_desc": null,
+   "replacement": "5151014100474",
+   "replacement_desc": "(K)SVT-A7620GN-0W1EB-WIR2.8mm-A|MINI C24|V1.0|1080P|N制|不带LOGO|白色|4PIN车载视频连接器|0.5米|不带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|B面安装|F355方案|E227967|客户定制|带区域标识|增加护线环",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": "227967"
+  },
+  {
+   "original": "5151014100262",
+   "original_desc": null,
+   "replacement": "5151014100475",
+   "replacement_desc": "(K)SVT-A7620GN-0W1EB-WIR3.6mm-A|MINI C24|V1.0|1080P|N制|不带LOGO|白色|4PIN车载视频连接器|0.5米|不带音频|带红外|3.6mm镜头|配英文说明书|带独立包装|B面安装|F355方案|E227967|客户定制|带区域标识|增加护线环",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": "227967"
+  },
+  {
+   "original": "5151014100263",
+   "original_desc": null,
+   "replacement": "5151014100476",
+   "replacement_desc": "SVT-A7620GN-0W2ED-WIR3.6mm-A|MINI C24|V1.0|1080P|N制|不带LOGO|黄色|4PIN小5559转接线|0.2米|不带音频|带红外|3.6mm镜头|定制说明书|带独立包装|定制包装盒及标贴|D面安装|F355方案|E3927|客户定制|带区域标识|定制型号：CAMICAMTXM12AHD-3.6MM-H-Y",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": "3927"
+  },
+  {
+   "original": "5151014100273",
+   "original_desc": null,
+   "replacement": "5151014100477",
+   "replacement_desc": "(K)SVT-A7620GN-7W9EA-WIR3.6mm-A|MINI C24|V1.0|1080P|N制|客户定制LOGO|白色|190定制航空线|0.5米|不带音频|带红外|3.6mm镜头|无说明书|带独立包装|定制标贴|A面安装|F355方案|E3999|客户定制|带区域标识|客户定制型号：SV-EXT4-1080C|定制底座和硅胶垫",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": "3999"
+  },
+  {
+   "original": "5151014100274",
+   "original_desc": null,
+   "replacement": "5151014100478",
+   "replacement_desc": "(K)SVT-A7620GN-7W9EB-WIR3.6mm-A|MINI C24|V1.0|1080P|N制|客户定制LOGO|白色|190定制航空线|0.5米|不带音频|带红外|3.6mm镜头|无说明书|带独立包装|定制标贴|B面安装|F355方案|E3999|客户定制|带区域标识|客户定制型号：SV-EXT4-1080S|定制底座和硅胶垫",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": "3999"
+  },
+  {
+   "original": "5151014100275",
+   "original_desc": null,
+   "replacement": "5151014100479",
+   "replacement_desc": "(K)SVT-A7620GN-7W9ED-WIR3.6mm-A|MINI C24|V1.0|1080P|N制|客户定制LOGO|白色|190定制航空线|0.5米|不带音频|带红外|3.6mm镜头|无说明书|带独立包装|定制标贴|D面安装|F355方案|E3999|客户定制|带区域标识|客户定制型号：SV-EXT4-1080R|定制底座和硅胶垫",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": "3999"
+  },
+  {
+   "original": "5151014100276",
+   "original_desc": null,
+   "replacement": "5151014100480",
+   "replacement_desc": "(K)SVT-A7620GN-7W9EA-WIR6mm-A|MINI C24|V1.0|1080P|N制|客户定制LOGO|白色|190定制航空线|0.5米|不带音频|带红外|6mm镜头|无说明书|带独立包装|定制标贴|A面安装|F355方案|E3999|客户定制|带区域标识|客户定制型号：SV-EXT6-1080C|定制底座和硅胶垫",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": "3999"
+  },
+  {
+   "original": "5151014100277",
+   "original_desc": null,
+   "replacement": "5151014100481",
+   "replacement_desc": "(K)SVT-A76q20GN-7W9EB-WIR6mm-A|MINI C24|V1.0|1080P|N制|客户定制LOGO|白色|190定制航空线|0.5米|不带音频|带红外|6mm镜头|无说明书|带独立包装|定制标贴|B面安装|F355方案|E3999|客户定制|带区域标识|客户定制型号：SV-EXT6-1080S|定制底座和硅胶垫",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": "3999"
+  },
+  {
+   "original": "5151014100278",
+   "original_desc": null,
+   "replacement": "5151014100482",
+   "replacement_desc": "(K)SVT-A7620GN-7Y9EA-WIR8mm-A|MINI C24|V1.0|1080P|N制|客户定制LOGO|黄色|190定制航空线|0.5米|不带音频|带红外|8mm镜头|无说明书|带独立包装|定制标贴|A面安装|F355方案|E3999|客户定制|带区域标识|客户定制型号：SV-EXT8-1080C|定制底座和硅胶垫",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": "3999"
+  },
+  {
+   "original": "5151014100279",
+   "original_desc": null,
+   "replacement": "5151014100483",
+   "replacement_desc": "(K)SVT-A7620GN-7Y9EB-WIR8mm-A|MINI C24|V1.0|1080P|N制|客户定制LOGO|黄色|190定制航空线|0.5米|不带音频|带红外|8mm镜头|定制说明书|带独立包装|定制标贴|B面安装|F355方案|E3999|客户定制|带区域标识|客户定制型号：SV-EXT8-1080S|定制底座和硅胶垫",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": "3999"
+  },
+  {
+   "original": "5151014100280",
+   "original_desc": null,
+   "replacement": "5151014100484",
+   "replacement_desc": "(K)SVT-A7620GN-7Y9EA-WIR16mm-A|MINI C24|V1.0|1080P|N制|客户定制LOGO|黄色|190定制航空线|0.5米|不带音频|带红外|16mm镜头|无说明书|带独立包装|定制标贴|A面安装|F355方案|E3999|客户定制|带区域标识|客户定制型号：SV-EXT16-1080C|定制底座和硅胶垫",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": "3999"
+  },
+  {
+   "original": "5151014100281",
+   "original_desc": null,
+   "replacement": "5151014100485",
+   "replacement_desc": "(K)SVT-A7620GN-7Y9EB-WIR16mm-A|MINI C24|V1.0|1080P|N制|客户定制LOGO|黄色|190定制航空线|0.5米|不带音频|带红外|16mm镜头|无说明书|带独立包装|定制标贴|B面安装|F355方案|E3999|客户定制|带区域标识|客户定制型号：SV-EXT16-1080S|定制底座和硅胶垫",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": "3999"
+  },
+  {
+   "original": "5151014100282",
+   "original_desc": null,
+   "replacement": "5151014100486",
+   "replacement_desc": "(K)SVT-A7620GN-7Y9EA-WIR25mm-A|MINI C24|V1.0|1080P|N制|客户定制LOGO|黄色|190定制航空线|0.5米|不带音频|带红外|25mm镜头|无说明书|带独立包装|定制标贴|A面安装|F355方案|E3999|客户定制|带区域标识|客户定制型号：SV-EXT25-1080C|定制底座和硅胶垫",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": "3999"
+  },
+  {
+   "original": "5151014100283",
+   "original_desc": null,
+   "replacement": "5151014100487",
+   "replacement_desc": "(K)SVT-A7620GN-7Y9EB-WIR25mm-A|MINI C24|V1.0|1080P|N制|客户定制LOGO|黄色|190定制航空线|0.5米|不带音频|带红外|25mm镜头|无说明书|带独立包装|定制标贴|B面安装|F355方案|E3999|客户定制|带区域标识|客户定制型号：SV-EXT25-1080S|定制底座和硅胶垫",
+   "lifecycle": "[产品]量产",
+   "model": "MINI C24",
+   "customer_code": "3999"
+  },
+  {
+   "original": "5151014100284",
+   "original_desc": null,
+   "replacement": "5151014100488",
+   "replacement_desc": "SVT-A7620GP-1Y1ED-WIR2.8mm-A|MINI C24|V1.0|1080P|P制|锐明英文LOGO|中东定制黄色|4PIN车载视频连接器|0.5米|不带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|D面安装|F355方案|E6049|客户定制",
+   "lifecycle": "[产品]研发样品",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100331",
+   "original_desc": null,
+   "replacement": "5151014100489",
+   "replacement_desc": "SVT-A7620GP-0W1ED-WIR16mm-A|MINI C24|V1.0|1080P|P制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|带红外|16mm镜头|配英文说明书|带独立包装|D面安装|F355方案|E3869|客户定制|带区域标识",
+   "lifecycle": "[产品]研发样品",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100332",
+   "original_desc": null,
+   "replacement": "5151014100490",
+   "replacement_desc": "SVT-A7620GP-1W1ED-WIR2.8mm-A|MINI C24|V1.0|1080P|P制|锐明英文LOGO|白色|4PIN车载视频连接器|0.5米|不带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|D面安装|F355方案|E136033|客户定制",
+   "lifecycle": "[产品]研发样品",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100335",
+   "original_desc": null,
+   "replacement": "5151014100491",
+   "replacement_desc": "SVT-A7620GN-MWJEA-WIR2.8mm-A|MINI C24|V1.0|1080P|N制|客户定制LOGO|白色|标准4芯航空头|0. 5米|不带音频|带红外|2.8mm镜头|带独立包装|定制包装盒及标贴|A面安装|F355方案|E3989|客户定制|客供彩盒",
+   "lifecycle": "[产品]研发样品",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100336",
+   "original_desc": null,
+   "replacement": "5151014100492",
+   "replacement_desc": "SVT-A7620GN-MWJEB-WIR2.8mm-A|MINI C24|V1.0|1080P|N制|客户定制LOGO|白色|标准4芯航空头|0.5米|不带音频|带红外|2.8mm镜头|带独立包装|定制包装盒及标贴|B面安装|F355方案|E3989|客户定制|客供彩盒",
+   "lifecycle": "[产品]研发样品",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100346",
+   "original_desc": null,
+   "replacement": "5151014100493",
+   "replacement_desc": "SVT-A7620GN-0W2EA-WIR6mm-A|MINI C24|V1.0|1080P|N制|不带LOGO|白色|4PIN小5559转接线|0.2米|不带音频|带红外|6mm镜头|定制说明书|带独立包装|定制包装盒及标贴|A面安装|F355方案|E3927|客户定制|带区域标识|CAMICAMTXM12AHD-6MM",
+   "lifecycle": "[产品]研发样品",
+   "model": "MINI C24",
+   "customer_code": "3927"
+  },
+  {
+   "original": "5151014100347",
+   "original_desc": null,
+   "replacement": "5151014100494",
+   "replacement_desc": "(K)SVT-A7620GN-0W2EB-WIR6mm-A|MINI C24|V1.0|1080P|N制|不带LOGO|白色|4PIN小5559转接线|0.2米|不带音频|带红外|6mm镜头|定制说明书|带独立包装|定制包装盒及标贴|B面安装|F355方案|E3927|客户定制|带区域标识|CAMICAMTXM12AHD-6MM-B",
+   "lifecycle": "[产品]研发样品",
+   "model": "MINI C24",
+   "customer_code": "3927"
+  },
+  {
+   "original": "5151014100348",
+   "original_desc": null,
+   "replacement": "5151014100495",
+   "replacement_desc": "SVT-A7620GN-0W2EA-WIR8mm-A|MINI C24|V1.0|1080P|N制|不带LOGO|白色|4PIN小5559转接线|0.2米|不带音频|带红外|8mm镜头|定制说明书|带独立包装|定制包装盒及标贴|A面安装|F355方案|E3927|客户定制|带区域标识|CAMICAMTXM12AHD-8MM",
+   "lifecycle": "[产品]研发样品",
+   "model": "MINI C24",
+   "customer_code": "3927"
+  },
+  {
+   "original": "5151014100384",
+   "original_desc": null,
+   "replacement": "5151014100496",
+   "replacement_desc": "SVT-A7620GP-1B1ED-WIR2.8mm-A|MINI C24|V1.0|1080P|P制|锐明英文LOGO|黑色|4PIN车载视频连接器|0.5米|不带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|D面安装|F355方案|E0001|通用",
+   "lifecycle": "[产品]研发样品",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151014100387",
+   "original_desc": null,
+   "replacement": null,
+   "replacement_desc": null,
+   "lifecycle": "初始",
+   "model": "MINI C24",
+   "customer_code": "未发布"
+  },
+  {
+   "original": "5151014100392",
+   "original_desc": null,
+   "replacement": "5151014100498",
+   "replacement_desc": "SVT-A7620GP-0WJED-WIR2.1mm-A|MINI C24|V1.0|1080P|P制|不带LOGO|白色|M8-4P母头线尾线|带M8-4P公头转标准4芯航空转接线|尾线0.5米|转接线0.2米|不带音频|带红外|2.1mm镜头|配英文说明书|带独立包装|D面安装|F355方案|E102066|客户定制",
+   "lifecycle": "[产品]研发样品",
+   "model": "MINI C24",
+   "customer_code": null
+  },
+  {
+   "original": "5151015100013",
+   "original_desc": null,
+   "replacement": null,
+   "replacement_desc": null,
+   "lifecycle": "[产品]量产",
+   "model": "CA20T",
+   "customer_code": "近两年无出货记录"
+  },
+  {
+   "original": "5151015100014",
+   "original_desc": null,
+   "replacement": "5151015100038",
+   "replacement_desc": "SVT-A7620MP-1BUC-UU8mm-A|CA20|V1.0|1080P|P制|锐明中文LOGO|黑色|标准4芯航空头|增加防脱胶圈|0.5米|不带音频|不带红外|8mm镜头|不带包装|F355方案|C2514|客户定制",
+   "lifecycle": "[产品]量产",
+   "model": "CA20",
+   "customer_code": null
+  },
+  {
+   "original": "5151015100015",
+   "original_desc": null,
+   "replacement": "5151015100036",
+   "replacement_desc": "SVT-A7620MP-1B1N-UU8mm-A|CA20|V1.0|1080P|P制|锐明中文LOGO|黑色|标准4芯航空头|0.5米|不带音频|不带红外|8mm镜头|无说明书|不带包装|F355方案|C0000|通用|ADAS用",
+   "lifecycle": "[产品]量产",
+   "model": "CA20",
+   "customer_code": null
+  },
+  {
+   "original": "5151015100016",
+   "original_desc": null,
+   "replacement": "5151015100037",
+   "replacement_desc": "SVT-A7620MP-0B1E-UU8mm-A|CA20|V1.0|1080P|P制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|不带红外|8mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用|ADAS用",
+   "lifecycle": "[产品]量产",
+   "model": "CA20",
+   "customer_code": null
+  },
+  {
+   "original": "5151015100017",
+   "original_desc": null,
+   "replacement": "5151015100039",
+   "replacement_desc": "SVT-A7620MP-0B1E-AU2.8mm-A|CA20|V1.0|1080P|P制|不带LOGO|黑色|标准4芯航空头|0.5米|带音频|不带红外|2.8mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA20",
+   "customer_code": null
+  },
+  {
+   "original": "5151015100020",
+   "original_desc": null,
+   "replacement": "5151015100035",
+   "replacement_desc": "SVT-A7620MP-0B1E-AU4mm-A|CA20|V1.0|1080P|P制|不带LOGO|黑色|标准4芯航空头|0.5米|带音频|不带红外|4mm镜头|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA20",
+   "customer_code": null
+  },
+  {
+   "original": "5151015100021",
+   "original_desc": null,
+   "replacement": "5151015100040",
+   "replacement_desc": "SVT-A7620MP-1B1E-AU4mm-A|CA20|V1.0|1080P|P制|锐明英文LOGO|黑色|标准4芯航空头|0.5米|带音频|不带红外|4mm镜头|带独立包装|F355方案|E0001|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA20",
+   "customer_code": null
+  },
+  {
+   "original": "5151015100024",
+   "original_desc": null,
+   "replacement": "5151015100041",
+   "replacement_desc": "SVT-A7620MP-0B1E-AU4mm-A|CA20|V1.0|1080P|P制|不带LOGO|黑色|标准4芯航空头|0.5米|带音频|不带红外|4mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用|上出线",
+   "lifecycle": "[产品]量产",
+   "model": "CA20",
+   "customer_code": null
+  },
+  {
+   "original": "5151015100026",
+   "original_desc": null,
+   "replacement": "5151015100042",
+   "replacement_desc": "SVT-A7620MN-0B1E-AU4mm-A|CA20|V1.0|1080P|N制|不带LOGO|黑色|标准4芯航空头|0.5米|带音频|不带红外|4mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA20",
+   "customer_code": null
+  },
+  {
+   "original": "5151015100027",
+   "original_desc": null,
+   "replacement": "5151015100043",
+   "replacement_desc": "SVT-A7620MN-0B1E-AU2.8mm-A|CA20|V1.0|1080P|N制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA20",
+   "customer_code": null
+  },
+  {
+   "original": "5151015100031",
+   "original_desc": null,
+   "replacement": "5151015100044",
+   "replacement_desc": "SVT-A7620MP-0B1E-UU8mm-A|CA20|V1.0|1080P|P制|不带LOGO|黑色|标准4芯航空头|增加防脱胶圈|0.5米|不带音频|不带红外|8mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用|ADAS用",
+   "lifecycle": "[产品]量产",
+   "model": "CA20",
+   "customer_code": null
+  },
+  {
+   "original": "5151015100032",
+   "original_desc": null,
+   "replacement": "5151015100045",
+   "replacement_desc": "SVT-A7620MP-0B1E-UU8mm-A|CA20|V1.0|1080P|P制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|不带红外|8mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用|上出线|ADAS用",
+   "lifecycle": "[产品]量产",
+   "model": "CA20",
+   "customer_code": null
+  },
+  {
+   "original": "5151015100033",
+   "original_desc": null,
+   "replacement": "5151015100046",
+   "replacement_desc": "SVT-A7620MP-0B1E-AU4mm-A|CA20|V1.0|1080P|P制|不带LOGO|黑色|标准4芯航空头|0.5米|带音频|不带红外|4mm镜头|配英文说明书|带独立包装|定制标贴|F355方案|E209826|客户定制",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA20",
+   "customer_code": null
+  },
+  {
+   "original": "5151015100034",
+   "original_desc": null,
+   "replacement": "5151015100047",
+   "replacement_desc": "SVT-A7620MP-1B1E-AU8mm-A|CA20|V1.0|1080P|P制|锐明英文LOGO|黑色|标准4芯航空头|0.5米|带音频|不带红外|8mm镜头|配英文说明书|带独立包装|F355方案|E0001|通用|上出线",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA20",
+   "customer_code": null
+  },
+  {
+   "original": "5151016100005",
+   "original_desc": null,
+   "replacement": "5151016100020",
+   "replacement_desc": "SVT-A7620QP-0G1E-WIR2.8mm-A|CA13|V1.0|1080P|P制|不带LOGO|灰绿色|标准4芯航空头|0.5米|不带音频|带红外|2.8mm镜头|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA13",
+   "customer_code": null
+  },
+  {
+   "original": "5151016100015",
+   "original_desc": null,
+   "replacement": "5151016100021",
+   "replacement_desc": "SVT-A7620QN-0B1N-WIR2.8mm-A|CA13|V1.0|1080P|N制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|带红外|2.8mm镜头|无说明书|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA13",
+   "customer_code": null
+  },
+  {
+   "original": "5151016100016",
+   "original_desc": null,
+   "replacement": "5151016100024",
+   "replacement_desc": "SVT-A7620QP-0BWN-WIR2.8mm-A|CA13|V1.0|1080P|P制|不带LOGO|黑色|定制4芯宝马头|带转接线|2米|不带音频|带红外|2.8mm镜头|无说明书|带独立包装|F355方案|E228752|客户定制",
+   "lifecycle": "[产品]量产",
+   "model": "CA13",
+   "customer_code": null
+  },
+  {
+   "original": "5151016100017",
+   "original_desc": null,
+   "replacement": "5151016100023",
+   "replacement_desc": "SVT-A7620QN-0BWN-WIR2.8mm-A|CA13|V1.0|1080P|N制|不带LOGO|黑色|定制4芯宝马头|带转接线|2米|不带音频|带红外|2.8mm镜头|无说明书|带独立包装|F355方案|E228752|客户定制",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA13",
+   "customer_code": null
+  },
+  {
+   "original": "5151016100019",
+   "original_desc": null,
+   "replacement": "5151016100022",
+   "replacement_desc": "SVT-A7620QP-0BWN-WIR2.8mm-A|CA13|V1.0|1080P|P制|不带LOGO|黑色|定制4芯宝马头|带转接线|2米|不带音频|带红外|2.8mm镜头|无说明书|带独立包装|F355方案|E228752|客户定制",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA13",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100001",
+   "original_desc": null,
+   "replacement": "5151019100194",
+   "replacement_desc": "SVT-A7620MSP-1BTN-UU8mm-A|CA20S|V1.0|1080P|P制|锐明中文LOGO|黑色|4芯宝马头|1.5米|不带音频|不带红外|8mm镜头|无说明书|不带包装|F355方案|C0001|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100014",
+   "original_desc": null,
+   "replacement": "5151019100191",
+   "replacement_desc": "SVT-A7620MSN-0B1E-UU2.8mm-A|CA20S|V1.0|1080P|N制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|不带红外|2.8mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100015",
+   "original_desc": null,
+   "replacement": "5151019100195",
+   "replacement_desc": "SVT-A7620MSP-1B1C-UU2.8mm-A|CA20S|V1.0|1080P|P制|锐明中文LOGO|黑色|标准4芯航空头|0.5米|不带音频|不带红外|2.8mm镜头|配中文说明书|带独立包装|F355方案|C0001|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100018",
+   "original_desc": null,
+   "replacement": "5151019100193",
+   "replacement_desc": "SVT-A7620MSP-0B1E-UU2.8mm-A|CA20S|V1.0|1080P|P制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|不带红外|2.8mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100019",
+   "original_desc": null,
+   "replacement": "5151019100192",
+   "replacement_desc": "SVT-A7620MSP-0B1E-UU4mm-A|CA20S|V1.0|1080P|P制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|不带红外|4mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100020",
+   "original_desc": null,
+   "replacement": "5151019100196",
+   "replacement_desc": "SVT-A7620MSP-1BTN-UU8mm-A|CA20S|V2.0|1080P|P制|锐明中文LOGO|黑色|4芯宝马头|1.5米|不带音频|不带红外|8mm镜头|无说明书|不带包装|F355方案|C0001|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100021",
+   "original_desc": null,
+   "replacement": "5151019100197",
+   "replacement_desc": "(K)SVT-A7620MSP-0BTN-UU8mm-A|CA20S|V2.0|1080P|P制|不带LOGO|黑色|4芯宝马头|1.5米|不带音频|不带红外|8mm镜头|无说明书|不带包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100022",
+   "original_desc": null,
+   "replacement": "5151019100198",
+   "replacement_desc": "SVT-A7620MSP-1BTN-UU8mm-A|CA20S|V2.0|1080P|P制|锐明英文LOGO|黑色|4芯宝马头|1.5米|不带音频|不带红外|8mm镜头|无说明书|不带包装|F355方案|E0001|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100023",
+   "original_desc": null,
+   "replacement": "5151019100199",
+   "replacement_desc": "SVT-A7620MSP-0B1N-UU8mm-A|CA20S|V2.0|1080P|P制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|不带红外|8mm镜头|无说明书|不带包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100024",
+   "original_desc": null,
+   "replacement": "5151019100200",
+   "replacement_desc": "SVT-A7620MSP-HBTN-UU8mm-A|CA20S|V2.0|1080P|P制|客户定制LOGO|黑色|4芯宝马头|1.5米|不带音频|不带红外|8mm镜头|无说明书|不带包装|定制标贴|F355方案|E46003|客户定制|HT-CHD-A1",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100026",
+   "original_desc": null,
+   "replacement": "5151019100201",
+   "replacement_desc": "SVT-A7620MSP-1B1N-UU8mm-A|CA20S|V2.0|1080P|P制|锐明英文LOGO|黑色|标准4芯航空头|0.5米|不带音频|不带红外|8mm镜头|无说明书|不带包装|F355方案|E0001|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100029",
+   "original_desc": null,
+   "replacement": "5151019100202",
+   "replacement_desc": "SVT-A7620MSP-0B1E-UU4mm-A|CA20S|V1.0|1080P|P制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|不带红外|4mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用|上出线",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100030",
+   "original_desc": null,
+   "replacement": "5151019100203",
+   "replacement_desc": "SVT-A7620MSP-KBTN-UU8mm-A|CA20S|V2.0|1080P|P制|客户定制LOGO|黑色|4芯宝马头|1.5米|不带音频|不带红外|8mm镜头|无说明书|不带包装|F355方案|E3239|客户定制",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100031",
+   "original_desc": null,
+   "replacement": "5151019100209",
+   "replacement_desc": "SVT-A7620MSP-JB1E-UU2.8mm-A|CA20S|V1.0|1080P|P制|客户定制LOGO|黑色|标准4芯航空头|0.5米|不带音频|不带红外|2.8mm镜头|配英文说明书|带独立包装|定制标贴|F355方案|E4054|客户定制",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100033",
+   "original_desc": null,
+   "replacement": "5151019100210",
+   "replacement_desc": "SVT-A7620MSP-JBTN-UU8mm-A|CA20S|V2.0|1080P|P制|客户定制LOGO|黑色|4芯宝马头|1.5米|不带音频|不带红外|8mm镜头|无说明书|不带包装|定制标贴|F355方案|E4054|客户定制",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100035",
+   "original_desc": null,
+   "replacement": "5151019100204",
+   "replacement_desc": "SVT-A7620MSP-0B1N-UU4mm-A|CA20S|V2.0|1080P|P制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|不带红外|4mm镜头|无说明书|不带包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100038",
+   "original_desc": null,
+   "replacement": "5151019100208",
+   "replacement_desc": "SVT-A7720MSN-0B1E-UU8mm-A|CA20S|V2.0|1080P|N制|不带LOGO|黑色|标准4芯航空头|2米|不带音频|不带红外|8mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100039",
+   "original_desc": null,
+   "replacement": "5151019100205",
+   "replacement_desc": "SVT-A7620MSP-1B1E-UU8mm-A|CA20S|V2.0|1080P|P制|锐明英文LOGO|黑色|标准4芯航空头|0.5米|不带音频|不带红外|8mm镜头|配英文说明书|带独立包装|F355方案|E0001|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100040",
+   "original_desc": null,
+   "replacement": "5151019100206",
+   "replacement_desc": "SVT-A7620MSP-1BTE-UU8mm-A|CA20S|V2.0|1080P|P制|锐明英文LOGO|黑色|4芯宝马头|1.5米|不带音频|不带红外|8mm镜头|配英文说明书|带独立包装|F355方案|E0001|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100042",
+   "original_desc": null,
+   "replacement": "5151019100207",
+   "replacement_desc": "SVT-A7620MSP-1BTE-UU8mm-A|CA20S|V2.0|1080P|P制|锐明英文LOGO|黑色|4芯宝马头|5米|不带音频|不带红外|8mm镜头|配英文说明书|带独立包装|F355方案|E0001|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100043",
+   "original_desc": null,
+   "replacement": "5151019100211",
+   "replacement_desc": "SVT-A7620MSP-1B1E-UU4mm-A|CA20S|V1.0|1080P|P制|锐明英文LOGO|黑色|标准4芯航空头|0.5米|不带音频|不带红外|4mm镜头|配英文说明书|带独立包装|F355方案|E0001|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100044",
+   "original_desc": null,
+   "replacement": "5151019100212",
+   "replacement_desc": "SVT-A7620MSN-0B1E-UU2.8mm-A|CA20S|V1.0|1080P|N制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|不带红外|2.8mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用|上出线",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100045",
+   "original_desc": null,
+   "replacement": "5151019100213",
+   "replacement_desc": "SVT-A7620MSP-0B1E-UU8mm-A|CA20S|V2.0|1080P|P制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|不带红外|8mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100047",
+   "original_desc": null,
+   "replacement": "5151019100214",
+   "replacement_desc": "SVT-A7620MSP-1B1E-UU8mm-A|CA20S|V2.0|1080P|P制|锐明英文LOGO|黑色|标准4芯航空头|增加防脱松环|0.5米|不带音频|不带红外|8mm镜头|配英文说明书|带独立包装|F355方案|E0001|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100052",
+   "original_desc": null,
+   "replacement": "5151019100215",
+   "replacement_desc": "SVT-A7620MSP-NBTE-UU8mm-A|CA20S|V2.0|1080P|P制|客户定制LOGO|黑色|4芯宝马头|1.5米|不带音频|不带红外|8mm镜头|配英文说明书|带独立包装|定制标贴|F355方案|E1040|客户定制",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100055",
+   "original_desc": null,
+   "replacement": "5151019100216",
+   "replacement_desc": "SVT-A7620MSP-0B1E-UU4mm-A|CA20S|V1.0|1080P|P制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|不带红外|4mm镜头|配英文说明书|带独立包装|定制标贴|F355方案|E52011|客户定制",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100057",
+   "original_desc": null,
+   "replacement": "5151019100217",
+   "replacement_desc": "SVT-A7620MSP-1BXN-UU8mm-A|CA20S|V2.0|1080P|P制|锐明中文LOGO|黑色|标准4芯航空头|0.5米|不带音频|不带红外|8mm镜头|无说明书|不带包装|F355方案|C0001|通用|前装定制尾线",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100058",
+   "original_desc": null,
+   "replacement": "5151019100218",
+   "replacement_desc": "SVT-A7620MSP-1B1C-UU8mm-A|CA20S|V2.0|1080P|P制|锐明中文LOGO|黑色|标准4芯航空头|0.5米|不带音频|不带红外|8mm镜头|配中文说明书|带独立包装|F355方案|C0001|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100059",
+   "original_desc": null,
+   "replacement": "5151019100219",
+   "replacement_desc": "SVT-A7620MSP-0BTC-UU8mm-A|CA20S|V2.0|1080P|P制|不带LOGO|黑色|4芯宝马头|1.5米|不带音频|不带红外|8mm镜头|配中文说明书|带独立包装|F355方案|C0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100061",
+   "original_desc": null,
+   "replacement": "5151019100220",
+   "replacement_desc": "SVT-A7620MSP-FB1N-UU8mm-A|CA20S|V2.0|1080P|P制|客户定制LOGO|黑色|标准4芯航空头|0.5米|不带音频|不带红外|8mm镜头|无说明书|不带包装|F355方案|C3453|客户定制",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100062",
+   "original_desc": null,
+   "replacement": "5151019100223",
+   "replacement_desc": "SVT-A7620MSP-0BTE-UU8mm-A|CA20S|V2.0|1080P|P制|不带LOGO|黑色|4芯宝马头|1.5米|不带音频|不带红外|8mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100064",
+   "original_desc": null,
+   "replacement": "5151019100225",
+   "replacement_desc": "SVT-A7620MSN-0B1E-UU4mm-A|CA20S|V1.0|1080P|N制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|不带红外|4mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100065",
+   "original_desc": null,
+   "replacement": "5151019100221",
+   "replacement_desc": "SVT-A7620MSP-0B1C-UU8mm-A|CA20S|V2.0|1080P|P制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|不带红外|8mm镜头|配中文说明书|带独立包装|F355方案|C0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100070",
+   "original_desc": null,
+   "replacement": "5151019100222",
+   "replacement_desc": "SVT-A7720MSP-0B1E-UU8mm-A|CA20S|V2.0|1080P|P制|不带LOGO|黑色|标准4芯航空头|2米|不带音频|不带红外|8mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100071",
+   "original_desc": null,
+   "replacement": "5151019100224",
+   "replacement_desc": "SVT-A7620MSN-MB1E-UU2.8mm-A|CA20S|V2.0|1080P|N制|客户定制LOGO|黑色|标准4芯航空头|0.5米|不带音频|不带红外|2.8mm镜头|配英文说明书|带独立包装|定制包装盒及标贴|F355方案|E3989|客户定制",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100075",
+   "original_desc": null,
+   "replacement": "5151019100226",
+   "replacement_desc": "(K)SVT-A7720MSN-AI-0BZE-UU8mm-A|CA20S|V2.0|1080P|N制|不带LOGO|黑色|5028定制尾线|0.5米|不带音频|不带红外|8mm镜头|带独立包装|F355方案|E125028|客户定制",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": "125028"
+  },
+  {
+   "original": "5151019100078",
+   "original_desc": null,
+   "replacement": "5151019100227",
+   "replacement_desc": "SVT-A7720MSP-AI-1B1E-UU8mm-A|CA20S|V2.0|1080P|P制|锐明英文LOGO|黑色|标准4芯航空头|2米|不带音频|不带红外|8mm镜头|配英文说明书|带独立包装|F355方案|E0001|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100079",
+   "original_desc": null,
+   "replacement": "5151019100228",
+   "replacement_desc": "SVT-A7720MSP-1B1E-UU8mm-A|CA20S|V2.0|1080P|P制|客户定制LOGO|黑色|标准4芯航空头|2米|不带音频|不带红外|8mm镜头|带独立包装|定制包装盒|F355方案|E4054|客户定制",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100080",
+   "original_desc": null,
+   "replacement": "5151019100229",
+   "replacement_desc": "SVT-A7620MSP-1B1E-UU2.8mm-A|CA20S|V1.0|1080P|P制|锐明英文LOGO|黑色|标准4芯航空头|0.5米|不带音频|不带红外|2.8mm镜头|配英文说明书|带独立包装|F355方案|E0001|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100082",
+   "original_desc": null,
+   "replacement": "5151019100230",
+   "replacement_desc": "SVT-A7720MSP-AI-1B1E-UU8mm-A|CA20S|V2.0|1080P|P制|客户定制LOGO|黑色|标准4芯航空头|2米|不带音频|不带红外|8mm镜头|配英文说明书|带独立包装|定制标贴|F355方案|E209270|客户定制",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100085",
+   "original_desc": null,
+   "replacement": "5151019100231",
+   "replacement_desc": "(K)SVT-A7720MSN-AI-1B1E-UU8mm-A|CA20S|V2.0|1080P|N制|客户定制LOGO|黑色|0.5米|小4P公头线|不带音频|不带红外|8mm镜头|配英文说明书|带独立包装|定制标贴|F355方案|E3999|客户定制|带区域标识|标贴型号：SV-AI-ADAS|不带X",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": "3999"
+  },
+  {
+   "original": "5151019100086",
+   "original_desc": null,
+   "replacement": "5151019100232",
+   "replacement_desc": "(K)SVT-A7720MSN-AI-0BZE-UU4mm-A|CA20S|V1.0|1080P|N制|不带LOGO|黑色|125028定制尾线|0.5米|不带音频|不带红外|4mm镜头|配英文说明书|带独立包装|定制标贴|F355方案|E0000|客户定制|带区域标识|酒精贴纸",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA20S",
+   "customer_code": "125028"
+  },
+  {
+   "original": "5151019100087",
+   "original_desc": null,
+   "replacement": "5151019100233",
+   "replacement_desc": "SVT-A7620MSP-0B1C-UU6mm-A|CA20S|V2.0|1080P|P制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|不带红外|6mm镜头|配中文说明书|带独立包装|F355方案|C0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100094",
+   "original_desc": null,
+   "replacement": "5151019100234",
+   "replacement_desc": "SVT-A7720MSP-AI-0B1E-UU8mm-A|CA20S|V2.0|1080P|P制|不带LOGO|黑色|标准4芯航空头|2米|不带音频|不带红外|8mm镜头|配英文说明书|带独立包装|定制标贴|F355方案|E227088|客户定制",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100096",
+   "original_desc": null,
+   "replacement": "5151019100235",
+   "replacement_desc": "SVT-A7720MSN-AI-0B1E-UU8mm-A|CA20S|V2.0|1080P|N制|不带LOGO|黑色|标准4芯航空头|2米|不带音频|不带红外|8mm镜头|配英文说明书|带独立包装|定制标贴|F355方案|E76033|客户定制|带区域标识",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100097",
+   "original_desc": null,
+   "replacement": "5151019100236",
+   "replacement_desc": "SVT-A7720MSN-AI-0B1E-UU8mm-A|CA20S|V2.0|1080P|N制|不带LOGO|黑色|标准4芯航空头|2米|不带音频|不带红外|8mm镜头|配英文说明书|带独立包装|定制标贴|F355方案|E143037|客户定制",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100099",
+   "original_desc": null,
+   "replacement": "5151019100238",
+   "replacement_desc": "SVT-A7620MSP-1BXN-UU8mm-A|CA20S|V2.0|1080P|P制|锐明中文LOGO|黑色|标准4芯航空头|0.5米|不带音频|不带红外|8mm镜头|无说明书|带独立包装|F355方案|C61057|客户定制|前装定制尾线",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100104",
+   "original_desc": null,
+   "replacement": "5151019100239",
+   "replacement_desc": "SVT-A7620MSN-0B1E-UU4mm-A|CA20S|V1.0|1080P|N制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|不带红外|4mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100107",
+   "original_desc": null,
+   "replacement": "5151019100237",
+   "replacement_desc": "SVT-A7620MSP-0B1E-UU2.8mm-A|CA20S|V1.0|1080P|P制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|不带红外|2.8mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用|外壳不带X",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100108",
+   "original_desc": null,
+   "replacement": "5151019100240",
+   "replacement_desc": "SVT-A7620MSP-0B1E-UU2.8mm-A|CA20S|V1.0|1080P|P制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|不带红外|2.8mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用|上出线",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100109",
+   "original_desc": null,
+   "replacement": "5151019100241",
+   "replacement_desc": "SVT-A7720MSN-AI-0B1E-UU4mm-A|CA20S|V1.0|1080P|N制|不带LOGO|黑色|标准4芯航空头|2米|不带音频|不带红外|4mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用|带区域标识",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100110",
+   "original_desc": null,
+   "replacement": "5151019100242",
+   "replacement_desc": "SVT-A7620MSP-1B1N-UU8mm-A|CA20S|V2.0|1080P|P制|锐明中文LOGO|黑色|标准4芯航空头|0.5米|不带音频|不带红外|8mm镜头|无说明书|不带包装|F355方案|C0001|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100111",
+   "original_desc": null,
+   "replacement": "5151019100243",
+   "replacement_desc": "SVT-A7620MSP-0BTN-UU8mm-A|CA20S|V2.0|1080P|P制|不带LOGO|黑色|4芯宝马头|1.5米|不带音频|不带红外|8mm镜头|无说明书|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100112",
+   "original_desc": null,
+   "replacement": "5151019100244",
+   "replacement_desc": "SVT-A7720MSN-AI-0B1E-UU8mm-A|CA20S|V2.0|1080P|N制|不带LOGO|黑色|标准4芯航空头|2米|不带音频|不带红外|8mm镜头|配英文说明书|不带包装|F355方案|E0000|通用|带区域标识",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100113",
+   "original_desc": null,
+   "replacement": "5151019100245",
+   "replacement_desc": "SVT-A7620MSP-0BTN-UU4mm-A|CA20S|V1.0|1080P|P制|不带LOGO|黑色|4芯宝马头|0.5米|不带音频|不带红外|4mm镜头|带独立包装|F355方案|E166072|客户定制|上出线|4mm无畸变金属镜头|定制软件曝光1/400|锐明像素专用料号",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100114",
+   "original_desc": null,
+   "replacement": "5151019100251",
+   "replacement_desc": "SVT-A7720MSN-AI-0B1E-UU8mm-A|CA20S|V2.0|1080P|N制|不带LOGO|黑色|标准4芯航空头|2米|不带音频|不带红外|8mm镜头|配英文说明书|带独立包装|定制标贴|F355方案|E4019|客户定制",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100117",
+   "original_desc": null,
+   "replacement": "5151019100252",
+   "replacement_desc": "SVT-A7620MSP-1BTN-UU8mm-A|CA20S|V2.0|1080P|P制|锐明中文LOGO|黑色|4芯宝马头|1.5米|不带音频|不带红外|8mm镜头|无说明书|带独立包装|F355方案|C0001|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100118",
+   "original_desc": null,
+   "replacement": "5151019100253",
+   "replacement_desc": "SVT-A7720MSP-AI-0B1E-UU8mm-A|CA20S|V2.0|1080P|P制|不带LOGO|黑色|标准4芯航空头|2米|不带音频|不带红外|8mm镜头|配英文说明书|带独立包装|定制标贴|F355方案|E209044|客户定制",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100119",
+   "original_desc": null,
+   "replacement": "5151019100254",
+   "replacement_desc": "SVT-A7620MSP-0BTN-UU8mm-A|CA20S|V2.0|1080P|P制|不带LOGO|黑色|4芯宝马头|1.5米|不带音频|不带红外|8mm镜头|无说明书|带独立包装|定制标贴|F355方案|E3837|客户定制|FC-AI-ADAS",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100120",
+   "original_desc": null,
+   "replacement": "5151019100256",
+   "replacement_desc": "(K)SVT-A7720MSN-AI-TBTE-UU8mm-A|CA20S|V2.0|1080P|N制|客户定制LOGO|黑色|4P宝马母头带黑色硅胶套|0.45米|不带音频|不带红外|8mm镜头|无说明书|带独立包装|定制包装盒及标贴|F355方案|E3928|客户定制|上出线|外壳不带X",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100121",
+   "original_desc": null,
+   "replacement": "5151019100249",
+   "replacement_desc": "SVT-A7620MSP-0BTN-UU8mm-A|CA20S|V2.0|1080P|P制|不带LOGO|黑色|4芯宝马头|1.5米|不带音频|不带红外|8mm镜头|无说明书|不带包装|定制标贴|F355方案|E3837|客户定制|带区域标识|FC-AI-ADAS不带model|外壳不带X",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100122",
+   "original_desc": null,
+   "replacement": "5151019100246",
+   "replacement_desc": "SVT-A7620MSP-0BTN-UU8mm-A|CA20S|V2.0|1080P|P制|不带LOGO|黑色|4芯宝马头|1.5米|不带音频|不带红外|8mm镜头|无说明书|带独立包装|定制标贴|F355方案|E3837|客户定制|FC-AI-ADAS|外壳不带X",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100124",
+   "original_desc": null,
+   "replacement": "5151019100248",
+   "replacement_desc": "SVT-A7620MSP-1BTE-UU2.8mm-A|CA20S|V1.0|1080P|P制|锐明英文LOGO|黑色|4芯宝马头|1.5米|不带音频|不带红外|2.8mm镜头|配英文说明书|带独立包装|F355方案|E0001|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100126",
+   "original_desc": null,
+   "replacement": "5151019100247",
+   "replacement_desc": "SVT-A7720MSP-0B1E-UU8mm-A|CA20S|V2.0|1080P|P制|不带LOGO|黑色|标准4芯航空头|2米|不带音频|不带红外|8mm镜头|配英文说明书|带独立包装|定制标贴|F355方案|E210348|客户定制",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100128",
+   "original_desc": null,
+   "replacement": "5151019100250",
+   "replacement_desc": "SVT-A7620MSP-1BTN-UU8mm-A|CA20S|V2.0|1080P|P制|客户定制LOGO|黑色|4芯宝马头|1.5米|不带音频|不带红外|8mm镜头|无说明书|不带包装|F355方案|E4028|客户定制",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100129",
+   "original_desc": null,
+   "replacement": "5151019100255",
+   "replacement_desc": "SVT-A7620MSP-1BTE-UU8mm-A|CA20S|V2.0|1080P|P制|锐明英文LOGO|黑色|4芯宝马头|1.5米|不带音频|不带红外|8mm镜头|配英文说明书|带独立包装|定制标贴|F355方案|E5008|客户定制",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100130",
+   "original_desc": null,
+   "replacement": "5151019100257",
+   "replacement_desc": "SVT-A7620MSP-1B1N-UU8mm-A|CA20S|V2.0|1080P|P制|锐明英文LOGO|黑色|标准4芯航空头|2米|不带音频|不带红外|8mm镜头|无说明书|不带包装|F355方案|E0000|通用|上出线",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100131",
+   "original_desc": null,
+   "replacement": "5151019100258",
+   "replacement_desc": "SVT-A7620MSP-0B1E-UU6mm-A|CA20S|V2.0|1080P|P制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|不带红外|6mm镜头|配英文说明书|带独立包装|F355方案|E1302|客户定制|硬过Emark",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100133",
+   "original_desc": null,
+   "replacement": "5151019100259",
+   "replacement_desc": "SVT-A7620MSP-1BTN-UU8mm-A|CA20S|V2.0|1080P|P制|客户定制LOGO|黑色|4芯宝马头|1.5米|不带音频|不带红外|8mm镜头|无说明书|带独立包装|F355方案|E4028|客户定制",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100140",
+   "original_desc": null,
+   "replacement": "5151019100260",
+   "replacement_desc": "SVT-A7620MSN-0B1E-UU8mm-A|CA20S|V2.0|1080P|N制|不带LOGO|黑色|4PIN车载视频连接器|0.5米|不带音频|不带红外|8mm镜头|配英文说明书|带独立包装|F355方案|E227967|客户定制|外壳不带X",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": "227967"
+  },
+  {
+   "original": "5151019100146",
+   "original_desc": null,
+   "replacement": "5151019100266",
+   "replacement_desc": "SVT-A7620MSN-0B1E-UU2.8mm-A|CA20S|V1.0|1080P|N制|不带LOGO|黑色|M12防水接口|0.5米|不带音频|不带红外|2.8mm镜头|配英文说明书|带独立包装|F355方案|E227967|客户定制|外壳不带X",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": "227967"
+  },
+  {
+   "original": "5151019100147",
+   "original_desc": null,
+   "replacement": "5151019100267",
+   "replacement_desc": "SVT-A7620MSN-1BTE-UU2.8mm-A|CA20S|V1.0|1080P|N制|锐明英文LOGO|黑色|4芯宝马头|1.5米|不带音频|不带红外|2.8mm镜头|配英文说明书|带独立包装|F355方案|E0001|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100149",
+   "original_desc": null,
+   "replacement": "5151019100268",
+   "replacement_desc": "SVT-A7620MSP-1B1C-UU8mm-A|CA20S|V2.0|1080P|P制|中英文LOGO|黑色|标准4芯航空头|0.5米|不带音频|不带红外|8mm镜头|无说明书|带独立包装|F355方案|C0001|通用|定制型号为：CL20S",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100150",
+   "original_desc": null,
+   "replacement": "5151019100275",
+   "replacement_desc": "SVT-A7620MSP-1B1N-UU8mm-A|CA20S|V2.0|1080P|P制|锐明英文LOGO|黑色|标准4芯航空线|增加防脱松环|0.5米|不带音频|不带红外|8mm镜头|无说明书|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100152",
+   "original_desc": null,
+   "replacement": "5151019100270",
+   "replacement_desc": "SVT-A7620MSN-1BTE-UU2.8mm-A|CA20S|V1.0|1080P|N制|不带LOGO|黑色|4芯宝马头|1.5米|不带音频|不带红外|2.8mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用|外壳不带“X\"",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100153",
+   "original_desc": null,
+   "replacement": "5151019100262",
+   "replacement_desc": "SVT-A7720MSP-0B1E-UU8mm-A|CA20S|V2.0|1080P|P制|不带LOGO|黑色|标准4芯航空头|2米|不带音频|不带红外|8mm镜头|配英文说明书|带独立包装|定制标贴|F355方案|E132052|客户定制",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100154",
+   "original_desc": null,
+   "replacement": "5151019100265",
+   "replacement_desc": "SVT-A7720MSP-0B1E-UU8mm-A|CA20S|V2.0|1080P|P制|不带LOGO|黑色|标准4芯航空头|2米|不带音频|不带红外|8mm镜头|配英文说明书|带独立包装|定制标贴|F355方案|E132052|客户定制",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100155",
+   "original_desc": null,
+   "replacement": "5151019100263",
+   "replacement_desc": "SVT-A7720MSP-0B1E-UU8mm-A|CA20S|V2.0|1080P|P制|不带LOGO|黑色|标准4芯航空头|2米|不带音频|不带红外|8mm镜头|配英文说明书|带独立包装|定制标贴|F355方案|E132052|客户定制",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100156",
+   "original_desc": null,
+   "replacement": "5151019100261",
+   "replacement_desc": "SVT-A7620MSN-0B1E-UU4mm-A|CA20S|V1.0|1080P|N制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|不带红外|4mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用|外壳不带X",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100157",
+   "original_desc": null,
+   "replacement": "5151019100264",
+   "replacement_desc": "SVT-A7720MSN-AI-0B1E-UU8mm-A|CA20S|V2.0|1080P|N制|锐明英文LOGO|黑色|标准4芯航空头|2米|不带音频|不带红外|8mm镜头|配英文说明书|带独立包装|F355方案|E0001|通用",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100158",
+   "original_desc": null,
+   "replacement": "5151019100274",
+   "replacement_desc": "SVT-A7720MSP-0B1E-UU8mm-A|CA20S|V2.0|1080P|P制|不带LOGO|黑色|标准4芯航空头|2米|不带音频|不带红外|8mm镜头|配英文说明书|带独立包装|定制标贴|F355方案|E86041|客户定制|“P0039MT+物料编号\"",
+   "lifecycle": "[产品]量产",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100161",
+   "original_desc": null,
+   "replacement": "5151019100276",
+   "replacement_desc": "SVT-A7620MSP-FB1N-UU8mm-A|CA20S|V2.0|1080P|P制|客户定制LOGO|黑色|标准4芯航空头|增加防脱胶圈|0.5米|不带音频|不带红外|8mm镜头|无说明书|不带包装|F355方案|E3453|客户定制",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100162",
+   "original_desc": null,
+   "replacement": "5151019100278",
+   "replacement_desc": "SVT-A7620MP-0B1E-AU4mm-A|CA20S|V1.0|1080P|P制|客户定制LOGO|黑色|标准4芯航空头|0.5米|不带音频|不带红外|4mm镜头|配英文说明书|带独立包装|F355方案|E209826|客户定制",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100168",
+   "original_desc": null,
+   "replacement": "5151019100279",
+   "replacement_desc": "SVT-A7720MSP-0B1E-UU8mm-A|CA20S|V2.0|1080P|P制|不带LOGO|黑色|标准4芯航空头|2米|不带音频|不带红外|8mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100170",
+   "original_desc": null,
+   "replacement": "5151019100280",
+   "replacement_desc": "SVT-A7620MSP-1B1E-UU8mm-A|CA20S|V2.0|1080P|P制|锐明英文LOGO|黑色|4PIN车载连接器|0.5米|不带音频|不带红外|8mm镜头|配英文说明书|带独立包装|F355方案|E0001|通用",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100171",
+   "original_desc": null,
+   "replacement": "5151019100282",
+   "replacement_desc": "SVT-A7620MSP-1B1E-UU4mm-A|CA20S|V1.0|1080P|P制|锐明英文LOGO|黑色|标准4芯航空头|0.5米|不带音频|不带红外|4mm镜头|配英文说明书|带独立包装|F355方案|E0001|通用|上出线",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100172",
+   "original_desc": null,
+   "replacement": "5151019100285",
+   "replacement_desc": "SVT-A7720MSN-0B1E-UU8mm-A|CA20S|V2.0|1080P|N制|客户定制LOGO|黑色|标准4芯航空头|2米|不带音频|不带红外|8mm镜头|配英文说明书|带独立包装|定制标贴|F355方案|E410442|客户定制|不带“Model\"字样",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100173",
+   "original_desc": null,
+   "replacement": "5151019100288",
+   "replacement_desc": "SVT-A7620MSN-0B1E-UU2.8mm-A|CA20S|V1.0|1080P|N制|锐明英文LOGO|黑色|标准4芯航空线|0.5米|不带音频|不带红外|2.8mm镜头|配英文说明书|带独立包装|F355方案|E0001|通用",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100176",
+   "original_desc": null,
+   "replacement": "5151019100290",
+   "replacement_desc": "SVT-A7620MSP-1B1E-UU8mm-A|CA20S|V2.0|1080P|P制|客户定制LOGO|黑色|标准4芯航空头|0.5米|不带音频|不带红外|8mm镜头|配英文说明书|带独立包装|F355方案|E417550|客户定制",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100177",
+   "original_desc": null,
+   "replacement": "5151019100291",
+   "replacement_desc": "SVT-A7620MSP-1B1E-UU8mm-A|CA20S|V2.0|1080P|P制|锐明英文LOGO|黑色|4PIN车载连接器|0.5米|不带音频|不带红外|8mm镜头|配英文说明书|带独立包装|F355方案|E0001|通用|上出线",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100179",
+   "original_desc": null,
+   "replacement": "5151019100269",
+   "replacement_desc": "SVT-A7620MSP-1B1E-UU8mm-A|CA20S|V2.0|1080P|P制|客户定制LOGO|黑色|标准4芯航空头|0.5米|不带音频|不带红外|8mm镜头|配英文说明书|带独立包装|F355方案|E417550|客户定制",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100180",
+   "original_desc": null,
+   "replacement": "5151019100271",
+   "replacement_desc": "SVT-A7720MSN-0B1E-UU8mm-A|CA20S|V2.0|1080P|N制|不带LOGO|黑色|标准4芯航空头|2米|不带音频|不带红外|8mm镜头|配英文说明书|带独立包装|定制标贴|F355方案|E410442|客户定制|不带“Model\"字样",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100181",
+   "original_desc": null,
+   "replacement": "5151019100277",
+   "replacement_desc": "SVT-A7620MSP-FB1N-UU8mm-A|CA20S|V2.0|1080P|P制|客户定制LOGO|黑色|标准4芯航空头|增加防脱胶圈|0.5米|不带音频|不带红外|8mm镜头|带独立包装|F355方案|C3453|客户定制",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100182",
+   "original_desc": null,
+   "replacement": "5151019100273",
+   "replacement_desc": "SVT-A7720MSN-0B1E-UU8mm-A|CA20S|V2.0|1080P|N制|不带LOGO|黑色|标准4芯航空头|2米|不带音频|不带红外|8mm镜头|配英文说明书|不带包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100183",
+   "original_desc": null,
+   "replacement": "5151019100272",
+   "replacement_desc": "SVT-A7720MSP-AI-0B1E-UU8mm-A|CA20S|V2.0|1080P|P制|不带LOGO|黑色|标准4芯航空头|2米|不带音频|不带红外|8mm镜头|配英文说明书|不带包装|定制标贴|F355方案|E209044|客户定制",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100184",
+   "original_desc": null,
+   "replacement": "5151019100283",
+   "replacement_desc": "SVT-A7720MSP-0B1E-UU8mm-A|CA20S|V2.0|1080P|P制|不带LOGO|黑色|标准4芯航空头|2米|不带音频|不带红外|8mm镜头|配英文说明书|不带包装|定制标贴|F355方案|E86041|客户定制|定制标贴“P0039MT+物料编号\"",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100185",
+   "original_desc": null,
+   "replacement": "5151019100281",
+   "replacement_desc": "SVT-A7620MSN-0B1E-UU8mm-A|CA20S|V2.0|1080P|N制|客户定制LOGO|黑色|标准4芯航空头|2米|不带音频|不带红外|8mm镜头|配英文说明书|不带包装|定制标贴|F355方案|E410442|客户定制",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100186",
+   "original_desc": null,
+   "replacement": "5151019100284",
+   "replacement_desc": "SVT-A7720MSN-0B1E-UU8mm-A|CA20S|V2.0|1080P|N制|不带LOGO|黑色|标准4芯航空头|2米|不带音频|不带红外|8mm镜头|配英文说明书|不带包装|定制标贴|F355方案|E410442|客户定制",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151019100188",
+   "original_desc": null,
+   "replacement": "5151019100286",
+   "replacement_desc": "(K)SVT-A7720MSN-AI-0BZE-UU8mm-A|CA20S|V2.0|1080P|N制|不带LOGO|黑色|5028定制尾线|0.5米|不带音频|不带红外|8mm镜头|不带包装|F355方案|E125028|客户定制",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA20S",
+   "customer_code": "125028"
+  },
+  {
+   "original": "5151019100189",
+   "original_desc": null,
+   "replacement": "5151019100287",
+   "replacement_desc": "(K)SVT-A7720MSN-AI-0BZE-UU4mm-A|CA20S|V1.0|1080P|N制|不带LOGO|黑色|125028定制尾线|0.5米|不带音频|不带红外|4mm镜头|配英文说明书|不带包装|F355方案|E125028|客户定制|带区域标识|定制标贴|酒精贴纸",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA20S",
+   "customer_code": "125028"
+  },
+  {
+   "original": "5151019100190",
+   "original_desc": null,
+   "replacement": "5151019100289",
+   "replacement_desc": "SVT-A7720MSP-0B1E-UU8mm-A|CA20S|V2.0|1080P|P制|不带LOGO|黑色|标准4芯航空头|2米|不带音频|不带红外|8mm镜头|配英文说明书|不带包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA20S",
+   "customer_code": null
+  },
+  {
+   "original": "5151022100017",
+   "original_desc": null,
+   "replacement": "5151071100084",
+   "replacement_desc": "SVT-A7620HN-0G1E-AIR2.8mm-A|CA11|V1.0|1080P|N制|不带LOGO|灰绿色|标准4芯航空头|0.5米|带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|定制标贴|F355方案|E4019|客户定制",
+   "lifecycle": "[产品]量产",
+   "model": "CA11",
+   "customer_code": null
+  },
+  {
+   "original": "5151022100020",
+   "original_desc": null,
+   "replacement": "5151071100085",
+   "replacement_desc": "SVT-A7620HP-0G1E-AIR2.8mm-A|CA11|V1.0|1080P|P制|不带LOGO|灰绿色|标准4芯航空头|0.5米|带音频|带红外|2.8mm镜头|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA11",
+   "customer_code": null
+  },
+  {
+   "original": "5151022100021",
+   "original_desc": null,
+   "replacement": "5151071100086",
+   "replacement_desc": "SVT-A7620HP-0G1E-AIR3.6mm-A|CA11|V1.0|1080P|P制|不带LOGO|灰绿色|标准4芯航空头|0.5米|带音频|带红外|3.6mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA11",
+   "customer_code": null
+  },
+  {
+   "original": "5151022100064",
+   "original_desc": null,
+   "replacement": "5151071100088",
+   "replacement_desc": "SVT-A7620HN-0G1E-AIR2.8mm-A|CA11|V1.0|1080P|N制|不带LOGO|灰绿色|标准4芯航空头|0.5米|带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA11",
+   "customer_code": null
+  },
+  {
+   "original": "5151022100120",
+   "original_desc": null,
+   "replacement": "5151071100087",
+   "replacement_desc": "SVT-A7620HP-0B1E-AIR2.8mm-A|CA11|V1.0|1080P|P制|不带LOGO|黑色|标准4芯航空头|0.5米|带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用|带区域标识",
+   "lifecycle": "[产品]量产",
+   "model": "CA11",
+   "customer_code": null
+  },
+  {
+   "original": "5151022100136",
+   "original_desc": null,
+   "replacement": "与5151022100021重复",
+   "replacement_desc": null,
+   "lifecycle": "[产品]研发样品",
+   "model": "CA11",
+   "customer_code": null
+  },
+  {
+   "original": "5151026100003",
+   "original_desc": null,
+   "replacement": "5151016100025",
+   "replacement_desc": "SVT-A7620QP-0G1C-WIR2.8mm-A|CA13|V1.0|1080P|P制|不带LOGO|灰绿色|标准4芯航空头|0.5米|不带音频|带红外|2.8mm镜头|配中文说明书|带独立包装|F355方案|C0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA13",
+   "customer_code": null
+  },
+  {
+   "original": "5151028100003",
+   "original_desc": null,
+   "replacement": "5151051100028",
+   "replacement_desc": "(K)SVT-A7620ASP-0B1E-AIR2.1mm-A|CA34|V1.0|1080P|P制|不带LOGO|黑色|标准4芯航空头|0.5米|带音频|带红外|2.1mm镜头|配英文说明书|带独立包装|定制标贴|F355方案|E4006|客户定制",
+   "lifecycle": "[产品]量产",
+   "model": "CA34",
+   "customer_code": null
+  },
+  {
+   "original": "5151028100004",
+   "original_desc": null,
+   "replacement": "2026/6/30上线",
+   "replacement_desc": null,
+   "lifecycle": "[产品]量产",
+   "model": "CA34",
+   "customer_code": "3999"
+  },
+  {
+   "original": "5151028100006",
+   "original_desc": null,
+   "replacement": "5151051100027",
+   "replacement_desc": "SVT-A7620ASP-0B1E-AU2.1mm-A|CA34|V1.0|1080P|P制|不带LOGO|黑色|标准4芯航空头|0.5米|带音频|不带红外|2.1mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA34",
+   "customer_code": null
+  },
+  {
+   "original": "5151028100007",
+   "original_desc": null,
+   "replacement": "5151051100029",
+   "replacement_desc": "SVT-A7620ASN-0B1E-AIR2.1mm-A|CA34|V1.0|1080P|N制|不带LOGO|黑色|标准4芯航空头|0.5米|带音频|带红外|2.1mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA34",
+   "customer_code": null
+  },
+  {
+   "original": "5151028100011",
+   "original_desc": null,
+   "replacement": "暂不申请",
+   "replacement_desc": null,
+   "lifecycle": "[产品]量产",
+   "model": "CA34",
+   "customer_code": "3913"
+  },
+  {
+   "original": "5151028100012",
+   "original_desc": null,
+   "replacement": "暂不申请",
+   "replacement_desc": null,
+   "lifecycle": "[产品]量产",
+   "model": "CA34",
+   "customer_code": "3913"
+  },
+  {
+   "original": "5151028100013",
+   "original_desc": null,
+   "replacement": "暂不申请",
+   "replacement_desc": null,
+   "lifecycle": "[产品]量产",
+   "model": "CA34",
+   "customer_code": "3913"
+  },
+  {
+   "original": "5151028100014",
+   "original_desc": null,
+   "replacement": "暂不申请",
+   "replacement_desc": null,
+   "lifecycle": "[产品]量产",
+   "model": "CA34",
+   "customer_code": "3913"
+  },
+  {
+   "original": "5151028100015",
+   "original_desc": null,
+   "replacement": "暂不申请",
+   "replacement_desc": null,
+   "lifecycle": "[产品]量产",
+   "model": "CA34",
+   "customer_code": "7028"
+  },
+  {
+   "original": "5151028100016",
+   "original_desc": null,
+   "replacement": "暂不申请",
+   "replacement_desc": null,
+   "lifecycle": "[产品]量产",
+   "model": "CA34",
+   "customer_code": "7028"
+  },
+  {
+   "original": "5151028100017",
+   "original_desc": null,
+   "replacement": "暂不申请",
+   "replacement_desc": null,
+   "lifecycle": "[产品]量产",
+   "model": "CA34",
+   "customer_code": "7028"
+  },
+  {
+   "original": "5151028100018",
+   "original_desc": null,
+   "replacement": "暂不申请",
+   "replacement_desc": null,
+   "lifecycle": "[产品]量产",
+   "model": "CA34",
+   "customer_code": "7028"
+  },
+  {
+   "original": "5151030100009",
+   "original_desc": null,
+   "replacement": "5151030100016",
+   "replacement_desc": "SVT-A7620MSP-0B1N-UU4mm-A|CA20ST|V1.0|1080P|P制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|不带红外|4mm镜头|无说明书|带独立包装|F355方案|E0000|通用|上出线",
+   "lifecycle": "[产品]量产",
+   "model": "CA20ST",
+   "customer_code": null
+  },
+  {
+   "original": "5151030100010",
+   "original_desc": null,
+   "replacement": "5151030100017",
+   "replacement_desc": "SVT-A7620MSP-1BTN-UU4mm-AT|CA20ST|V1.0|1080P|P制|锐明英文LOGO|黑色|标准4芯宝马头|2.5米|不带音频|不带红外|4mm镜头|无说明书|带独立包装|F355方案|E0001|通用|上出线|带偏光片",
+   "lifecycle": "[产品]量产",
+   "model": "CA20ST",
+   "customer_code": null
+  },
+  {
+   "original": "5151030100011",
+   "original_desc": null,
+   "replacement": "5151030100019",
+   "replacement_desc": "SVT-A7620MSP-0BTN-UU4mm-AT|CA20ST|V1.0|1080P|P制|不带LOGO|黑色|4芯宝马头|2.5米|不带音频|不带红外|4mm镜头|带独立包装|F355方案|E0000|通用|定制标贴不带SVT|外壳不带X",
+   "lifecycle": "[产品]量产",
+   "model": "CA20ST",
+   "customer_code": null
+  },
+  {
+   "original": "5151030100012",
+   "original_desc": null,
+   "replacement": "5151030100018",
+   "replacement_desc": "SVT-A7620MSP-1BTN-UU4mm-AT|CA20ST|V1.0|1080P|P制|不带LOGO|黑色|4芯宝马头|2.5米|不带音频|不带红外|4mm镜头|无说明书|带独立包装|F355方案|E0000|通用|上出线|带偏光",
+   "lifecycle": "[产品]量产",
+   "model": "CA20ST",
+   "customer_code": null
+  },
+  {
+   "original": "5151039100048",
+   "original_desc": null,
+   "replacement": "5151039100158",
+   "replacement_desc": "SVT-A7620HSP-0B1E-WIR2.2mm-A|CA39|V1.1|V1.1|1080P|P制|不带LOGO|黑色|标准4芯航空头|增加防脱松环|0.5米|不带音频|带红外|2.2mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA39",
+   "customer_code": null
+  },
+  {
+   "original": "5151039100057",
+   "original_desc": null,
+   "replacement": "5151039100159",
+   "replacement_desc": "SVT-A7620HSN-0B1E-WIR3.6mm-A|CA39|V1.2|1080P|N制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|带红外|3.6mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用|带区域标识",
+   "lifecycle": "[产品]量产",
+   "model": "CA39",
+   "customer_code": null
+  },
+  {
+   "original": "5151039100059",
+   "original_desc": null,
+   "replacement": "5151039100160",
+   "replacement_desc": "SVT-A7620HSP-0B1E-WIR2.2mm-A|CA39|V1.1|V1.1|1080P|P制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|带红外|2.2mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA39",
+   "customer_code": null
+  },
+  {
+   "original": "5151039100060",
+   "original_desc": null,
+   "replacement": "5151039100161",
+   "replacement_desc": "SVT-A7620HSN-0B1E-WIR2.2mm-A|CA39|V1.1|1080P|N制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|带红外|2.2mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用|带区域标识",
+   "lifecycle": "[产品]量产",
+   "model": "CA39",
+   "customer_code": null
+  },
+  {
+   "original": "5151039100068",
+   "original_desc": null,
+   "replacement": null,
+   "replacement_desc": null,
+   "lifecycle": "[产品]量产",
+   "model": "CA39",
+   "customer_code": "23年申请\n无出货记录"
+  },
+  {
+   "original": "5151039100080",
+   "original_desc": null,
+   "replacement": "5151039100162",
+   "replacement_desc": "SVT-A7620HSP-0B1E-WU2.8mm-A|CA39|V1.2|1080P|P制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|不带红外|2.8mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA39",
+   "customer_code": null
+  },
+  {
+   "original": "5151039100083",
+   "original_desc": null,
+   "replacement": "5151039100163",
+   "replacement_desc": "SVT-A7620HSP-0B1E-WIR2.8mm-A|CA39|V1.2|1080P|P制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用|外壳不带X",
+   "lifecycle": "[产品]量产",
+   "model": "CA39",
+   "customer_code": null
+  },
+  {
+   "original": "5151039100085",
+   "original_desc": null,
+   "replacement": "5151039100164",
+   "replacement_desc": "SVT-A7620HSN-0B1N-WIR2.2mm-A|CA39|V1.1|1080P|N制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|带红外|2.2mm镜头|无说明书|带独立包装|F355方案|E0000|通用|外壳不带X",
+   "lifecycle": "[产品]量产",
+   "model": "CA39",
+   "customer_code": null
+  },
+  {
+   "original": "5151039100089",
+   "original_desc": null,
+   "replacement": "5151039100165",
+   "replacement_desc": "SVT-A7620HSP-0B1E-UU2.2mm-A|CA39|V1.1|1080P|P制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|不带红外|2.2mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA39",
+   "customer_code": null
+  },
+  {
+   "original": "5151039100091",
+   "original_desc": null,
+   "replacement": "5151039100166",
+   "replacement_desc": "SVT-A7620HSP-1B1E-WIR2.2mm-A|CA39|V1.1|1080P|P制|锐明英文LOGO|黑色|标准4芯航空头|0.5米|不带音频|带红外|2.2mm镜头|配英文说明书|带独立包装|F355方案|E0001|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA39",
+   "customer_code": null
+  },
+  {
+   "original": "5151039100092",
+   "original_desc": null,
+   "replacement": "5151039100168",
+   "replacement_desc": "SVT-A7620HSP-0B1E-WU8mm-A|CA39|V1.2|1080P|P制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|不带红外|8mm镜头|无说明书|带独立包装|F355方案|像素专用料号|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA39",
+   "customer_code": null
+  },
+  {
+   "original": "5151039100094",
+   "original_desc": null,
+   "replacement": null,
+   "replacement_desc": null,
+   "lifecycle": "[产品]量产",
+   "model": "CA39",
+   "customer_code": "23年申请\n无出货记录"
+  },
+  {
+   "original": "5151039100095",
+   "original_desc": null,
+   "replacement": "与5151039100083重复",
+   "replacement_desc": null,
+   "lifecycle": "[产品]量产",
+   "model": "CA39",
+   "customer_code": null
+  },
+  {
+   "original": "5151039100096",
+   "original_desc": null,
+   "replacement": "5151039100169",
+   "replacement_desc": "SVT-A7620HSP-0B1E-WIR3.6mm-A|CA39|V1.2|1080P|P制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA39",
+   "customer_code": null
+  },
+  {
+   "original": "5151039100099",
+   "original_desc": null,
+   "replacement": "5151039100170",
+   "replacement_desc": "SVT-A7620HSN-0B1E-WIR2.8mm-A|CA39|V1.2|1080P|N制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用|带区域标识",
+   "lifecycle": "[产品]量产",
+   "model": "CA39",
+   "customer_code": null
+  },
+  {
+   "original": "5151039100100",
+   "original_desc": null,
+   "replacement": "5151039100171",
+   "replacement_desc": "SVT-A7620HSN-0B1N-WIR3.6mm-A|CA39|V1.2|1080P|N制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|带红外|3.6mm镜头|无说明书|带独立包装|F355方案|E0000|通用|带区域标识|不带X",
+   "lifecycle": "[产品]量产",
+   "model": "CA39",
+   "customer_code": null
+  },
+  {
+   "original": "5151039100101",
+   "original_desc": null,
+   "replacement": null,
+   "replacement_desc": null,
+   "lifecycle": "[产品]量产",
+   "model": "CA39",
+   "customer_code": "近两年无出货记录"
+  },
+  {
+   "original": "5151039100102",
+   "original_desc": null,
+   "replacement": "5151039100172",
+   "replacement_desc": "SVT-A7620HSP-0B1E-WIR2.8mm-A|CA39|V1.2|1080P|P制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA39",
+   "customer_code": null
+  },
+  {
+   "original": "5151039100105",
+   "original_desc": null,
+   "replacement": "5151039100173",
+   "replacement_desc": "SVT-A7620HSP-0B1E-WIR2.8mm-A|CA39|V1.2|1080P|P制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|F355方案|E86041|客户定制|外壳不带X|定制标贴“P0047MT+物料编号\"",
+   "lifecycle": "[产品]量产",
+   "model": "CA39",
+   "customer_code": null
+  },
+  {
+   "original": "5151039100107",
+   "original_desc": null,
+   "replacement": "5151039100174",
+   "replacement_desc": "SVT-A7620HSN-0B1E-WIR2.2mm-A|CA39|V1.1|1080P|N制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|带红外|2.2mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用|带区域标识|外壳不带X",
+   "lifecycle": "[产品]量产",
+   "model": "CA39",
+   "customer_code": null
+  },
+  {
+   "original": "5151039100108",
+   "original_desc": null,
+   "replacement": "5151039100175",
+   "replacement_desc": "SVT-A7620HSN-0B1E-WIR2.8mm-A|CA39|V1.2|1080P|N制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用|带区域标识|外壳不带X",
+   "lifecycle": "[产品]量产",
+   "model": "CA39",
+   "customer_code": null
+  },
+  {
+   "original": "5151039100110",
+   "original_desc": null,
+   "replacement": "5151039100176",
+   "replacement_desc": "(K)SVT-A7620HSN-0B1N-WIR2.2mm-A|CA39|V1.1|1080P|N制|不带LOGO|黑色|M12防水接口|0.5米|不带音频|带红外|2.2mm镜头|无说明书|带独立包装|F355方案|E227967|客户定制|外壳不带X​|增加护线环",
+   "lifecycle": "[产品]量产",
+   "model": "CA39",
+   "customer_code": "227967"
+  },
+  {
+   "original": "5151039100112",
+   "original_desc": null,
+   "replacement": "5151039100177",
+   "replacement_desc": "SVT-A7620HSN-0B1N-WIR2.8mm-A|CA39|V1.2|1080P|N制|不带LOGO|黑色|M12防水接口|0.5米|不带音频|带红外|2.8mm镜头|无说明书|带独立包装|F355方案|E227967|客户定制|外壳不带X​|增加护线环",
+   "lifecycle": "[产品]量产",
+   "model": "CA39",
+   "customer_code": "227967"
+  },
+  {
+   "original": "5151039100113",
+   "original_desc": null,
+   "replacement": "5151039100178",
+   "replacement_desc": "SVT-A7620HSN-0B1N-WIR3.6mm-A|CA39|V1.2|1080P|N制|不带LOGO|黑色|M12防水接口|0.5米|不带音频|带红外|3.6mm镜头|无说明书|带独立包装|F355方案|E227967|客户定制|外壳不带X​|增加护线环",
+   "lifecycle": "[产品]量产",
+   "model": "CA39",
+   "customer_code": "227967"
+  },
+  {
+   "original": "5151039100114",
+   "original_desc": null,
+   "replacement": "5151039100179",
+   "replacement_desc": "SVT-A7620HSP-0B1N-WIR2.2mm-A|CA39|V1.1|1080P|P制|不带LOGO|黑色|M12防水接口|0.5米|不带音频|带红外|2.2mm镜头|无说明书|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA39",
+   "customer_code": null
+  },
+  {
+   "original": "5151039100115",
+   "original_desc": null,
+   "replacement": "5151039100180",
+   "replacement_desc": "SVT-A7620HSP-0B1E-UIR8mm-A|CA39|V1.2|1080P|P制|不带LOGO|黑色|M12防水接头|0.5米|不带音频|带红外|8mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA39",
+   "customer_code": null
+  },
+  {
+   "original": "5151039100118",
+   "original_desc": null,
+   "replacement": "5151039100181",
+   "replacement_desc": "SVT-A7620HSP-0B1E-WIR2.2mm-A|CA39|V1.1|1080P|P制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|带红外|2.2mm镜头|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA39",
+   "customer_code": null
+  },
+  {
+   "original": "5151039100119",
+   "original_desc": null,
+   "replacement": "申请后无出货记录",
+   "replacement_desc": null,
+   "lifecycle": "[产品]研发样品",
+   "model": "CA39",
+   "customer_code": null
+  },
+  {
+   "original": "5151039100122",
+   "original_desc": null,
+   "replacement": "申请后无出货记录",
+   "replacement_desc": null,
+   "lifecycle": "[产品]研发样品",
+   "model": "CA39",
+   "customer_code": null
+  },
+  {
+   "original": "5151039100123",
+   "original_desc": null,
+   "replacement": "5151039100182",
+   "replacement_desc": "SVT-A7620HSP-0B1E-WIR2.8mm-A|CA39|V1.2|1080P|P制|客户定制LOGO|黑色|标准4芯航空头|0.5米|不带音频|带红外|2.8mm镜头|带独立包装|F355方案|E209826|客户定制",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA39",
+   "customer_code": null
+  },
+  {
+   "original": "5151039100124",
+   "original_desc": null,
+   "replacement": "近两年无出货记录",
+   "replacement_desc": null,
+   "lifecycle": "[产品]研发样品",
+   "model": "CA39",
+   "customer_code": null
+  },
+  {
+   "original": "5151039100127",
+   "original_desc": null,
+   "replacement": "5151039100183",
+   "replacement_desc": "SVT-A7620HSN-0B1E-WIR2.8mm-A|CA39|V1.2|1080P|N制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用|带区域标识|增加出线孔|外壳不带X",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA39",
+   "customer_code": null
+  },
+  {
+   "original": "5151039100130",
+   "original_desc": null,
+   "replacement": "5151039100184",
+   "replacement_desc": "SVT-A7620HSP-0B1E-WIR2.2mm-A|CA39|V1.1|1080P|P制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|带红外|2.2mm镜头|配英文说明书|带独立包装|定制标贴|F355方案|E86041|客户定制|带标贴“P0082MT\"",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA39",
+   "customer_code": null
+  },
+  {
+   "original": "5151039100132",
+   "original_desc": null,
+   "replacement": "与5151039100138重复",
+   "replacement_desc": null,
+   "lifecycle": "[产品]量产",
+   "model": "CA39",
+   "customer_code": null
+  },
+  {
+   "original": "5151039100136",
+   "original_desc": null,
+   "replacement": "5151039100186",
+   "replacement_desc": "SVT-A7620HSN-0BWN-WIR3.6mm-A|CA39|V1.2|1080P|N制|不带LOGO|黑色|定制4芯宝马头|带转接线|2米|不带音频|带红外|3.6mm镜头|无说明书|带独立包装|F355方案|E228752|客户定制",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA39",
+   "customer_code": null
+  },
+  {
+   "original": "5151039100137",
+   "original_desc": null,
+   "replacement": "5151039100187",
+   "replacement_desc": "SVT-A7620HSN-0B1E-WIR2.2mm-A|CA39|V1.1|1080P|N制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|带红外|2.2mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用|带区域标识|增加出线孔|外壳不带X",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA39",
+   "customer_code": null
+  },
+  {
+   "original": "5151039100138",
+   "original_desc": null,
+   "replacement": "5151039100185",
+   "replacement_desc": "SVT-A7620HSP-0BWN-WIR3.6mm-A|CA39|V1.2|1080P|P制|不带LOGO|黑色|定制4芯宝马头|带转接线|2米|不带音频|带红外|3.6mm镜头|无说明书|带独立包装|F355方案|E228752|客户定制",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA39",
+   "customer_code": null
+  },
+  {
+   "original": "5151039100141",
+   "original_desc": null,
+   "replacement": "5151039100188",
+   "replacement_desc": "SVT-A7620HSP-0B1E-WIR2.8mm-A|CA39|V1.2|1080P|P制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|带红外|2.8mm镜头|配英文说明书|不带包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA39",
+   "customer_code": null
+  },
+  {
+   "original": "5151039100142",
+   "original_desc": null,
+   "replacement": "5151039100189",
+   "replacement_desc": "SVT-A7620HSN-0B1E-WIR2.2mm-A|CA39|V1.1|1080P|N制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|带红外|2.2mm镜头|配英文说明书|不带包装|F355方案|E0000|通用|带区域标识",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA39",
+   "customer_code": null
+  },
+  {
+   "original": "5151040100012",
+   "original_desc": null,
+   "replacement": "5151040100112",
+   "replacement_desc": "SVT-A7620HBN-0B1E-AIR2.2mm-A|CA39B|V1.1|1080P|N制|不带LOGO|黑色|标准4芯航空头|0.5米|带音频|带红外|2.2mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用|带区域标识",
+   "lifecycle": "[产品]量产",
+   "model": "CA39B",
+   "customer_code": null
+  },
+  {
+   "original": "5151040100015",
+   "original_desc": null,
+   "replacement": "5151040100115",
+   "replacement_desc": "SVT-A7620HBP-AI-0B1E-AIR2.2mm-A|CA39B|V1.1|1080P|P制|不带LOGO|黑色|标准4芯航空线|0.5米|带音频|带红外|2.2mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA39B",
+   "customer_code": null
+  },
+  {
+   "original": "5151040100016",
+   "original_desc": null,
+   "replacement": "5151040100114",
+   "replacement_desc": "SVT-A7620HBP-0B1E-AU2.8mm-A|CA39B|V1.1|1080P|P制|不带LOGO|黑色|标准4芯航空头|0.5米|带音频|不带红外|2.8mm镜头|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA39B",
+   "customer_code": null
+  },
+  {
+   "original": "5151040100018",
+   "original_desc": null,
+   "replacement": "5151040100113",
+   "replacement_desc": "SVT-A7620MN-0B1E-AU3.6mm-A|CA39B|V1.1|1080P|N制|不带LOGO|黑色|标准4芯航空头|0.5米|带音频|不带红外|3.6mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA39B",
+   "customer_code": null
+  },
+  {
+   "original": "5151040100022",
+   "original_desc": null,
+   "replacement": "5151040100111",
+   "replacement_desc": "SVT-A7620HBP-0B1E-AIR2.8mm-A|CA39B|V1.1|1080P|P制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|带红外|2.8mm镜头|无说明书|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA39B",
+   "customer_code": null
+  },
+  {
+   "original": "5151040100026",
+   "original_desc": null,
+   "replacement": "5151040100116",
+   "replacement_desc": "SVT-A7620HBP-0B1E-AIR2.2mm-A|CA39B|V1.1|1080P|P制|不带LOGO|黑色|标准4芯航空头|0.5米|带音频|带红外|2.2mm镜头|配英文说明书|带独立包装|F355方案|E197101|客户定制|定制标贴型号 CR-R-XJ-2022A",
+   "lifecycle": "[产品]量产",
+   "model": "CA39B",
+   "customer_code": null
+  },
+  {
+   "original": "5151040100038",
+   "original_desc": null,
+   "replacement": "5151040100117",
+   "replacement_desc": "SVT-A7620HBP-0B1E-AIR2.8mm-A|CA39B|V1.1|1080P|P制|不带LOGO|黑色|标准4芯航空头|0.5米|带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA39B",
+   "customer_code": null
+  },
+  {
+   "original": "5151040100039",
+   "original_desc": null,
+   "replacement": "5151040100118",
+   "replacement_desc": "SVT-A7620HBP-0B1E-AIR3.6mm-A|CA39B|V1.1|1080P|P制|不带LOGO|黑色|标准4芯航空头|0.5米|带音频|带红外|3.6mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA39B",
+   "customer_code": null
+  },
+  {
+   "original": "5151040100040",
+   "original_desc": null,
+   "replacement": "5151040100119",
+   "replacement_desc": "SVT-A7620HBN-0B1E-AIR2.8mm-A|CA39B|V1.1|1080P|N制|不带LOGO|黑色|标准4芯航空头|0.5米|带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用|带区域标识",
+   "lifecycle": "[产品]量产",
+   "model": "CA39B",
+   "customer_code": null
+  },
+  {
+   "original": "5151040100041",
+   "original_desc": null,
+   "replacement": "5151040100120",
+   "replacement_desc": "SVT-A7620HBN-0B1E-AIR3.6mm-A|CA39B|V1.1|1080P|N制|不带LOGO|黑色|标准4芯航空头|0.5米|带音频|带红外|3.6mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用|带区域标识",
+   "lifecycle": "[产品]量产",
+   "model": "CA39B",
+   "customer_code": null
+  },
+  {
+   "original": "5151040100042",
+   "original_desc": null,
+   "replacement": "5151040100121",
+   "replacement_desc": "SVT-A7620HBP-0B1E-AIR2.2mm-A|CA39B|V1.1|1080P|P制|不带LOGO|黑色|标准4芯航空头|0.5米|带音频|带红外|2.2mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA39B",
+   "customer_code": null
+  },
+  {
+   "original": "5151040100045",
+   "original_desc": null,
+   "replacement": "5151040100122",
+   "replacement_desc": "SVT-A7620HBP-1B1E-AIR2.8mm-A|CA39B|V1.1|1080P|P制|锐明英文LOGO|黑色|标准4芯航空头|0.5米|带音频|带红外|2.8mm镜头|带独立包装|F355方案|E0001|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA39B",
+   "customer_code": null
+  },
+  {
+   "original": "5151040100052",
+   "original_desc": null,
+   "replacement": "5151040100123",
+   "replacement_desc": "SVT-A7620HBP-1B1C-AIR2.8mm-A|CA39B|V1.1|1080P|P制|锐明英文LOGO|黑色|4PIN车载视频连接器|0.5米|带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|F355方案|E0001|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA39B",
+   "customer_code": null
+  },
+  {
+   "original": "5151040100053",
+   "original_desc": null,
+   "replacement": "5151040100124",
+   "replacement_desc": "(K)SVT-A7620HBN-0B1E-AIR2.2mm-A|CA39B|V1.1|1080P|N制|不带LOGO|黑色|4PIN车载视频连接器|0.5米|带音频|带红外|2.2mm镜头|配英文说明书|带独立包装|F355方案|E227967|客户定制|带区域标识",
+   "lifecycle": "[产品]量产",
+   "model": "CA39B",
+   "customer_code": "227967"
+  },
+  {
+   "original": "5151040100054",
+   "original_desc": null,
+   "replacement": "5151040100125",
+   "replacement_desc": "(K)SVT-A7620HBN-0B1E-AIR2.8mm-A|CA39B|V1.1|1080P|N制|不带LOGO|黑色|4PIN车载视频连接器|0.5米|带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|F355方案|E227967|客户定制|带区域标识",
+   "lifecycle": "[产品]量产",
+   "model": "CA39B",
+   "customer_code": "227967"
+  },
+  {
+   "original": "5151040100055",
+   "original_desc": null,
+   "replacement": "5151040100126",
+   "replacement_desc": "(K)SVT-A7620HBN-0B1E-AIR3.6mm-A|CA39B|V1.1|1080P|N制|不带LOGO|黑色|4PIN车载视频连接器|0.5米|带音频|带红外|3.6mm镜头|配英文说明书|带独立包装|F355方案|E227967|客户定制|带区域标识",
+   "lifecycle": "[产品]量产",
+   "model": "CA39B",
+   "customer_code": "227967"
+  },
+  {
+   "original": "5151040100056",
+   "original_desc": null,
+   "replacement": "5151040100127",
+   "replacement_desc": "SVT-A7620HBP-0W1C-AIR2.8mm-A|CA39B|V1.1|1080P|P制|不带LOGO|白色|4PIN车载视频连接器|0.5米|带音频|带红外|2.8mm镜头|配中文说明书|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA39B",
+   "customer_code": null
+  },
+  {
+   "original": "5151040100057",
+   "original_desc": null,
+   "replacement": "5151040100128",
+   "replacement_desc": "SVT-A7620HBN-1B1E-AIR2.8mm-A|CA39B|V1.1|1080P|N制|锐明英文LOGO|黑色|标准4芯航空头|0.5米|带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|F355方案|E0001|通用|带区域标识",
+   "lifecycle": "[产品]量产",
+   "model": "CA39B",
+   "customer_code": null
+  },
+  {
+   "original": "5151040100059",
+   "original_desc": null,
+   "replacement": "5151040100129",
+   "replacement_desc": "SVT-A7620HBP-1W1E-AIRF2.2mm-A|CA39B|V1.1|1080P|P制|锐明英文LOGO|白色|标准4芯航空头|增加防脱松环|0.5米|带音频|带红外|2.2mm镜头|配英文说明书|带独立包装|F355方案|E0001|通用|截止940红外",
+   "lifecycle": "[产品]量产",
+   "model": "CA39B",
+   "customer_code": null
+  },
+  {
+   "original": "5151040100062",
+   "original_desc": null,
+   "replacement": "5151040100130",
+   "replacement_desc": "SVT-A7620HBP-1W1E-AIRF2.2mm-A|CA39B|V1.1|1080P|P制|锐明英文LOGO|白色|4PIN车载视频连接器|0.5米|带音频|带红外|2.2mm镜头|配英文说明书|带独立包装|F355方案|E0001|通用|截止940红外",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA39B",
+   "customer_code": null
+  },
+  {
+   "original": "5151040100064",
+   "original_desc": null,
+   "replacement": "5151040100131",
+   "replacement_desc": "STV-A7620HBP-0W1C-AIR2.8mm-A|CA39B|V1.1|1080P|P制|不带LOGO|白色|4PIN车载视频连接器|0.5米|带音频|带红外|2.8mm镜头|配中文说明书|带独立包装|定制标贴|F355方案|C228930|客户定制|贴标签“前车厢 探头\"",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA39B",
+   "customer_code": null
+  },
+  {
+   "original": "5151040100065",
+   "original_desc": null,
+   "replacement": "5151040100132",
+   "replacement_desc": "STV-A7620HBP-0W1C-AIR2.8mm-A|CA39B|V1.1|1080P|P制|不带LOGO|白色|4PIN车载视频连接器|0.5米|带音频|带红外|2.8mm镜头|配中文说明书|带独立包装|定制标贴|F355方案|C228930|客户定制|贴标签“中门 探头\"",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA39B",
+   "customer_code": null
+  },
+  {
+   "original": "5151040100066",
+   "original_desc": null,
+   "replacement": "5151040100133",
+   "replacement_desc": "STV-A7620HBP-0W1C-AIR2.8mm-A|CA39B|V1.1|1080P|P制|不带LOGO|白色|4PIN车载视频连接器|0.5米|带音频|带红外|2.8mm镜头|配中文说明书|带独立包装|定制标贴|F355方案|C228930|客户定制|贴标签“后车厢 探头\"",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA39B",
+   "customer_code": null
+  },
+  {
+   "original": "5151040100068",
+   "original_desc": null,
+   "replacement": "5151040100135",
+   "replacement_desc": "STV-A7620HBP-0W1C-AIR2.8mm-A|CA39B|V1.1|1080P|P制|不带LOGO|白色|标准4芯航空头|增加防脱松环|0.5米|带音频|带红外|2.8mm镜头|无说明书|带独立包装|F355方案|E0000|客户定制",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA39B",
+   "customer_code": null
+  },
+  {
+   "original": "5151040100072",
+   "original_desc": null,
+   "replacement": "5151040100136",
+   "replacement_desc": "SVT-A7620HBP-0W1E-AIR2.8mm-A|CA39B|V1.1|1080P|P制|不带LOGO|白色|标准4芯航空头|0.5米|带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA39B",
+   "customer_code": null
+  },
+  {
+   "original": "5151040100076",
+   "original_desc": null,
+   "replacement": "5151040100137",
+   "replacement_desc": "SVT-A7620HBN-1B1C-AIR2.8mm-A|CA39B|V1.1|1080P|N制|锐明英文LOGO|黑色|4PIN车载视频连接器|0.5米|带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|F355方案|E0001|通用",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA39B",
+   "customer_code": null
+  },
+  {
+   "original": "5151040100078",
+   "original_desc": null,
+   "replacement": "5151040100138",
+   "replacement_desc": "SVT-A7620HBP-0B1E-AIR2.2mm-A|CA39B|V1.1|1080P|P制|锐明英文LOGO|黑色|标准4芯航空头|0.5米|带音频|带红外|2.2mm镜头|配英文说明书|带独立包装|F355方案|E0001|通用",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA39B",
+   "customer_code": null
+  },
+  {
+   "original": "5151040100080",
+   "original_desc": null,
+   "replacement": "5151040100140",
+   "replacement_desc": "SVT-A7620HBP-1B1E-AIR2.8mm-A|CA39B|V1.1|1080P|P制|锐明英文LOGO|黑色|标准4芯航空头|0.5米|带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|F355方案|E0001|通用",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA39B",
+   "customer_code": null
+  },
+  {
+   "original": "5151040100081",
+   "original_desc": null,
+   "replacement": "5151040100139",
+   "replacement_desc": "SVT-A7620HBP-1B1E-AIR3.6mm-A|CA39B|V1.1|1080P|P制|锐明英文LOGO|黑色|标准4芯航空头|0.5米|带音频|带红外|3.6mm镜头|配英文说明书|带独立包装|F355方案|E0001|通用",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA39B",
+   "customer_code": null
+  },
+  {
+   "original": "5151040100083",
+   "original_desc": null,
+   "replacement": "申请后无出货记录",
+   "replacement_desc": null,
+   "lifecycle": "[产品]研发样品",
+   "model": "CA39B",
+   "customer_code": null
+  },
+  {
+   "original": "5151040100084",
+   "original_desc": null,
+   "replacement": "5151040100141",
+   "replacement_desc": "SVT-A7620HBP-0B1C-AU2.8mm-A|CA39B|V1.1|1080P|P制|不带LOGO|黑色|4PIN车载视频连接器|0.5米|带音频|带红外|2.8mm镜头|配中文说明书|带独立包装|F355方案|C0000|通用",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA39B",
+   "customer_code": null
+  },
+  {
+   "original": "5151040100090",
+   "original_desc": null,
+   "replacement": "申请后无出货记录",
+   "replacement_desc": null,
+   "lifecycle": "[产品]研发样品",
+   "model": "CA39B",
+   "customer_code": null
+  },
+  {
+   "original": "5151040A00001",
+   "original_desc": null,
+   "replacement": "5151040A00008",
+   "replacement_desc": "(K)QZ-A7620HBP-0W1C-AIR2.8mm-A|CA39B|V1.1|1080P|P制|不带LOGO|白色|标准4芯航空头|0.5米|带音频|带红外|2.8mm镜头|配中文说明书|带独立包装|F355方案|C0001|通用",
+   "lifecycle": "[产品]试产样品",
+   "model": "CA39B",
+   "customer_code": null
+  },
+  {
+   "original": "5151040A00002",
+   "original_desc": null,
+   "replacement": "5151040A00009",
+   "replacement_desc": "(K)QZ-A7620HBP-0W1C-AIR2.8mm-A|CA39B|V1.1|1080P|P制|不带LOGO|白色|4PIN车载视频连接器|0.5米|带音频|带红外|2.8mm镜头|配中文说明书|带独立包装|F355方案|C0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA39B",
+   "customer_code": null
+  },
+  {
+   "original": "5151040A00004",
+   "original_desc": null,
+   "replacement": "申请后无出货记录",
+   "replacement_desc": null,
+   "lifecycle": "[产品]量产",
+   "model": "CA39B",
+   "customer_code": null
+  },
+  {
+   "original": "5151040A00005",
+   "original_desc": null,
+   "replacement": "5151040A00010",
+   "replacement_desc": "QZ-A7620HBP-1W1E-AIRF2.8mm-A|CA39B|V1.1|1080P|P制|锐明英文LOGO|白色|4PIN车载视频连接器|0.5米|带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|F355方案|E0001|通用|截止940红外",
+   "lifecycle": "[产品]量产",
+   "model": "CA39B",
+   "customer_code": null
+  },
+  {
+   "original": "5151040A00006",
+   "original_desc": null,
+   "replacement": "5151040A00011",
+   "replacement_desc": "QZ-A7620HBP-1B1E-AIRF2.8mm-A|CA39B|V1.1|1080P|P制|锐明英文LOGO|黑色|4PIN车载视频连接器|0.5米|带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|F355方案|E0001|通用|截止940红外",
+   "lifecycle": "[产品]量产",
+   "model": "CA39B",
+   "customer_code": null
+  },
+  {
+   "original": "5151041100039",
+   "original_desc": null,
+   "replacement": "5151041100067",
+   "replacement_desc": "SVT-A7620HAP-0W1C-AIR2.2mm-A|CA39A|V1.2|1080P|P制|不带LOGO|白色|标准4芯航空头|0.5米|带音频|带红外|2.2mm镜头|配中文说明书|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA39A",
+   "customer_code": null
+  },
+  {
+   "original": "5151041100040",
+   "original_desc": null,
+   "replacement": "5151041100069",
+   "replacement_desc": "SVT-A7620HAP-0W1C-AIR2.8mm-A|CA39A|V1.2|1080P|P制|不带LOGO|白色|标准4芯航空头|0.5米|带音频|带红外|2.8mm镜头|配中文说明书|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA39A",
+   "customer_code": null
+  },
+  {
+   "original": "5151041100041",
+   "original_desc": null,
+   "replacement": "5151041100068",
+   "replacement_desc": "SVT-A7620HAP-0W1E-AIR2.2mm-A|CA39A|V1.2|1080P|P制|不带LOGO|白色|标准4芯航空头|0.5米|带音频|带红外|2.2mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA39A",
+   "customer_code": null
+  },
+  {
+   "original": "5151041100042",
+   "original_desc": null,
+   "replacement": "申请后无出货记录",
+   "replacement_desc": null,
+   "lifecycle": "[产品]量产",
+   "model": "CA39A",
+   "customer_code": null
+  },
+  {
+   "original": "5151041100043",
+   "original_desc": null,
+   "replacement": "5151041100071",
+   "replacement_desc": "SVT-A7620HAN-0W1E-AIR2.2mm-A|CA39A|V1.2|1080P|N制|不带LOGO|白色|标准4芯航空头|0.5米|带音频|带红外|2.2mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA39A",
+   "customer_code": null
+  },
+  {
+   "original": "5151041100044",
+   "original_desc": null,
+   "replacement": "申请后无出货记录",
+   "replacement_desc": null,
+   "lifecycle": "[产品]量产",
+   "model": "CA39A",
+   "customer_code": null
+  },
+  {
+   "original": "5151041100047",
+   "original_desc": null,
+   "replacement": "5151041100070",
+   "replacement_desc": "SVT-A7620HAP-1W1E-AIR2.2mm-A|CA39A|V1.2|1080P|P制|锐明英文LOGO|白色|4PIN车载视频连接器|0.5米|带音频|带红外|2.2mm镜头|配英文说明书|带独立包装|F355方案|E0001|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA39A",
+   "customer_code": null
+  },
+  {
+   "original": "5151041100049",
+   "original_desc": null,
+   "replacement": "5151041100072",
+   "replacement_desc": "SVT-A7620HAP-0W1E-AIR2.2mm-A|CA39A|V1.2|1080P|P制|不带LOGO|白色|4PIN车载视频连接器|0.5米|带音频|带红外|2.2mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA39A",
+   "customer_code": null
+  },
+  {
+   "original": "5151041100050",
+   "original_desc": null,
+   "replacement": "申请后无出货记录",
+   "replacement_desc": null,
+   "lifecycle": "[产品]量产",
+   "model": "CA39A",
+   "customer_code": null
+  },
+  {
+   "original": "5151041100051",
+   "original_desc": null,
+   "replacement": "5151041100073",
+   "replacement_desc": "SVT-A7620HAP-1W1E-AIRF2.2mm-A|CA39A|V1.2|1080P|P制|锐明英文LOGO|白色|标准4芯航空头|0.5米|带音频|带红外|2.2mm镜头|配英文说明书|带独立包装|F355方案|E0001|通用|截止940红外",
+   "lifecycle": "[产品]量产",
+   "model": "CA39A",
+   "customer_code": null
+  },
+  {
+   "original": "5151041100053",
+   "original_desc": null,
+   "replacement": "申请后无出货记录",
+   "replacement_desc": null,
+   "lifecycle": "[产品]量产",
+   "model": "CA39A",
+   "customer_code": null
+  },
+  {
+   "original": "5151041100057",
+   "original_desc": null,
+   "replacement": "申请后无出货记录",
+   "replacement_desc": null,
+   "lifecycle": "[产品]研发样品",
+   "model": "CA39A",
+   "customer_code": null
+  },
+  {
+   "original": "5151041A00001",
+   "original_desc": null,
+   "replacement": "申请后无出货记录",
+   "replacement_desc": null,
+   "lifecycle": "[产品]量产",
+   "model": "CA39A",
+   "customer_code": null
+  },
+  {
+   "original": "5151041A00002",
+   "original_desc": null,
+   "replacement": "5151041100074",
+   "replacement_desc": "(K)QZ-A7620HAP-0W1C-AIR2.2mm-A|CA39A|V1.2|1080P|P制|不带LOGO|白色|标准4芯航空头|0.5米|带音频|带红外|2.2mm镜头|配中文说明书|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA39A",
+   "customer_code": null
+  },
+  {
+   "original": "5151044100001",
+   "original_desc": null,
+   "replacement": "5151072100094",
+   "replacement_desc": "SVT-A7620VP-0BMN-WIR6mm-A|CA4|V1.0|1080P|P制|不带LOGO|黑色|防水M12-8芯母头|0.5米|不带音频|带红外|6mm镜头|无说明书|带独立包装|F355方案|C0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "Z2",
+   "customer_code": null
+  },
+  {
+   "original": "5151051100001",
+   "original_desc": null,
+   "replacement": "5151051100030",
+   "replacement_desc": "SVT-A7620ASP-0B1E-AIR2.1mm-A|CA34|V1.0|1080P|P制|锐明英文LOGO|黑色|标准4芯航空头|0.4米|带音频|带红外|2.1mm镜头|配英文说明书|带独立包装|定制标贴|F355方案|E3914|客户定制",
+   "lifecycle": "[产品]量产",
+   "model": "CA34",
+   "customer_code": null
+  },
+  {
+   "original": "5151051100002",
+   "original_desc": null,
+   "replacement": "5151051100031",
+   "replacement_desc": "SVT-A7620ASP-0W1E-AU2.1mm-A|CA34|V1.0|1080P|P制|客户定制LOGO|白色|标准4芯航空头|0.5米|带音频|不带红外|2.1mm镜头|配英文说明书|带独立包装|F355方案|C3453|客户定制",
+   "lifecycle": "[产品]量产",
+   "model": "CA34",
+   "customer_code": null
+  },
+  {
+   "original": "5151051100003",
+   "original_desc": null,
+   "replacement": "5151051100032",
+   "replacement_desc": "SVT-A7620ASP-1B1E-AIR2.1mm-A|CA34|V1.0|1080P|P制|锐明英文LOGO|黑色|标准4芯航空头|0.5米|带音频|带红外|2.1mm镜头|配英文说明书|带独立包装|F355方案|E0001|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA34",
+   "customer_code": null
+  },
+  {
+   "original": "5151051100004",
+   "original_desc": null,
+   "replacement": "5151051100033",
+   "replacement_desc": "SVT-A7620ASP-0B1E-AIR2.8mm-A|CA34|V1.0|1080P|P制|不带LOGO|黑色|标准4芯航空头|0.5米|带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|定制标贴|F355方案|E4006|客户定制",
+   "lifecycle": "[产品]量产",
+   "model": "CA34",
+   "customer_code": null
+  },
+  {
+   "original": "5151051100005",
+   "original_desc": null,
+   "replacement": "5151051100034",
+   "replacement_desc": "SVT-A7620ASN-0B1E-AIR2.1mm-A|CA34|V1.0|1080P|N制|不带LOGO|黑色|标准4芯航空头|0.5米|带音频|带红外|2.1mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用|带安装贴纸|3孔下盖",
+   "lifecycle": "[产品]量产",
+   "model": "CA34",
+   "customer_code": null
+  },
+  {
+   "original": "5151051100006",
+   "original_desc": null,
+   "replacement": "5151051100035",
+   "replacement_desc": "SVT-A7620ASP-0W1E-AIR2.8mm-A|CA34|V1.0|1080P|P制|不带LOGO|白色|标准4芯航空头|0.5米|带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|F355方案|E4006|客户定制|定制标贴|标贴去SVT",
+   "lifecycle": "[产品]量产",
+   "model": "CA34",
+   "customer_code": null
+  },
+  {
+   "original": "5151051100007",
+   "original_desc": null,
+   "replacement": "5151051100036",
+   "replacement_desc": "SVT-A7620ASP-0W1E-AIR2.1mm-A|CA34|V1.0|1080P|P制|不带LOGO|白色|标准4芯航空头|0.5米|带音频|带红外|2.1mm镜头|配英文说明书|带独立包装|F355方案|E4006|客户定制|定制型号标贴|标贴去SVT",
+   "lifecycle": "[产品]量产",
+   "model": "CA34",
+   "customer_code": null
+  },
+  {
+   "original": "5151051100008",
+   "original_desc": null,
+   "replacement": "5151051100037",
+   "replacement_desc": "(K)SVT-A7620ASN-0B1E-AIR2.1mm-A|CA34|V1.0|1080P|N制|不带LOGO|黑色|4PIN车载视频连接器|0.5米|带音频|带红外|2.1mm镜头|配英文说明书|带独立包装|F355方案|E227967|客户定制|带区域标识",
+   "lifecycle": "[产品]量产",
+   "model": "CA34",
+   "customer_code": "227967"
+  },
+  {
+   "original": "5151051100010",
+   "original_desc": null,
+   "replacement": "暂不申请",
+   "replacement_desc": null,
+   "lifecycle": "[产品]研发样品",
+   "model": "CA34",
+   "customer_code": "7028"
+  },
+  {
+   "original": "5151051100011",
+   "original_desc": null,
+   "replacement": "暂不申请",
+   "replacement_desc": null,
+   "lifecycle": "[产品]研发样品",
+   "model": "CA34",
+   "customer_code": "7028"
+  },
+  {
+   "original": "5151051100012",
+   "original_desc": null,
+   "replacement": "暂不申请",
+   "replacement_desc": null,
+   "lifecycle": "[产品]研发样品",
+   "model": "CA34",
+   "customer_code": "7028"
+  },
+  {
+   "original": "5151051100013",
+   "original_desc": null,
+   "replacement": "暂不申请",
+   "replacement_desc": null,
+   "lifecycle": "[产品]研发样品",
+   "model": "CA34",
+   "customer_code": "7028"
+  },
+  {
+   "original": "5151051100017",
+   "original_desc": null,
+   "replacement": "5151051100038",
+   "replacement_desc": "SVT-A7620ASP-0B1E-AIR2.1mm-A|CA34|V1.0|1080P|P制|不带LOGO|黑色|标准4芯航空头|0.5米|带音频|带红外|2.1mm镜头|配英文说明书|带独立包装|F355方案|E3922|客户定制|IR反应时间为2s",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA34",
+   "customer_code": "3922"
+  },
+  {
+   "original": "5151051100018",
+   "original_desc": null,
+   "replacement": "5151051100039",
+   "replacement_desc": "SVT-A7620ASP-0W1E-AIR2.1mm-A|CA34|V1.0|1080P|P制|不带LOGO|白色|标准4芯航空头|0.5米|带音频|不带红外|2.1mm镜头|配英文说明书|带独立包装|F355方案|E228353|客户定制|定制标贴|标贴去SVT",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA34",
+   "customer_code": null
+  },
+  {
+   "original": "5151051100020",
+   "original_desc": null,
+   "replacement": "5151051100040",
+   "replacement_desc": "SVT-A7620ASP-0W1E-AIR2.8mm-A|CA34|V1.0|1080P|P制|不带LOGO|白色|标准4芯航空头|0.5米|带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|定制标贴|F355方案|E228353|客户定制|标贴去SVT",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA34",
+   "customer_code": null
+  },
+  {
+   "original": "5151051100021",
+   "original_desc": null,
+   "replacement": "5151051100041",
+   "replacement_desc": "SVT-A7620ASP-0W1E-AIR2.1mm-A|CA34|V1.0|1080P|P制|不带LOGO|白色|标准4芯航空头|0.5米|带音频|带红外|2.1mm镜头|配英文说明书|带独立包装|定制标贴|F355方案|E228353|客户定制|标贴去SVT",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA34",
+   "customer_code": null
+  },
+  {
+   "original": "5151051100022",
+   "original_desc": null,
+   "replacement": "5151051100042",
+   "replacement_desc": "SVT-A7620ASP-0W1E-AIR2.1mm-A|CA34|V1.0|1080P|P制|不带LOGO|白色|标准4芯航空头|0.5米|带音频|不带红外|2.1mm镜头|配英文说明书|带独立包装|定制标贴|F355方案|E228353|客户定制|标贴去SVT",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA34",
+   "customer_code": null
+  },
+  {
+   "original": "5151051100023",
+   "original_desc": null,
+   "replacement": "暂不申请",
+   "replacement_desc": null,
+   "lifecycle": "[产品]研发样品",
+   "model": "CA34",
+   "customer_code": "7028"
+  },
+  {
+   "original": "5151051100024",
+   "original_desc": null,
+   "replacement": "暂不申请",
+   "replacement_desc": null,
+   "lifecycle": "[产品]研发样品",
+   "model": "CA34",
+   "customer_code": "7028"
+  },
+  {
+   "original": "5151051100025",
+   "original_desc": null,
+   "replacement": "暂不申请",
+   "replacement_desc": null,
+   "lifecycle": "[产品]研发样品",
+   "model": "CA34",
+   "customer_code": "7028"
+  },
+  {
+   "original": "5151051100026",
+   "original_desc": null,
+   "replacement": "暂不申请",
+   "replacement_desc": null,
+   "lifecycle": "[产品]研发样品",
+   "model": "CA34",
+   "customer_code": "7028"
+  },
+  {
+   "original": "5151070100004",
+   "original_desc": null,
+   "replacement": "5151070100064",
+   "replacement_desc": "SVT-A7620CP-FW1C-AU3.6mm-A|CA1|V1.0|1080P|P制|客户定制LOGO|白色|标准4芯航空头|0.5米|带音频|不带红外|3.6mm镜头|配中文说明书|带独立包装|F355方案|C3453|客户定制|定制蓝色智达LOGO",
+   "lifecycle": "[产品]量产",
+   "model": "CA1",
+   "customer_code": null
+  },
+  {
+   "original": "5151070100009",
+   "original_desc": null,
+   "replacement": "5151070100065",
+   "replacement_desc": "SVT-A7620CN-5G2N-AIR2.8mm-A|CA1|V1.0|1080P|N制|客户定制LOGO|灰绿色|定制小559线|0.05米|带音频|带红外|2.8mm镜头|定制说明书|带独立包装|F355方案|E3927|客户定制|定制型号和标贴|带快速安装说明",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA1",
+   "customer_code": "3927"
+  },
+  {
+   "original": "5151070100010",
+   "original_desc": null,
+   "replacement": "5151070100066",
+   "replacement_desc": "(K)SVT-A7620CN-5W2E-AIR2.8mm-A|CA1|V1.0|1080P|N制|客户定制LOGO|白色|定制小559线|0.05米|带音频|带红外|2.8mm镜头|定制说明书|带独立包装|定制包装盒及标贴|F355方案|E3927|客户定制|客户定制型号：CAMICAS32AHD-2.8DNWHITE",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA1",
+   "customer_code": "3927"
+  },
+  {
+   "original": "5151070100050",
+   "original_desc": null,
+   "replacement": "5151070100067",
+   "replacement_desc": "SVT-A7620CN-5G2N-AU2.8mm-A|CA1|V1.0|1080P|N制|客户定制LOGO|灰绿色|定制小5559线|0.2米|带音频|不带红外|2.8mm镜头|定制说明书|带独立包装|定制包装盒及标贴|F355方案|E3927|客户定制|带区域标识",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA1",
+   "customer_code": "3927"
+  },
+  {
+   "original": "5151070100051",
+   "original_desc": null,
+   "replacement": "5151070100068",
+   "replacement_desc": "SVT-A7620CP-FW1C-AU2.1mm-A|CA1|V1.0|1080P|P制|客户定制LOGO|白色|标准4芯航空头|增加防脱胶圈|0.5米|带音频|不带红外|2.1mm镜头|配中文说明书|带独立包装|F355方案|C3453|客户定制",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA1",
+   "customer_code": null
+  },
+  {
+   "original": "5151070100052",
+   "original_desc": null,
+   "replacement": "5151070100069",
+   "replacement_desc": "(K)SVT-A7620CN-5G2N-AIR3.6mm-A|CA1|V1.0|1080P|N制|客户定制LOGO|灰绿色|4PIN小5559头|0.2米|带音频|带红外|3.6mm镜头|定制说明书|客户定制包装|F355方案|E3927|客户定制|带区域标识|带快速安装说明|定制型号和标贴|",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA1",
+   "customer_code": "3927"
+  },
+  {
+   "original": "5151070100053",
+   "original_desc": null,
+   "replacement": "与5151070100052重复",
+   "replacement_desc": null,
+   "lifecycle": "[产品]研发样品",
+   "model": "CA1",
+   "customer_code": "3927"
+  },
+  {
+   "original": "5151071100018",
+   "original_desc": null,
+   "replacement": "5151071100089",
+   "replacement_desc": "SVT-A7620HN-0B1E-AIR2.5mm-A|CA11|V1.0|新金属迷你海螺|1080P|N制|不带LOGO|黑色|标准4芯航空头|0.5米|带音频|带红外|2.5mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用|带区域标识",
+   "lifecycle": "[产品]量产",
+   "model": "CA11",
+   "customer_code": null
+  },
+  {
+   "original": "5151071100029",
+   "original_desc": null,
+   "replacement": "5151071100090",
+   "replacement_desc": "SVT-A7620HN-0G1N-AIR3.6mm-A|CA11|V1.0|1080P|N制|不带LOGO|灰绿色|标准4芯航空头|0.5米|带音频|带红外|3.6mm镜头|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA11",
+   "customer_code": null
+  },
+  {
+   "original": "5151071100032",
+   "original_desc": null,
+   "replacement": "5151071100091",
+   "replacement_desc": "SVT-A7620HP-1G1E-AIR2.8mm-A|CA11|V1.0|1080P|P制|锐明英文LOGO|灰绿色|标准4芯航空头|0.5米|带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|F355方案|E0001|通用",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA11",
+   "customer_code": null
+  },
+  {
+   "original": "5151071100056",
+   "original_desc": null,
+   "replacement": "5151071100092",
+   "replacement_desc": "SVT-A7620HP-0G1E-AIR2.8mm-A|CA11|V1.0|1080P|P制|不带LOGO|灰绿色|标准4芯航空头|0.5米|带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA11",
+   "customer_code": null
+  },
+  {
+   "original": "5151071100070",
+   "original_desc": null,
+   "replacement": "与5151022100020重复",
+   "replacement_desc": null,
+   "lifecycle": "[产品]研发样品",
+   "model": "CA11",
+   "customer_code": null
+  },
+  {
+   "original": "5151071100071",
+   "original_desc": null,
+   "replacement": "5151071100093",
+   "replacement_desc": "SVT-A7620HP-1G1E-AIR3.6mm-A|CA11|V1.0|1080P|P制|锐明英文LOGO|灰绿色|标准4芯航空头|0.36米|带音频|带红外|3.6mm镜头|配英文说明书|带独立包装|F355方案|E0001|通用",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA11",
+   "customer_code": null
+  },
+  {
+   "original": "5151071100072",
+   "original_desc": null,
+   "replacement": "5151071100094",
+   "replacement_desc": "SVT-A7620HP-1G1E-AIR3.6mm-A|CA11|V1.0|1080P|P制|锐明英文LOGO|灰绿色|标准4芯航空头|0.5米|带音频|带红外|3.6mm镜头|配英文说明书|带独立包装|定制标贴|F355方案|E3948|客户定制",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA11",
+   "customer_code": null
+  },
+  {
+   "original": "5151071100073",
+   "original_desc": null,
+   "replacement": "与5151022100020重复",
+   "replacement_desc": null,
+   "lifecycle": "[产品]研发样品",
+   "model": "CA11",
+   "customer_code": null
+  },
+  {
+   "original": "5151071100074",
+   "original_desc": null,
+   "replacement": "5151071100095",
+   "replacement_desc": "SVT-A7620HP-1G1E-AIR2.8mm-A|CA11|V1.0|1080P|P制|锐明英文LOGO|灰绿色|标准4芯航空头|0.5米|带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|F355方案|E0001|通用",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA11",
+   "customer_code": null
+  },
+  {
+   "original": "5151072100003",
+   "original_desc": null,
+   "replacement": "5151072100095",
+   "replacement_desc": "SVT-30F-AHD355-P-WIR2.8mm-A|CA4|V1.0|室外方形机|1080P|P制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|F355方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": "CA4",
+   "customer_code": null
+  },
+  {
+   "original": "5151072100018",
+   "original_desc": null,
+   "replacement": "5151072100096",
+   "replacement_desc": "SVT-A7620VN-0B1E-UIR16mm-A|CA4|V1.0|1080P|N制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|带红外|16mm镜头|带独立包装|F355方案|E1347|客户定制|限制快门",
+   "lifecycle": "[产品]量产",
+   "model": "CA4",
+   "customer_code": null
+  },
+  {
+   "original": "5151072100022",
+   "original_desc": null,
+   "replacement": "5151072100097",
+   "replacement_desc": "SVT-30F-AHD355-P-WIR2.8mm-A|CA4|V1.0|1080P|P制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|定制标贴|F355方案|E86041|客户定制|定制标贴“P0044MT+物料编号\"",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA4",
+   "customer_code": null
+  },
+  {
+   "original": "5151072100059",
+   "original_desc": null,
+   "replacement": "5151072100098",
+   "replacement_desc": "SVT-30F-AHD355-P-WIR2.8mm-A|CA4|V1.0|1080P|P制|锐明英文LOGO|黑色|标准4芯航空头|0.5米|不带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|F355方案|E0001|通用",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA4",
+   "customer_code": null
+  },
+  {
+   "original": "5151072100082",
+   "original_desc": null,
+   "replacement": "5151072100099",
+   "replacement_desc": "SVT-30F-AHD355-PM-WIR2.8mm-A|CA4|V1.0|1080P|P制|锐明中文LOGO|黑色|标准4芯航空头|0.5米|不带音频|带红外|2.8mm镜头|配中文说明书|不带包装|F355方案|C0001|通用|配比亚迪定制支架",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA4",
+   "customer_code": null
+  },
+  {
+   "original": "5151072100084",
+   "original_desc": null,
+   "replacement": "5151072100100",
+   "replacement_desc": "SVT-30F-AHD355-P-WIR6mm-A|CA4|V1.0|1080P|P制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|带红外|6mm镜头|配中文说明书|带独立包装|F355方案|C0000|通用|配Z2支架和灯板",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA4",
+   "customer_code": null
+  },
+  {
+   "original": "5151095100001",
+   "original_desc": null,
+   "replacement": "5151095100032",
+   "replacement_desc": "SVT-A7620AN-1W1E-WIR2.5mm-A|CA2|V1.0|1080P|N制|客户定制LOGO|白色|标准4芯航空头|0.5米|带音频|不带红外|2.5mm镜头|配英文说明书|带独立包装|F355方案|E4028|客户定制|配二极管",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA2",
+   "customer_code": null
+  },
+  {
+   "original": "5151095100024",
+   "original_desc": null,
+   "replacement": "5151095100033",
+   "replacement_desc": "SVT-A7620AP-0W1E-AIR2.8mm-A|CA2|V1.0|1080P|P制|不带LOGO|白色|标准4芯航空头|增加防脱胶环|0.5米|带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|F355方案|C2514|客户定制|外壳电泳+喷粉|定制硅胶垫片",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA2",
+   "customer_code": null
+  },
+  {
+   "original": "5151095100025",
+   "original_desc": null,
+   "replacement": "5151095100034",
+   "replacement_desc": "SVT-A7620AN-1W1E-AIR2.5mm-A|CA2|V1.0|1080P|N制|锐明英文LOGO|白色|4PIN车载连接器|0.5米|带音频|带红外|2.5mm镜头|配英文说明书|带独立包装|F355方案|E0001|通用",
+   "lifecycle": "[产品]研发样品",
+   "model": "CA2",
+   "customer_code": null
+  },
+  {
+   "original": "5151004100007",
+   "original_desc": null,
+   "replacement": null,
+   "replacement_desc": null,
+   "lifecycle": "[产品]研发样品",
+   "model": null,
+   "customer_code": null
+  },
+  {
+   "original": "5151039100047",
+   "original_desc": null,
+   "replacement": "5151039100145",
+   "replacement_desc": "SVT-A6620HSP-0B1E-WIR3.6mm-G|CA39|V1.2|1080P|P制|不带LOGO|黑色|标准4芯航空头|0.5米|不带音频|带红外|3.6mm镜头|配英文说明书|带独立包装|2053方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": null,
+   "customer_code": null
+  },
+  {
+   "original": "5151039100071",
+   "original_desc": null,
+   "replacement": "5151039100146",
+   "replacement_desc": "SVT-A6620HSP-0B1E-WU2.2mm-G|CA39|V1.1|1080P|P制|客户定制LOGO|黑色|标准4芯航空头|0.5米|不带音频|不带红外|2.2mm镜头|配英文说明书|带独立包装|定制标贴|2053方案|E3922|客户定制",
+   "lifecycle": "[产品]量产",
+   "model": null,
+   "customer_code": null
+  },
+  {
+   "original": "5151039100072",
+   "original_desc": null,
+   "replacement": "5151039100147",
+   "replacement_desc": "SVT-A6620HSP-1B1E-WIR2.8mm-G|CA39|V1.2|1080P|P制|锐明英文LOGO|黑色|标准4芯航空头|0.5米|不带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|2053方案|E0001|通用",
+   "lifecycle": "[产品]量产",
+   "model": null,
+   "customer_code": null
+  },
+  {
+   "original": "5151039100074",
+   "original_desc": null,
+   "replacement": "5151039100148",
+   "replacement_desc": "SVT-A6620HSP-1B1E-WIR3.6mm-G|CA39|V1.2|1080P|P制|锐明英文LOGO|黑色|标准4芯航空头|0.5米|不带音频|带红外|3.6mm镜头|配英文说明书|带独立包装|2053方案|E0001|通用",
+   "lifecycle": "[产品]量产",
+   "model": null,
+   "customer_code": null
+  },
+  {
+   "original": "5151039100075",
+   "original_desc": null,
+   "replacement": "5151039100149",
+   "replacement_desc": "SVT-A6620HSP-0B1E-WIR2.8mm-G|CA39|V1.2|1080P|P制|客户定制LOGO|黑色|标准4芯航空头|0.5米|不带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|定制标贴|2053方案|E209270|客户定制",
+   "lifecycle": "[产品]量产",
+   "model": null,
+   "customer_code": null
+  },
+  {
+   "original": "5151039100104",
+   "original_desc": null,
+   "replacement": "5151039100150",
+   "replacement_desc": "SVT-A6620HSP-0B1E-WIR2.2mm-G|CA39|V1.1|1080P|P制|客户定制LOGO|黑色|标准4芯航空头|0.5米|不带音频|带红外|2.2mm镜头|配英文说明书|带独立包装|定制标贴|2053方案|E3922|客户定制",
+   "lifecycle": "[产品]量产",
+   "model": null,
+   "customer_code": null
+  },
+  {
+   "original": "5151039100109",
+   "original_desc": null,
+   "replacement": "5151039100151",
+   "replacement_desc": "SVT-A6620HSP-0B1E-WIR2.2mm-G|CA39|V1.1|1080P|P制|客户定制LOGO|黑色|标准4芯航空头|0.5米|不带音频|带红外|2.2mm镜头|配英文说明书|带独立包装|定制标贴|2053方案|E3922|客户定制",
+   "lifecycle": "[产品]量产",
+   "model": null,
+   "customer_code": null
+  },
+  {
+   "original": "5151039100121",
+   "original_desc": null,
+   "replacement": null,
+   "replacement_desc": null,
+   "lifecycle": "[产品]研发样品",
+   "model": null,
+   "customer_code": null
+  },
+  {
+   "original": "5151040100030",
+   "original_desc": null,
+   "replacement": "5151040100095",
+   "replacement_desc": "SVT-A6620HBP-1W1E-AIR2.2mm-G|CA39B|V1.1|1080P|P制|锐明英文LOGO|白色|标准4芯航空头|0.5米|带音频|带红外|2.2mm镜头|配英文说明书|带独立包装|2053方案|E0001|通用",
+   "lifecycle": "[产品]量产",
+   "model": null,
+   "customer_code": null
+  },
+  {
+   "original": "5151040100031",
+   "original_desc": null,
+   "replacement": "5151040100096",
+   "replacement_desc": "SVT-A6620HBP-1W1E-AIR2.2mm-G|CA39B|V1.1|1080P|P制|锐明英文LOGO|白色|带防松脱环4芯航空头|0.5米|带音频|带红外|2.2mm镜头|配英文说明书|带独立包装|2053方案|E0001|通用",
+   "lifecycle": "[产品]量产",
+   "model": null,
+   "customer_code": null
+  },
+  {
+   "original": "5151040100032",
+   "original_desc": null,
+   "replacement": "5151040100097",
+   "replacement_desc": "SVT-A6620HBP-1B1E-AIR2.2mm-G|CA39B|V1.1|1080P|P制|锐明英文LOGO|黑色|带防松脱环4芯航空头|0.5米|带音频|带红外|2.2mm镜头|配英文说明书|带独立包装|2053方案|E0001|通用",
+   "lifecycle": "[产品]量产",
+   "model": null,
+   "customer_code": null
+  },
+  {
+   "original": "5151040100044",
+   "original_desc": null,
+   "replacement": "5151040100098",
+   "replacement_desc": "SVT-A6620HBP-1B1E-AIR2.2mm-G|CA39B|V1.1|1080P|P制|锐明英文LOGO|黑色|标准4芯航空头|0.5米|带音频|带红外|2.2mm镜头|配英文说明书|带独立包装|2053方案|E0001|通用",
+   "lifecycle": "[产品]量产",
+   "model": null,
+   "customer_code": null
+  },
+  {
+   "original": "5151040100049",
+   "original_desc": null,
+   "replacement": "5151040100099",
+   "replacement_desc": "SVT-A6620HBP-0W1E-AIR2.2mm-G|CA39B|V1.1|1080P|P制|不带LOGO|白色|4PIN车载视频连接器|0.5米|带音频|带红外|2.2mm镜头|配英文说明书|带独立包装|2053方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": null,
+   "customer_code": null
+  },
+  {
+   "original": "5151040100051",
+   "original_desc": null,
+   "replacement": "5151040100100",
+   "replacement_desc": "SVT-A6620HBP-0W1E-AIR2.2mm-G|CA39B|V1.1|1080P|P制|不带LOGO|白色|带防松脱环4芯航空头|0.5米|带音频|带红外|2.2mm镜头|配英文说明书|带独立包装|2053方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": null,
+   "customer_code": null
+  },
+  {
+   "original": "5151040100060",
+   "original_desc": null,
+   "replacement": "5151040100101",
+   "replacement_desc": "SVT-A6620HBP-0B1E-AIR2.2mm-G|CA39B|V1.1|1080P|P制|不带LOGO|黑色|4PIN车载视频连接器|0.5米|带音频|带红外|2.2mm镜头|配英文说明书|带独立包装|2053方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": null,
+   "customer_code": null
+  },
+  {
+   "original": "5151040100061",
+   "original_desc": null,
+   "replacement": "5151040100102",
+   "replacement_desc": "SVT-A6620HBP-0W1E-AIR2.2mm-G|CA39B|V1.1|1080P|P制|不带LOGO|白色|4PIN车载连接器|0.5米|带音频|带红外|2.2mm镜头|配英文说明书|带独立包装|2053方案|E0001|通用",
+   "lifecycle": "[产品]研发样品",
+   "model": null,
+   "customer_code": null
+  },
+  {
+   "original": "5151040100063",
+   "original_desc": null,
+   "replacement": "5151040100103",
+   "replacement_desc": "SVT-A6620HBP-0W1E-AIR2.2mm-G|CA39B|V1.1|1080P|P制|不带LOGO|白色|4PIN车载视频连接器|0.5米|带音频|带红外|2.2mm镜头|配英文说明书|带独立包装|定制标贴|2053方案|C228930|客户定制|尾线标贴“防脱把探头\"",
+   "lifecycle": "[产品]研发样品",
+   "model": null,
+   "customer_code": null
+  },
+  {
+   "original": "5151040100073",
+   "original_desc": null,
+   "replacement": "5151040100104",
+   "replacement_desc": "SVT-A6620HBP-0W1E-AIR2.2mm-G|CA39B|V1.1|1080P|P制|不带LOGO|白色|4PIN车载视频连接器|0.5米|带音频|带红外|2.2mm镜头|配英文说明书|带独立包装|定制标贴|2053方案|C260733|客户定制|探头尾线贴标签“中门 探头\"",
+   "lifecycle": "[产品]研发样品",
+   "model": null,
+   "customer_code": null
+  },
+  {
+   "original": "5151040100082",
+   "original_desc": null,
+   "replacement": "5151040100105",
+   "replacement_desc": "SVT-A6620HBP-0W1E-AIR2.2mm-G|CA39B|V1.1|1080P|P制|不带LOGO|白色|4PIN车载视频连接器|0.5米|带音频|带红外|2.2mm镜头|配英文说明书|带独立包装|2053方案|C206733|客户定制|尾线贴标签“中门 探头\"",
+   "lifecycle": "[产品]研发样品",
+   "model": null,
+   "customer_code": null
+  },
+  {
+   "original": "5151040100091",
+   "original_desc": null,
+   "replacement": "5151040100108",
+   "replacement_desc": "SVT-A6620HBP-1W1N-AU2.8mm-G|CA39B|V1.2|1080P|P制|锐明英文LOGO|白色|4PIN车载视频连接器|0.5米|带音频|不带红外|2.8mm镜头|无说明书|带独立包装|2053方案|E0001|通用",
+   "lifecycle": "[产品]研发样品",
+   "model": null,
+   "customer_code": null
+  },
+  {
+   "original": "5151040100092",
+   "original_desc": null,
+   "replacement": "5151040100109",
+   "replacement_desc": "SVT-A6620HBP-1W1N-AIR2.8mm-G|CA39B|V1.2|1080P|P制|锐明英文LOGO|白色|4PIN车载视频连接器|0.5米|带音频|带红外|2.8mm镜头|无说明书|带独立包装|2053方案|E0001|通用",
+   "lifecycle": "[产品]研发样品",
+   "model": null,
+   "customer_code": null
+  },
+  {
+   "original": "5151040100093",
+   "original_desc": null,
+   "replacement": "5151040100106",
+   "replacement_desc": "SVT-A6620HBP-1W1E-AIR2.2mm-G|CA39B|V1.1|1080P|P制|锐明英文LOGO|白色|4PIN车载视频连接器|0.5米|带音频|带红外|2.2mm镜头|配英文说明书|带独立包装|2053方案|E0001|通用",
+   "lifecycle": "[产品]研发样品",
+   "model": null,
+   "customer_code": null
+  },
+  {
+   "original": "5151040100094",
+   "original_desc": null,
+   "replacement": "5151040100110",
+   "replacement_desc": "SVT-A6620HBP-1W1E-AIR2.8mm-G|CA39B|V1.2|1080P|P制|锐明英文LOGO|白色|标准4芯航空头|增加防脱松环|0.5米|带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|2053方案|E0001|通用",
+   "lifecycle": "[产品]研发样品",
+   "model": null,
+   "customer_code": null
+  },
+  {
+   "original": "5151041100014",
+   "original_desc": null,
+   "replacement": "5151041100059",
+   "replacement_desc": "SVT-A6620HAP-1W1E-AIR2.2mm-G|CA39A|V1.1|1080P|P制|锐明英文LOGO|白色|标准4芯航空头|0.5米|带音频|带红外|2.2mm镜头|配英文说明书|带独立包装|2053方案|E0001|通用",
+   "lifecycle": "[产品]量产",
+   "model": null,
+   "customer_code": null
+  },
+  {
+   "original": "5151041100030",
+   "original_desc": null,
+   "replacement": "5151041100060",
+   "replacement_desc": "SVT-A6620HAP-1W1E-AU2.8mm-G|CA39A|V1.2|1080P|P制|锐明英文LOGO|白色|标准4芯航空头|0.5米|带音频|不带红外|2.8mm镜头|带独立包装|2053方案|E0001|通用",
+   "lifecycle": "[产品]量产",
+   "model": null,
+   "customer_code": null
+  },
+  {
+   "original": "5151041100031",
+   "original_desc": null,
+   "replacement": "5151041100061",
+   "replacement_desc": "SVT-A6620HAP-1W1E-AIR2.2mm-G|CA39A|V1.1|1080P|P制|锐明英文LOGO|白色|标准4芯航空头|0.5米|带音频|带红外|2.2mm镜头|配英文说明书|带独立包装|2053方案|E0001|通用",
+   "lifecycle": "[产品]量产",
+   "model": null,
+   "customer_code": null
+  },
+  {
+   "original": "5151041100032",
+   "original_desc": null,
+   "replacement": "5151041100062",
+   "replacement_desc": "SVT-A6620HAP-1W1E-AIR2.8mm-G|CA39A|V1.2|1080P|P制|锐明英文LOGO|白色|标准4芯航空头|0.5米|带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|2053方案|E0001|通用",
+   "lifecycle": "[产品]量产",
+   "model": null,
+   "customer_code": null
+  },
+  {
+   "original": "5151041100034",
+   "original_desc": null,
+   "replacement": "5151041100063",
+   "replacement_desc": "SVT-A6620HAP-0W1C-AIR2.8mm-G|CA39A|V1.2|1080P|P制|不带LOGO|白色|标准4芯航空头|0.5米|带音频|带红外|2.8mm镜头|配中文说明书|带独立包装|2053方案|C0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": null,
+   "customer_code": null
+  },
+  {
+   "original": "5151041100036",
+   "original_desc": null,
+   "replacement": "5151041100064",
+   "replacement_desc": "SVT-A6620HAP-0W1E-AIR2.8mm-G|CA39A|V1.2|1080P|P制|不带LOGO|白色|标准4芯航空头|0.5米|带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|2053方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": null,
+   "customer_code": null
+  },
+  {
+   "original": "5151041100037",
+   "original_desc": null,
+   "replacement": "5151041100065",
+   "replacement_desc": "SVT-A6620HAN-0W1E-AIR2.2mm-G|CA39A|V1.1|1080P|N制|不带LOGO|白色|标准4芯航空头|0.5米|带音频|带红外|2.2mm镜头|配英文说明书|带独立包装|2053方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": null,
+   "customer_code": null
+  },
+  {
+   "original": "5151041100038",
+   "original_desc": null,
+   "replacement": "5151041100066",
+   "replacement_desc": "SVT-A6620HAN-0W1E-AIR2.8mm-G|CA39A|V1.2|1080P|N制|不带LOGO|白色|标准4芯航空头|0.5米|带音频|带红外|2.8mm镜头|配英文说明书|带独立包装|2053方案|E0000|通用",
+   "lifecycle": "[产品]量产",
+   "model": null,
+   "customer_code": null
+  }
+ ]
+}

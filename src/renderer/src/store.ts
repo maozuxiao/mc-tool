@@ -66,6 +66,11 @@ interface State {
   setLoggedIn: (v: boolean) => void
   setCheckingLogin: (v: boolean) => void
   setLanding: (v: boolean) => void
+  // 这三个 setter 之前只在实现里写了、接口里漏声明，
+  // 导致实现侧参数拿不到上下文类型（隐式 any），消费侧 useStore(s => s.setLoginState) 报「属性不存在」。
+  setLoginState: (v: 'checking' | 'logging' | 'failed' | 'ok') => void
+  setLoginError: (v: string) => void
+  setQrRefetchSeq: (v: number) => void
 
   setItemNo: (v: string) => void
   addField: () => void

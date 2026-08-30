@@ -165,13 +165,16 @@ export function QueryPanel({ disabled }: { disabled: boolean }) {
       {/* 标题栏 */}
       <div className="panel-header">
         <div className="brand">
-          <Icon
-            src={NOOK_ICON}
-            size={72}
-            className="brand-icon"
+          {/* animal-island-ui 的 Icon 只支持 name/src/size/className/style/bounce，
+              不支持 title 与 onClick，故用 button 包一层承载点击与 tooltip。 */}
+          <button
+            type="button"
+            className="brand-icon-btn"
             title={OA_HOME_URL}
             onClick={() => window.mcApi?.openExternal?.(OA_HOME_URL)}
-          />
+          >
+            <Icon src={NOOK_ICON} size={72} className="brand-icon" />
+          </button>
           <div className="brand-text">
             <span className="brand-title">{t('appTitle')}</span>
           </div>
@@ -189,7 +192,6 @@ export function QueryPanel({ disabled }: { disabled: boolean }) {
               aria-label={t('langLabel') || 'language'}
             />
             <Select
-              size="small"
               value=""
               placeholder={t('help')}
               options={[

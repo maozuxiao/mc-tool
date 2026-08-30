@@ -14,7 +14,10 @@ export function UpdateBar() {
   if (update.error) {
     return (
       <div className="update-bar update-bar--error">
-        <Icon name="icon-error" size={16} />
+        {/* animal-island-ui 的 IconName 里没有 error/warning 类图标，
+            合法值只有 miles/camera/chat/critterpedia/design/diy/helicopter/map/shopping/variant。
+            原先写的 icon-error 不在其中（图标其实一直没渲染出来），此处取语义最中性的 variant。 */}
+        <Icon name="icon-variant" size={16} />
         <span className="update-bar__text">{t('updateError', { m: update.error })}</span>
         <Button size="small" onClick={dismiss}>{t('updateDismiss')}</Button>
       </div>

@@ -333,6 +333,7 @@ body {
   color: #fff; border-bottom: 3px solid rgba(255,255,255,0.25);
 }
 .brand { display: flex; align-items: center; gap: 14px; }
+.brand-icon-btn { padding: 0; border: 0; background: transparent; display: inline-flex; cursor: pointer; }
 .brand-icon { font-size: 32px; width: 72px; height: 72px; object-fit: contain; cursor: pointer; transition: transform .15s ease; }
 .brand-icon:hover { transform: scale(1.05); }
 .brand-text { display: flex; flex-direction: column; gap: 4px; }
@@ -870,3 +871,33 @@ thead th .col-resizer:hover { background: rgba(19,138,126,0.25); }
 /* 批量展开按钮已改为 .mq-batch-toggle */
 .batch-btn { position: relative; min-width: 140px; }
 .batch-count { color: var(--animal-green-deep); font-size: 12px; font-weight: 600; white-space: nowrap; margin-left: 4px; }
+
+/* ── 顶层功能切换 ── */
+.view-switch {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 80;
+  display: flex;
+  gap: 4px;
+  padding: 5px;
+  border-radius: 999px;
+  background: rgba(255, 253, 248, .96);
+  border: 1px solid var(--animal-line);
+  box-shadow: var(--animal-shadow);
+}
+.view-switch button {
+  border: 0;
+  background: transparent;
+  color: var(--animal-text-soft);
+  font-size: 12.5px;
+  font-weight: 700;
+  padding: 7px 13px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.view-switch button.active {
+  background: linear-gradient(135deg, var(--animal-green), var(--animal-green-deep));
+  color: #fff;
+  box-shadow: 0 3px 10px rgba(25, 200, 185, .28);
+}

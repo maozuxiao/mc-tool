@@ -1,0 +1,234 @@
+import { BrowserWindow, net } from 'electron'
+import { randomUUID } from 'crypto'
+import type { AISendPayload } from '@shared/ai-types'
+import { getProvider } from './providerStore'
+import { MC_QUERY_TOOL_DEFINITION, MC_SKILL_SYSTEM_PROMPT, runMcQuery } from './mcSkill'
+import {
+  appendMessage, appendToolRun, completeToolRun, createConversation,
+  getConversation, updateMessage
+} from './historyStore'
+
+export interface AIStreamEvent {
+  type: 'conversation-created' | 'message-created' | 'delta' | 'tool-start' | 'tool-end' | 'done' | 'error'
+  conversationId: string
+  messageId?: string
+  content?: string
+  run?: any
+  message?: string
+}
+
+const controllers = new Map<string, AbortController>()
+const activeMessageIds = new Map<string, AbortController>()
+
+function send(event: AIStreamEvent) {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) win.webContents.send('ai:event', event)
+  }
+}
+
+function createAbortController(conversationId: string): AbortController {
+  const old = controllers.get(conversationId)
+  old?.abort()
+  const controller = new AbortController()
+  controllers.set(conversationId, controller)
+  return controller
+}
+
+export function stopMessage(conversationId: string): void {
+  controllers.get(conversationId)?.abort()
+}
+
+function openAIToolMessages(messages: any[], toolsEnabled: boolean) {
+  const payload: any[] = [{ role: 'system', content: MC_SKILL_SYSTEM_PROMPT }]
+  for (const m of messages) {
+    if (m.role === 'user') payload.push({ role: 'user', content: m.content })
+    else if (m.role === 'assistant' && m.content) payload.push({ role: 'assistant', content: m.content })
+  }
+  return payload
+}
+
+function openAIToolResponse(toolCallId: string, content: unknown): any {
+  return { role: 'tool', tool_call_id: toolCallId, content: JSON.stringify(content) }
+}
+
+async function streamOpenAICompatible(input: {
+  payload: AISendPayload
+  conversationId: string
+  messages: any[]
+  assistantMessageId: string
+  controller: AbortController
+}): Promise<void> {
+  const { payload, conversationId, messages, assistantMessageId, controller } = input
+  const { preset, config, apiKey } = getProvider(payload.providerId)
+  if (!apiKey && payload.providerId !== 'ollama') throw new Error('请先配置 API Key')
+
+  let conversation = [...messages]
+  for (let round = 0; round < 5; round++) {
+    const body: any = {
+      model: payload.modelId,
+      stream: true,
+      messages: [
+        { role: 'system', content: MC_SKILL_SYSTEM_PROMPT },
+        ...conversation.map(m => {
+          if (m.role === 'tool') return { role: 'tool', tool_call_id: m.tool_call_id, content: m.content }
+          if (m.tool_calls) return { role: 'assistant', content: m.content || '', tool_calls: m.tool_calls }
+          return { role: m.role, content: m.content }
+        })
+      ]
+    }
+    if (payload.useMcSkill) body.tools = [MC_QUERY_TOOL_DEFINITION]
+
+    const res = await net.fetch(`${config.baseUrl}/chat/completions`, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {})
+      },
+      body: JSON.stringify(body)
+    })
+    if (!res.ok || !res.body) {
+      const errText = await res.text().catch(() => '')
+      let msg = `HTTP ${res.status}`
+      try { msg = JSON.parse(errText)?.error?.message || msg } catch {}
+      throw new Error(msg)
+    }
+
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let content = ''
+    let usage: any = null
+    let toolCalls: any[] = []
+
+    while (true) {
+      const { value, done } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split(/\r?\n/)
+      buffer = lines.pop() || ''
+      for (const line of lines) {
+        const trimmed = line.trim()
+        if (!trimmed.startsWith('data:')) continue
+        const data = trimmed.slice(5).trim()
+        if (data === '[DONE]') continue
+        let json: any
+        try { json = JSON.parse(data) } catch { continue }
+        const delta = json.choices?.[0]?.delta || {}
+        if (delta.content) {
+          content += delta.content
+          send({ type: 'delta', conversationId, messageId: assistantMessageId, content: delta.content })
+        }
+        if (delta.tool_calls) {
+          for (const tc of delta.tool_calls) {
+            const idx = tc.index ?? 0
+            toolCalls[idx] = toolCalls[idx] || { id: tc.id || `call_${randomUUID()}`, type: 'function', function: { name: '', arguments: '' } }
+            if (tc.id) toolCalls[idx].id = tc.id
+            if (tc.function?.name) toolCalls[idx].function.name += tc.function.name
+            if (tc.function?.arguments) toolCalls[idx].function.arguments += tc.function.arguments
+          }
+        }
+        if (json.usage) usage = json.usage
+      }
+    }
+
+    if (!toolCalls.length) {
+      updateMessage(assistantMessageId, {
+        content,
+        inputTokens: usage?.prompt_tokens,
+        outputTokens: usage?.completion_tokens
+      })
+      return
+    }
+
+    const assistantToolMessage = { role: 'assistant', content, tool_calls: toolCalls }
+    conversation.push(assistantToolMessage)
+    for (const call of toolCalls) {
+      let parsed: any
+      try { parsed = JSON.parse(call.function.arguments || '{}') } catch { parsed = {} }
+      const runningRun = appendToolRun(assistantMessageId, {
+        toolName: call.function.name,
+        input: parsed,
+        status: 'running',
+        summary: `正在调用 ${call.function.name}`
+      })
+      send({ type: 'tool-start', conversationId, messageId: assistantMessageId, run: runningRun })
+      try {
+        const result = call.function.name === 'mc_query'
+          ? await runMcQuery(parsed, persistedRun => {
+              // runMcQuery 会回调两次：开始时登记 running 态、结束时回传终态。
+              // 首次回调不能落「完成」态，否则工具刚起跑 UI 就把转圈收掉了。
+              if (persistedRun.status !== 'running') {
+                completeToolRun(runningRun.id, {
+                  output: persistedRun.output,
+                  summary: persistedRun.summary,
+                  status: persistedRun.status,
+                  durationMs: persistedRun.durationMs
+                })
+                send({ type: 'tool-end', conversationId, messageId: assistantMessageId, run: { ...runningRun, ...persistedRun, id: runningRun.id } })
+              }
+              // 本调用方已在外部用 appendToolRun 建好 run，故回传既有 id 即可。
+              return { id: runningRun.id }
+            })
+          : { error: `不支持的工具：${call.function.name}` }
+        conversation.push(openAIToolResponse(call.id, result))
+      } catch (e: any) {
+        conversation.push(openAIToolResponse(call.id, { error: e.message }))
+      }
+    }
+    send({ type: 'delta', conversationId, messageId: assistantMessageId, content: '\n\n' })
+  }
+  throw new Error('AI 工具调用轮次过多')
+}
+
+export async function sendMessage(payload: AISendPayload): Promise<void> {
+  if (!payload.content.trim()) throw new Error('消息不能为空')
+  const provider = getProvider(payload.providerId)
+  if (!provider.apiKey && payload.providerId !== 'ollama') throw new Error('请先配置 API Key')
+
+  let conversationId = payload.conversationId
+  if (!conversationId) {
+    const title = payload.content.slice(0, 30).replace(/\s+/g, ' ') || '新对话'
+    const conv = createConversation(payload.providerId, payload.modelId, title)
+    conversationId = conv.id
+    send({ type: 'conversation-created', conversationId, message: conv.id })
+  }
+  const existing = getConversation(conversationId)
+  appendMessage({ conversationId, role: 'user', content: payload.content })
+  const assistant = appendMessage({
+    conversationId,
+    role: 'assistant',
+    content: '',
+    providerId: payload.providerId,
+    modelId: payload.modelId
+  })
+  const controller = createAbortController(conversationId)
+  activeMessageIds.set(assistant.id, controller)
+  send({ type: 'message-created', conversationId, messageId: assistant.id, message: assistant.id })
+
+  try {
+    const messages = existing.messages
+    if (provider.preset.protocol === 'openai-compatible') {
+      await streamOpenAICompatible({
+        payload, conversationId,
+        messages: [...messages, { role: 'user', content: payload.content }],
+        assistantMessageId: assistant.id,
+        controller
+      })
+    } else {
+      throw new Error('Anthropic adapter 将在后续版本启用，请先选择 OpenAI-compatible Provider')
+    }
+    send({ type: 'done', conversationId, messageId: assistant.id })
+  } catch (e: any) {
+    if (e.name === 'AbortError') {
+      send({ type: 'done', conversationId, messageId: assistant.id, message: '已停止生成' })
+      return
+    }
+    send({ type: 'error', conversationId, messageId: assistant.id, message: e.message })
+  } finally {
+    controllers.delete(conversationId)
+    activeMessageIds.delete(assistant.id)
+  }
+}
+
+export { openAIToolMessages }

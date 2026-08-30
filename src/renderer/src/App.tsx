@@ -1,41 +1,14 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useStore } from './store'
 import { LoginOverlay } from './components/LoginOverlay'
 import { QueryPanel } from './components/QueryPanel'
+import { ChatPanel } from './components/ai/ChatPanel'
 import { UpdateBar } from './components/UpdateBar'
 
-declare global {
-  interface Window {
-    mcApi: {
-      openOALogin: () => Promise<void>
-      reloadLogin: () => Promise<void>
-      getLoginUrl: () => Promise<string>
-      clearLogin: () => Promise<void>
-      onLoginChecked: (cb: (s: { loggedIn: boolean }) => void) => () => void
-      onLoginReady: (cb: (s: { loggedIn: boolean }) => void) => () => void
-      onLoginState: (cb: (s: { state: string }) => void) => () => void
-      onLoginLanding: (cb: () => void) => () => void
-      fetchOA: (url: string) => Promise<any>
-      startQrLogin: () => Promise<any>
-      pollQrLogin: (qrToken: string) => Promise<any>
-      logError: (msg: string) => void
-      checkForUpdates: () => Promise<{ ok: boolean; version?: string; error?: string }>
-      startDownload: () => Promise<{ ok: boolean; error?: string }>
-      onUpdateAvailable: (cb: (p: any) => void) => () => void
-      onUpdateDownloaded: (cb: (p: any) => void) => () => void
-      onUpdateNotAvailable: (cb: (p: any) => void) => () => void
-      onUpdateProgress: (cb: (p: { percent: number; transferred: number; total: number }) => void) => () => void
-      onUpdateError: (cb: (p: any) => void) => () => void
-      installUpdate: () => Promise<void>
-      saveCsv: (content: string, defaultName: string) => Promise<string | undefined>
-      appVersion: () => string
-    }
-  }
-}
+type MainView = 'query' | 'ai'
 
 export function App() {
   const loggedIn = useStore(s => s.loggedIn)
-  const checking = useStore(s => s.checkingLogin)
   const loginState = useStore(s => s.loginState)
   const landing = useStore(s => s.landing)
   const setLoggedIn = useStore(s => s.setLoggedIn)
@@ -45,9 +18,9 @@ export function App() {
   const setLoginError = useStore(s => s.setLoginError)
   const setQrRefetchSeq = useStore(s => s.setQrRefetchSeq)
   const setUpdateInfo = useStore(s => s.setUpdateInfo)
+  const [view, setView] = useState<MainView>('query')
 
   useEffect(() => {
-    // 监听主进程回传的登录态检测结果
     window.mcApi.onLoginChecked((s: { loggedIn: boolean; reason?: string }) => {
       setLanding(false)
       setLoggedIn(s.loggedIn)
@@ -56,16 +29,12 @@ export function App() {
         setLoginState('ok')
         setLoginError('')
       } else {
-        // SSO 未真正落地（无论 network 还是 reauth）：二维码都已失效（被扫过），必须自动重新拉取新码。
-        // 区别仅在提示文案：网络异常 vs 登录未完成。
         const reason = s.reason
         setLoginError(
           reason === 'network'
             ? '网络异常，正在重新获取二维码...'
             : '登录未完成，正在重新获取二维码...'
         )
-        // 通过 qrRefetchSeq 自增触发 LoginOverlay 自动重新拉取并显示新二维码，
-        // 用户无需手动点击刷新（旧码已被扫过、重扫无效）。
         setQrRefetchSeq(useStore.getState().qrRefetchSeq + 1)
       }
     })
@@ -75,7 +44,6 @@ export function App() {
       setChecking(false)
       if (s.loggedIn) setLoginState('ok')
     })
-    // 监听登录阶段状态：checking / logging / failed / ok
     window.mcApi.onLoginState((s: { state: string }) => {
       const state = s.state as 'checking' | 'logging' | 'failed' | 'ok'
       setLoginState(state)
@@ -83,11 +51,8 @@ export function App() {
       else setChecking(false)
       if (state === 'ok') { setLanding(false); setLoggedIn(true) }
     })
-    // 扫码成功、SSO 落地中：显示全屏 Loading 覆盖层，用户不会看到 OA 页面
     window.mcApi.onLoginLanding(() => setLanding(true))
-    // 挂载时主动询问一次当前登录态，作为事件丢失的兜底
     window.mcApi.reloadLogin()
-    // 自动更新事件
     window.mcApi.onUpdateAvailable((p: any) =>
       setUpdateInfo({ hasUpdate: true, version: p.version, notes: p.releaseNotes, checking: false }))
     window.mcApi.onUpdateDownloaded(() =>
@@ -104,8 +69,7 @@ export function App() {
     <div className="app-root">
       <UpdateBar />
       {!loggedIn && !landing && <LoginOverlay loginState={loginState} />}
-      <QueryPanel disabled={!loggedIn} />
-      {/* SSO 落地中：全屏 Loading 覆盖层，遮住底层内容，用户不会看到 OA 页面 */}
+      {view === 'query' ? <QueryPanel disabled={!loggedIn} /> : <ChatPanel disabled={!loggedIn} />}
       {landing && (
         <div className="sso-loading-overlay">
           <div className="sso-loading-box">
@@ -114,6 +78,10 @@ export function App() {
           </div>
         </div>
       )}
+      <div className="view-switch">
+        <button className={view === 'query' ? 'active' : ''} onClick={() => setView('query')}>物料查询</button>
+        <button className={view === 'ai' ? 'active' : ''} onClick={() => setView('ai')}>AI 助手</button>
+      </div>
     </div>
   )
 }
