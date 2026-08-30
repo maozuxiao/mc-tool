@@ -198,27 +198,33 @@ export function QueryPanel({ disabled }: { disabled: boolean }) {
                 { key: 'about', label: t('about') },
                 { key: 'check', label: updateInfo.checking ? t('updateChecking') : t('checkForUpdate') }
               ]}
-              onChange={(key) => {
-                if (key === 'about') alert(t('aboutInfo', { v: appVersion }))
+              onChange={async (key) => {
+                if (key === 'about') {
+                  void window.mcApi.showMessage({ message: t('aboutInfo', { v: appVersion }) })
+                }
                 if (key === 'check') {
                   // 手动检查：弹窗返回结果；有更新则提供「立即下载」入口
-                  checkUpdate().then((res: any) => {
-                    if (!res) return
-                    if (res.ok && res.hasUpdate) {
-                      const ok = confirm(t('updateConfirmDownload', { v: res.version || '' }))
-                      if (ok) {
-                        // 用户确认 → 开始下载（顶部 UpdateBar 显示进度）
-                        startDownload()
-                      }
-                    } else if (res.ok && res.latest) {
-                      alert(t('updateLatest'))
-                    } else if (!res.ok) {
-                      // 服务器未上传 latest.yml 等场景显示友好提示，不暴露原始 404 堆栈
-                      const msg = String(res.error || 'unknown')
-                      const isServiceMissing = /404|Cannot find channel|latest\.yml|update info/i.test(msg)
-                      alert(isServiceMissing ? t('updateServiceUnavailable') : t('updateError', { m: msg }))
+                  const res: any = await checkUpdate()
+                  if (!res) return
+                  if (res.ok && res.hasUpdate) {
+                    const ok = await window.mcApi.showConfirm({
+                      message: t('updateConfirmDownload', { v: res.version || '' })
+                    })
+                    if (ok) {
+                      // 用户确认 → 开始下载（顶部 UpdateBar 显示进度）
+                      startDownload()
                     }
-                  })
+                  } else if (res.ok && res.latest) {
+                    void window.mcApi.showMessage({ message: t('updateLatest') })
+                  } else if (!res.ok) {
+                    // 服务器未上传 latest.yml 等场景显示友好提示，不暴露原始 404 堆栈
+                    const msg = String(res.error || 'unknown')
+                    const isServiceMissing = /404|Cannot find channel|latest\.yml|update info/i.test(msg)
+                    void window.mcApi.showMessage({
+                      type: isServiceMissing ? 'info' : 'error',
+                      message: isServiceMissing ? t('updateServiceUnavailable') : t('updateError', { m: msg })
+                    })
+                  }
                 }
               }}
             />

@@ -19,6 +19,15 @@ export function App() {
   const setLoginError = useStore(s => s.setLoginError)
   const setQrRefetchSeq = useStore(s => s.setQrRefetchSeq)
   const setUpdateInfo = useStore(s => s.setUpdateInfo)
+  // landing 是一层全屏遮罩，只要它不消失，整个界面都无法输入。
+  // 主进程已保证每条路径都会给出结束事件，这里再加一道保险：
+  // 万一有未覆盖的异常分支漏发，2 分钟后自动解除，不必重启应用。
+  useEffect(() => {
+    if (!landing) return
+    const timer = window.setTimeout(() => setLanding(false), 120_000)
+    return () => window.clearTimeout(timer)
+  }, [landing, setLanding])
+
   const [view, setView] = useState<MainView>('query')
   // ChatPanel 一旦挂载就不再卸载：切到物料查询只是用 CSS 隐藏。
   // 否则来回切页面会丢失本地状态（当前会话 id、已加载的消息、流式进度）。

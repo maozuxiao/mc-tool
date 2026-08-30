@@ -22,13 +22,13 @@ export function FileTable() {
         : { ok: false, error: 'no ipc' }
       if (!res?.ok) {
         if (res?.error === 'NEED_RELOGIN') {
-          alert(t('fileNeedLogin'))
+          void window.mcApi.showMessage({ type: 'warning', message: t('fileNeedLogin') })
         } else if (!res?.canceled) {
-          alert(t('fileDownloadFail', { m: res?.error || 'unknown' }))
+          void window.mcApi.showMessage({ type: 'error', message: t('fileDownloadFail', { m: res?.error || 'unknown' }) })
         }
       }
     } catch (e: any) {
-      alert(t('fileDownloadFail', { m: e?.message || String(e) }))
+      void window.mcApi.showMessage({ type: 'error', message: t('fileDownloadFail', { m: e?.message || String(e) }) })
     } finally {
       setDownloading(null)
     }

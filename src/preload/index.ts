@@ -39,6 +39,17 @@ const mcApi = {
   saveCsv: (content: string, defaultName: string) =>
     ipcRenderer.invoke('dialog:saveCsv', content, defaultName),
 
+  // 提示框一律走主进程 dialog.showMessageBox，不要用 window.alert / window.confirm。
+  // 那两个是同步阻塞渲染进程的：弹窗一旦被主窗口挡住或用户没注意到，
+  // 整个界面就会表现为「全局无法输入」，只能重启应用才恢复。
+  showMessage: (opts: {
+    message: string
+    title?: string
+    type?: 'none' | 'info' | 'error' | 'warning' | 'question'
+  }): Promise<void> => ipcRenderer.invoke('dialog:message', opts),
+  showConfirm: (opts: { message: string; title?: string }): Promise<boolean> =>
+    ipcRenderer.invoke('dialog:confirm', opts),
+
   appVersion: (): string => ipcRenderer.sendSync(IPC.APP_VERSION),
 
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke('mc-open-external', url),

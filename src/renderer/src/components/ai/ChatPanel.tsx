@@ -465,6 +465,7 @@ export function ChatPanel({ disabled }: Props) {
 }
 
 function MarkdownLink({ href, children }: { href?: string; children?: React.ReactNode }) {
+  const t = useStore(s => s.t)
   const display = typeof children === 'string' ? children : ''
   const handleClick = async (e: React.MouseEvent<HTMLAnchorElement>) => {
     e.preventDefault()
@@ -488,12 +489,15 @@ function MarkdownLink({ href, children }: { href?: string; children?: React.Reac
         try { filename = decodeURIComponent(filename) } catch { /* 保持原样 */ }
         const res: any = await window.mcApi.downloadFile({ url, filename })
         if (!res?.ok && !res?.canceled) {
-          alert(res?.error === 'NEED_RELOGIN'
-            ? 'OA 登录已失效，请重新登录后再下载规格文件'
-            : `规格文件下载失败：${res?.error || 'unknown'}`)
+          void window.mcApi.showMessage({
+            type: 'error',
+            message: res?.error === 'NEED_RELOGIN'
+              ? t('fileNeedLogin')
+              : t('fileDownloadFail', { m: res?.error || 'unknown' })
+          })
         }
       } catch (err: any) {
-        alert(`规格文件下载失败：${err?.message || String(err)}`)
+        void window.mcApi.showMessage({ type: 'error', message: t('fileDownloadFail', { m: err?.message || String(err) }) })
       }
       return
     }

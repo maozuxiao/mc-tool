@@ -1404,9 +1404,21 @@ ipcMain.handle(IPC.OA_QR_LOGIN_POLL, async (_e, payload: {
           }
         } else {
           debugLog('[QR-POLL] authExecute success but no loginToken found, cannot complete SSO')
+          // 没有 loginToken 就无法完成 SSO，如实告知前端回到扫码重试，
+          // 否则前端会一直停在「等待扫码」的半途状态。
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send(IPC.OA_CHECK_LOGGED, { loggedIn: false, reason: 'reauth' })
+          }
         }
       } catch (finishErr: any) {
         debugLog('[QR-POLL] SSO finish warning: ' + finishErr.message)
+        // 兜底（关键）：completeOaSso 一进来就会发 OA_LOGIN_LANDING，
+        // 渲染层随即盖一层全屏「正在进入工具…」遮罩。这里若吞掉异常而不发结束事件，
+        // 遮罩就永远不消失——整个界面无法输入，只能重启应用。
+        // 这正是偶发「全局不能输入」的根因（例如 finalProbe 抛异常时）。
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send(IPC.OA_CHECK_LOGGED, { loggedIn: false, reason: 'reauth' })
+        }
       }
     }
 
@@ -1719,6 +1731,39 @@ ipcMain.handle(IPC.INSTALL_UPDATE, () => {
     debugLog('[INSTALL_UPDATE] fallback quitAndInstall(false, true)')
     autoUpdater.quitAndInstall(false, true)
   }
+})
+
+// 渲染层提示框统一走这里，不要用 window.alert / window.confirm：
+// 那两个是同步阻塞渲染进程的，弹窗若被主窗口挡住（或用户没留意到），
+// 整个界面会表现为「全局无法输入」，只能重启应用才恢复。
+// showMessageBox 由主进程弹出、正确挂在 mainWindow 上，且不阻塞渲染进程。
+ipcMain.handle('dialog:message', async (_e, opts: {
+  message?: string
+  title?: string
+  type?: 'none' | 'info' | 'error' | 'warning' | 'question'
+}) => {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  await dialog.showMessageBox(mainWindow, {
+    type: opts?.type || 'info',
+    title: opts?.title || 'MC物料查询',
+    message: String(opts?.message ?? ''),
+    buttons: ['确定'],
+    defaultId: 0,
+    cancelId: 0
+  })
+})
+
+ipcMain.handle('dialog:confirm', async (_e, opts: { message?: string; title?: string }) => {
+  if (!mainWindow || mainWindow.isDestroyed()) return false
+  const res = await dialog.showMessageBox(mainWindow, {
+    type: 'question',
+    title: opts?.title || 'MC物料查询',
+    message: String(opts?.message ?? ''),
+    buttons: ['取消', '确定'],
+    defaultId: 1,
+    cancelId: 0
+  })
+  return res.response === 1
 })
 
 ipcMain.handle('dialog:saveCsv', async (_e, content: string, defaultName: string) => {
