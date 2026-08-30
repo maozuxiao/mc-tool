@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm'
 import rehypeSanitize from 'rehype-sanitize'
 import rehypeHighlight from 'rehype-highlight'
 import type { AIConversation, AIMessage, AIProviderConfig, AIToolRun } from '@shared/ai-types'
+import { OA_ORIGIN } from '@shared/constants'
 import { useStore } from '../../store'
 
 interface ProviderBundle {
@@ -294,6 +295,47 @@ export function ChatPanel({ disabled }: Props) {
   )
 }
 
+function MarkdownLink({ href, children }: { href?: string; children?: React.ReactNode }) {
+  const display = typeof children === 'string' ? children : ''
+  const handleClick = async (e: React.MouseEvent<HTMLAnchorElement>) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (!href) return
+
+    // 把相对路径补成 OA 绝对地址
+    let url = href
+    if (url.startsWith('/')) url = OA_ORIGIN + url
+    if (!/^https?:\/\//i.test(url)) return
+
+    // 判断是不是规格文件下载链接
+    const isSpec = /\/specificationFileDownload\b/i.test(url) ||
+      /[?&]fileId=/i.test(url) ||
+      /[?&]fileName=/i.test(url)
+
+    if (isSpec) {
+      try {
+        const u = new URL(url)
+        let filename = u.searchParams.get('fileName') || display || 'spec-file'
+        try { filename = decodeURIComponent(filename) } catch { /* 保持原样 */ }
+        const res: any = await window.mcApi.downloadFile({ url, filename })
+        if (!res?.ok && !res?.canceled) {
+          alert(res?.error === 'NEED_RELOGIN'
+            ? 'OA 登录已失效，请重新登录后再下载规格文件'
+            : `规格文件下载失败：${res?.error || 'unknown'}`)
+        }
+      } catch (err: any) {
+        alert(`规格文件下载失败：${err?.message || String(err)}`)
+      }
+      return
+    }
+
+    // 普通外部链接用系统默认浏览器打开，避免在当前窗口导航导致白屏
+    window.mcApi.openExternal?.(url)
+  }
+
+  return <a href={href} onClick={handleClick}>{children}</a>
+}
+
 function MessageItem({ message }: { message: AIMessage }) {
   const t = useStore(s => s.t)
   return (
@@ -302,7 +344,7 @@ function MessageItem({ message }: { message: AIMessage }) {
       <div className="ai-bubble">
         {(message.toolRuns || []).map(run => <ToolRunCard key={run.id} run={run} />)}
         {message.role === 'assistant'
-          ? <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize, rehypeHighlight]}>{message.content}</ReactMarkdown>
+          ? <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize, rehypeHighlight]} components={{ a: MarkdownLink }}>{message.content}</ReactMarkdown>
           : <div className="ai-plain">{message.content}</div>}
       </div>
     </div>

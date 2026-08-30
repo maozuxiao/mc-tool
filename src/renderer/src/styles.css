@@ -26,10 +26,7 @@ body {
   color: var(--animal-text);
   -webkit-font-smoothing: antialiased;
 }
-/* 底部留白给固定在右下角的 .view-switch（bottom:18px + 约 44px 高），
-   避免它压住物料查询的表格右下角与 AI 助手的「发送 / 停止」按钮。
-   .view-switch 与登录遮罩都是 position: fixed，不受此处 padding 影响。 */
-.app-root { height: 100%; display: flex; flex-direction: column; position: relative; overflow: hidden; padding-bottom: 62px; box-sizing: border-box; }
+.app-root { height: 100%; display: flex; flex-direction: column; position: relative; overflow: hidden; }
 
 /* ── SSO 落地中 Loading 覆盖层（自定义，避免外部组件残留/布局异常） ── */
 .sso-loading-overlay {
@@ -486,7 +483,7 @@ body {
 /* 批量折叠内容 */
 .batch-body { display: flex; flex-direction: column; gap: 10px; }
 
-.panel-body { flex: 1; overflow-y: auto; padding: 18px 22px 28px; }
+.panel-body { flex: 1; overflow-y: auto; padding: 18px 22px 80px; }
 
 /* ── 卡片 ── */
 .card {

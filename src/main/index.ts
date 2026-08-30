@@ -301,6 +301,17 @@ function createWindow() {
     return { action: 'allow' }
   })
 
+  // 拦截窗口内导航：AI 消息里的 Markdown 链接点击后若未处理，会尝试在当前窗口加载 URL，
+  // OA 下载/登录页可能让渲染进程白屏。外部链接交给系统浏览器，OA 链接直接阻止。
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (url.startsWith('http')) {
+      event.preventDefault()
+      if (!/oa\.streamax\.com|iam\.streamax\.com/i.test(url)) {
+        shell.openExternal(url)
+      }
+    }
+  })
+
   // 输入框/选中文本右键菜单（Electron 默认无右键菜单）
   mainWindow.webContents.on('context-menu', (_event, params) => {
     if (!params.isEditable && !params.selectionText) return

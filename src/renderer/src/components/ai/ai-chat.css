@@ -5,8 +5,10 @@
   gap: 16px;
   height: 100%;
   min-height: 0;
-  /* 底部留白统一由 .app-root 承担（见 styles.css），此处不要再叠加，
-     否则两个页面叠加成 124px。 */
+  /* 底部留白：避免固定在右下角的 .view-switch（高约 44px，bottom:18px）
+     压住 AI 助手的输入框 / 发送按钮 / 最后一条消息。 */
+  padding-bottom: 80px;
+  box-sizing: border-box;
 }
 .ai-sidebar {
   display: flex;
