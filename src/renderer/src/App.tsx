@@ -8,6 +8,7 @@ import { UpdateBar } from './components/UpdateBar'
 type MainView = 'query' | 'ai'
 
 export function App() {
+  const t = useStore(s => s.t)
   const loggedIn = useStore(s => s.loggedIn)
   const loginState = useStore(s => s.loginState)
   const landing = useStore(s => s.landing)
@@ -79,8 +80,8 @@ export function App() {
         </div>
       )}
       <div className="view-switch">
-        <button className={view === 'query' ? 'active' : ''} onClick={() => setView('query')}>物料查询</button>
-        <button className={view === 'ai' ? 'active' : ''} onClick={() => setView('ai')}>AI 助手</button>
+        <button className={view === 'query' ? 'active' : ''} onClick={() => setView('query')}>{t('viewQuery')}</button>
+        <button className={view === 'ai' ? 'active' : ''} onClick={() => setView('ai')}>{t('viewAi')}</button>
       </div>
     </div>
   )

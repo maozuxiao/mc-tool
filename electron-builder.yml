@@ -36,7 +36,8 @@ win:
   target:
     - nsis
     - portable
-  # 禁用asarUnpack（保持 asar 压缩）
+  # 当前无原生模块依赖，无需解包（保持 asar 压缩）。
+  # 若以后引入 .node 依赖，必须在此配置 asarUnpack——原生模块无法从 asar 内部加载。
   asarUnpack: []
 
 mac:

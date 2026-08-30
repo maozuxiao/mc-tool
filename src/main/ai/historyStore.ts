@@ -1,119 +1,109 @@
-import Database from 'better-sqlite3'
+// AI 会话历史：JSON 文件持久化（userData/ai-history.json）。
+//
+// 原实现用 better-sqlite3，但它是原生模块，在本项目连续踩了三个坑：
+//   1) rollup 打包主进程时，其内部对 .node 的动态 require 无法解析（须标 external）；
+//   2) electron-builder 会自动跑 node-gyp 重建，本机无 VS 生成工具 → 打包直接失败；
+//   3) 更致命：v13 要求 Node >= 22（NAPI 10），而 Electron 33 内置 Node 20；
+//      降到 v12 虽支持 Node 20，但本机 Node 24 下 npm 装的是 Node 24 的 ABI 专版，
+//      同样加载失败，且每次 npm install 都会把它装回去。
+// 历史记录的操作都很简单（按会话取消息、追加、改名、删除），JSON 完全够用，
+// 也与本项目其余持久化方式（cookie 备份、供应商配置、日志）保持一致。
 import { app } from 'electron'
-import { existsSync, mkdirSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import type { AIConversation, AIMessage, AIToolRun } from '@shared/ai-types'
 
-let db: Database.Database | null = null
+interface ToolRunRecord extends AIToolRun {
+  messageId: string
+  createdAt: number
+}
 
-function getDb(): Database.Database {
-  if (db) return db
+interface HistoryData {
+  conversations: AIConversation[]
+  messages: AIMessage[]
+  toolRuns: ToolRunRecord[]
+}
+
+let cache: HistoryData | null = null
+
+function historyFile(): string {
   const dir = app.getPath('userData')
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-  db = new Database(join(dir, 'ai-chat.db'))
-  db.pragma('journal_mode = WAL')
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS conversations (
-      id TEXT PRIMARY KEY,
-      title TEXT NOT NULL,
-      provider_id TEXT NOT NULL,
-      model_id TEXT NOT NULL,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_conversations_updated ON conversations(updated_at DESC);
-    CREATE TABLE IF NOT EXISTS messages (
-      id TEXT PRIMARY KEY,
-      conversation_id TEXT NOT NULL,
-      role TEXT NOT NULL,
-      content TEXT NOT NULL,
-      reasoning TEXT,
-      provider_id TEXT,
-      model_id TEXT,
-      input_tokens INTEGER,
-      output_tokens INTEGER,
-      created_at INTEGER NOT NULL,
-      FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
-    );
-    CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, created_at);
-    CREATE TABLE IF NOT EXISTS tool_runs (
-      id TEXT PRIMARY KEY,
-      message_id TEXT NOT NULL,
-      tool_name TEXT NOT NULL,
-      input_json TEXT NOT NULL,
-      output_json TEXT,
-      summary TEXT,
-      status TEXT NOT NULL,
-      duration_ms INTEGER,
-      created_at INTEGER NOT NULL,
-      FOREIGN KEY(message_id) REFERENCES messages(id) ON DELETE CASCADE
-    );
-  `)
-  return db
+  return join(dir, 'ai-history.json')
+}
+
+function load(): HistoryData {
+  if (cache) return cache
+  const empty: HistoryData = { conversations: [], messages: [], toolRuns: [] }
+  try {
+    if (!existsSync(historyFile())) {
+      cache = empty
+      return cache
+    }
+    const parsed = JSON.parse(readFileSync(historyFile(), 'utf-8')) as Partial<HistoryData>
+    cache = {
+      conversations: parsed.conversations ?? [],
+      messages: parsed.messages ?? [],
+      toolRuns: parsed.toolRuns ?? []
+    }
+  } catch {
+    // 文件损坏时不要让整个 AI 助手不可用：退回空历史
+    cache = empty
+  }
+  return cache
+}
+
+function persist(): void {
+  if (!cache) return
+  try {
+    writeFileSync(historyFile(), JSON.stringify(cache), 'utf-8')
+  } catch {
+    // 写入失败不应阻塞正在进行的对话
+  }
+}
+
+function newId(prefix: string): string {
+  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
 }
 
 export function listConversations(): AIConversation[] {
-  return getDb().prepare(
-    `SELECT id, title, provider_id AS providerId, model_id AS modelId,
-            created_at AS createdAt, updated_at AS updatedAt
-     FROM conversations ORDER BY updated_at DESC LIMIT 200`
-  ).all() as AIConversation[]
+  return load()
+    .conversations.slice()
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .slice(0, 200)
 }
 
 export function createConversation(providerId: string, modelId: string, title: string): AIConversation {
   const now = Date.now()
-  const item = {
-    id: `conv_${now.toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+  const item: AIConversation = {
+    id: newId('conv'),
     title,
     providerId,
     modelId,
     createdAt: now,
     updatedAt: now
   }
-  getDb().prepare(
-    `INSERT INTO conversations (id, title, provider_id, model_id, created_at, updated_at)
-     VALUES (@id, @title, @providerId, @modelId, @createdAt, @updatedAt)`
-  ).run(item)
+  load().conversations.push(item)
+  persist()
   return item
 }
 
 export function getConversation(id: string): { conversation: AIConversation; messages: AIMessage[] } {
-  const conversation = getDb().prepare(
-    `SELECT id, title, provider_id AS providerId, model_id AS modelId,
-            created_at AS createdAt, updated_at AS updatedAt
-     FROM conversations WHERE id = ?`
-  ).get(id) as AIConversation | undefined
-  if (!conversation) throw new Error('会话不存在')
-  const messages = getDb().prepare(
-    `SELECT id, conversation_id AS conversationId, role, content, reasoning,
-            provider_id AS providerId, model_id AS modelId,
-            input_tokens AS inputTokens, output_tokens AS outputTokens, created_at AS createdAt
-     FROM messages WHERE conversation_id = ? ORDER BY created_at ASC`
-  ).all(id) as AIMessage[]
-  const ids = messages.map(m => m.id)
-  if (ids.length) {
-    const placeholders = ids.map(() => '?').join(',')
-    const runs = getDb().prepare(
-      `SELECT id, message_id AS messageId, tool_name AS toolName, input_json AS inputJson,
-              output_json AS outputJson, summary, status, duration_ms AS durationMs, created_at AS createdAt
-       FROM tool_runs WHERE message_id IN (${placeholders}) ORDER BY created_at ASC`
-    ).all(...ids) as any[]
-    for (const run of runs) {
-      const msg = messages.find(m => m.id === run.messageId)
-      if (!msg) continue
-      msg.toolRuns = msg.toolRuns || []
-      msg.toolRuns.push({
-        id: run.id,
-        toolName: run.toolName,
-        input: JSON.parse(run.inputJson),
-        output: run.outputJson ? JSON.parse(run.outputJson) : undefined,
-        summary: run.summary,
-        status: run.status,
-        durationMs: run.durationMs
-      } as AIToolRun)
-    }
+  const data = load()
+  const found = data.conversations.find(c => c.id === id)
+  if (!found) throw new Error('会话不存在')
+  const messages = data.messages
+    .filter(m => m.conversationId === id)
+    .sort((a, b) => a.createdAt - b.createdAt)
+    .map(m => ({ ...m }))
+  for (const m of messages) {
+    const runs = data.toolRuns
+      .filter(r => r.messageId === m.id)
+      .sort((a, b) => a.createdAt - b.createdAt)
+      .map(r => ({ ...r }))
+    if (runs.length) m.toolRuns = runs
   }
-  return { conversation, messages }
+  return { conversation: { ...found }, messages }
 }
 
 export function appendMessage(input: {
@@ -126,9 +116,10 @@ export function appendMessage(input: {
   inputTokens?: number
   outputTokens?: number
 }): AIMessage {
+  const data = load()
   const now = Date.now()
-  const msg = {
-    id: `msg_${now.toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+  const msg: AIMessage = {
+    id: newId('msg'),
     conversationId: input.conversationId,
     role: input.role,
     content: input.content,
@@ -139,52 +130,61 @@ export function appendMessage(input: {
     outputTokens: input.outputTokens,
     createdAt: now
   }
-  getDb().prepare(
-    `INSERT INTO messages (id, conversation_id, role, content, reasoning, provider_id, model_id, input_tokens, output_tokens, created_at)
-     VALUES (@id, @conversationId, @role, @content, @reasoning, @providerId, @modelId, @inputTokens, @outputTokens, @createdAt)`
-  ).run(msg)
-  getDb().prepare('UPDATE conversations SET updated_at = ? WHERE id = ?').run(now, input.conversationId)
-  return msg as AIMessage
+  data.messages.push(msg)
+  const conv = data.conversations.find(c => c.id === input.conversationId)
+  if (conv) conv.updatedAt = now
+  persist()
+  return msg
 }
 
 export function updateMessage(id: string, patch: { content?: string; reasoning?: string; inputTokens?: number; outputTokens?: number }): void {
-  const sets: string[] = []
-  const params: any = { id }
-  if (patch.content !== undefined) { sets.push('content = @content'); params.content = patch.content }
-  if (patch.reasoning !== undefined) { sets.push('reasoning = @reasoning'); params.reasoning = patch.reasoning }
-  if (patch.inputTokens !== undefined) { sets.push('input_tokens = @inputTokens'); params.inputTokens = patch.inputTokens }
-  if (patch.outputTokens !== undefined) { sets.push('output_tokens = @outputTokens'); params.outputTokens = patch.outputTokens }
-  if (!sets.length) return
-  getDb().prepare(`UPDATE messages SET ${sets.join(', ')} WHERE id = @id`).run(params)
+  const data = load()
+  const m = data.messages.find(x => x.id === id)
+  if (!m) return
+  if (patch.content !== undefined) m.content = patch.content
+  if (patch.reasoning !== undefined) m.reasoning = patch.reasoning
+  if (patch.inputTokens !== undefined) m.inputTokens = patch.inputTokens
+  if (patch.outputTokens !== undefined) m.outputTokens = patch.outputTokens
+  persist()
 }
 
 export function renameConversation(id: string, title: string): void {
-  getDb().prepare('UPDATE conversations SET title = ?, updated_at = ? WHERE id = ?').run(title, Date.now(), id)
+  const data = load()
+  const c = data.conversations.find(x => x.id === id)
+  if (!c) return
+  c.title = title
+  c.updatedAt = Date.now()
+  persist()
 }
 
 export function deleteConversation(id: string): void {
-  getDb().prepare('DELETE FROM conversations WHERE id = ?').run(id)
+  const data = load()
+  const msgIds = new Set(data.messages.filter(m => m.conversationId === id).map(m => m.id))
+  data.toolRuns = data.toolRuns.filter(r => !msgIds.has(r.messageId))
+  data.messages = data.messages.filter(m => m.conversationId !== id)
+  data.conversations = data.conversations.filter(c => c.id !== id)
+  persist()
 }
 
 export function appendToolRun(messageId: string, run: Omit<AIToolRun, 'id'>): AIToolRun {
-  const full = { ...run, id: `tool_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}` }
-  getDb().prepare(
-    `INSERT INTO tool_runs (id, message_id, tool_name, input_json, output_json, summary, status, duration_ms, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    full.id, messageId, full.toolName,
-    JSON.stringify(full.input || {}),
-    full.output === undefined ? null : JSON.stringify(full.output),
-    full.summary || null, full.status, full.durationMs || null, Date.now()
-  )
+  const full: ToolRunRecord = {
+    ...run,
+    id: newId('tool'),
+    messageId,
+    createdAt: Date.now()
+  }
+  load().toolRuns.push(full)
+  persist()
   return full
 }
 
 export function completeToolRun(id: string, patch: { output?: unknown; summary?: string; status: AIToolRun['status']; durationMs?: number }): void {
-  getDb().prepare(
-    `UPDATE tool_runs SET output_json = ?, summary = ?, status = ?, duration_ms = ? WHERE id = ?`
-  ).run(
-    patch.output === undefined ? null : JSON.stringify(patch.output),
-    patch.summary || null, patch.status, patch.durationMs || null, id
-  )
+  const data = load()
+  const run = data.toolRuns.find(r => r.id === id)
+  if (!run) return
+  if (patch.output !== undefined) run.output = patch.output
+  if (patch.summary !== undefined) run.summary = patch.summary
+  run.status = patch.status
+  if (patch.durationMs !== undefined) run.durationMs = patch.durationMs
+  persist()
 }

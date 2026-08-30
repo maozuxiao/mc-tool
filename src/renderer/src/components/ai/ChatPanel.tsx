@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm'
 import rehypeSanitize from 'rehype-sanitize'
 import rehypeHighlight from 'rehype-highlight'
 import type { AIConversation, AIMessage, AIProviderConfig, AIToolRun } from '@shared/ai-types'
+import { useStore } from '../../store'
 
 interface ProviderBundle {
   providers: AIProviderConfig[]
@@ -15,12 +16,14 @@ interface Props {
 }
 
 export function ChatPanel({ disabled }: Props) {
+  const t = useStore(s => s.t)
   const [providers, setProviders] = useState<ProviderBundle>({ providers: [], suggestions: {} })
   const [providerId, setProviderId] = useState('')
   const [modelId, setModelId] = useState('')
   const [modelOptions, setModelOptions] = useState<string[]>([])
   const [apiKey, setApiKey] = useState('')
   const [showSettings, setShowSettings] = useState(false)
+  const [modelOpen, setModelOpen] = useState(false)
   const [conversations, setConversations] = useState<AIConversation[]>([])
   const [conversationId, setConversationId] = useState<string | null>(null)
   const [messages, setMessages] = useState<AIMessage[]>([])
@@ -77,7 +80,7 @@ export function ChatPanel({ disabled }: Props) {
           return { ...m, toolRuns: (m.toolRuns || []).map(r => r.id === event.run.id ? { ...r, ...event.run } : r) }
         }))
       }
-      if (event.type === 'error') setNotice(event.message || 'AI 请求失败')
+      if (event.type === 'error') setNotice(event.message || t('aiRequestFailed'))
       if (event.type === 'done') setStreaming(false)
     })
   }, [refreshConversations, refreshProviders])
@@ -112,21 +115,21 @@ export function ChatPanel({ disabled }: Props) {
         ...(apiKey ? { apiKey } : {})
       })
       setApiKey('')
-      setNotice('AI 配置已保存')
+      setNotice(t('aiSaved'))
       await refreshProviders()
     } catch (e: any) { setNotice(e.message) }
   }
 
   const loadModels = async () => {
     if (!providerId) return
-    setNotice('正在获取模型列表...')
+    setNotice(t('aiFetchingModels'))
     const res = await window.mcApi.ai.listModels(providerId)
     if (res.ok) {
       setModelOptions(res.models.map((m: any) => m.id))
-      setNotice(`已获取 ${res.models.length} 个模型`)
+      setNotice(t('aiModelsFetched', { n: res.models.length }))
     } else {
       setModelOptions(res.suggestions || [])
-      setNotice(`模型列表获取失败：${res.error}，已显示推荐模型`)
+      setNotice(t('aiModelsFailed', { m: res.error }))
     }
   }
 
@@ -135,7 +138,7 @@ export function ChatPanel({ disabled }: Props) {
     if (!content || streaming || disabled) return
     if (!selectedProvider?.hasApiKey && providerId !== 'ollama') {
       setShowSettings(true)
-      setNotice('请先配置 API Key')
+      setNotice(t('aiNeedApiKey'))
       return
     }
     setInput('')
@@ -173,14 +176,20 @@ export function ChatPanel({ disabled }: Props) {
     refreshConversations()
   }
 
-  const title = useMemo(() => conversations.find(c => c.id === conversationId)?.title || '新对话', [conversations, conversationId])
+  const title = useMemo(() => conversations.find(c => c.id === conversationId)?.title || t('aiNewChatTitle'), [conversations, conversationId, t])
+  // 原生 <datalist> 的下拉弹层由浏览器绘制，CSS 无法控制其高度，模型一多就没有滚动条。
+  // 改为自绘下拉，沿用应用内 .lifecycle-panel 的规格（max-height + overflow-y: auto）。
+  const modelSuggestions = useMemo(() => {
+    const kw = modelId.trim().toLowerCase()
+    return kw ? modelOptions.filter(m => m.toLowerCase().includes(kw)) : modelOptions
+  }, [modelOptions, modelId])
 
   return (
     <div className="ai-page">
       <aside className="ai-sidebar">
         <div className="ai-sidebar-head">
-          <span>AI 助手</span>
-          <button className="mq-btn" onClick={() => { setConversationId(null); setMessages([]) }}>+ 新对话</button>
+          <span>{t('viewAi')}</span>
+          <button className="mq-btn" onClick={() => { setConversationId(null); setMessages([]) }}>{t('aiNewChat')}</button>
         </div>
         <div className="ai-history">
           {conversations.map(c => (
@@ -197,35 +206,56 @@ export function ChatPanel({ disabled }: Props) {
           <select className="ai-select" value={providerId} onChange={e => setProviderId(e.target.value)}>
             {providers.providers.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
-          <input className="ai-model-input" list="ai-model-list" value={modelId} onChange={e => setModelId(e.target.value)} />
-          <datalist id="ai-model-list">{modelOptions.map(m => <option key={m} value={m} />)}</datalist>
-          <button className="mq-btn" onClick={loadModels}>获取模型</button>
+          <div className="ai-model-combo">
+            <input
+              className="ai-model-input"
+              value={modelId}
+              placeholder={t('aiModel')}
+              onChange={e => { setModelId(e.target.value); setModelOpen(true) }}
+              onFocus={() => setModelOpen(true)}
+              onBlur={() => window.setTimeout(() => setModelOpen(false), 150)}
+            />
+            {modelOpen && modelSuggestions.length > 0 && (
+              <div className="ai-model-panel">
+                {modelSuggestions.map(m => (
+                  <div
+                    key={m}
+                    className={`ai-model-option${m === modelId ? ' active' : ''}`}
+                    onMouseDown={e => { e.preventDefault(); setModelId(m); setModelOpen(false) }}
+                  >
+                    {m}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <button className="mq-btn" onClick={loadModels}>{t('aiFetchModels')}</button>
           <label className="ai-skill-toggle">
             <input type="checkbox" checked={useSkill} onChange={e => setUseSkill(e.target.checked)} />
             MC Skill
           </label>
-          <button className="mq-btn accent" onClick={() => setShowSettings(v => !v)}>配置</button>
+          <button className="mq-btn accent" onClick={() => setShowSettings(v => !v)}>{t('aiSettings')}</button>
         </div>
 
         {showSettings && (
           <div className="ai-settings">
-            <div className="ai-settings-title">API 配置 · {selectedProvider?.name}</div>
+            <div className="ai-settings-title">{t('aiApiConfig', { name: selectedProvider?.name || '' })}</div>
             <label className="ai-field">
-              <span>Base URL</span>
+              <span>{t('aiBaseUrl')}</span>
               <input value={selectedProvider?.baseUrl || ''} onChange={e => {
                 setProviders(prev => ({ ...prev, providers: prev.providers.map(p => p.id === providerId ? { ...p, baseUrl: e.target.value } : p) }))
               }} />
             </label>
             <label className="ai-field">
-              <span>API Key</span>
-              <input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder={selectedProvider?.hasApiKey ? '已配置，留空保持不变' : '请输入 API Key'} />
+              <span>{t('aiApiKey')}</span>
+              <input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder={selectedProvider?.hasApiKey ? t('aiKeyConfigured') : t('aiKeyPlaceholder')} />
             </label>
             <div className="ai-settings-actions">
               <button className="mq-btn" onClick={async () => {
                 const res = await window.mcApi.ai.testProvider({ providerId, modelId })
                 setNotice(res.ok ? res.message : res.error)
-              }}>测试连接</button>
-              <button className="mq-btn accent" onClick={saveProvider}>保存配置</button>
+              }}>{t('aiTest')}</button>
+              <button className="mq-btn accent" onClick={saveProvider}>{t('aiSave')}</button>
             </div>
           </div>
         )}
@@ -234,7 +264,7 @@ export function ChatPanel({ disabled }: Props) {
           {messages.length === 0 && (
             <div className="ai-empty">
               <div className="ai-empty-icon">AI</div>
-              <div>你可以直接提问，也可以让我查询物料、库存、BOM 或规格文件。</div>
+              <div>{t('aiEmpty')}</div>
             </div>
           )}
           {messages.map(m => <MessageItem key={m.id} message={m} />)}
@@ -245,7 +275,7 @@ export function ChatPanel({ disabled }: Props) {
           {notice && <div className="ai-notice">{notice}</div>}
           <textarea
             value={input}
-            placeholder={disabled ? '请先登录 OA 后使用 AI 助手' : '输入问题，Enter 发送，Shift+Enter 换行'}
+            placeholder={disabled ? t('aiLoginRequired') : t('aiInputPh')}
             disabled={disabled || streaming}
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => {
@@ -255,8 +285,8 @@ export function ChatPanel({ disabled }: Props) {
           <div className="ai-composer-actions">
             <span className="ai-title">{title}</span>
             {streaming
-              ? <button className="mq-btn" onClick={() => conversationId && window.mcApi.ai.stopMessage(conversationId)}>停止</button>
-              : <button className="mq-btn accent" onClick={send} disabled={disabled || !input.trim()}>发送</button>}
+              ? <button className="mq-btn" onClick={() => conversationId && window.mcApi.ai.stopMessage(conversationId)}>{t('aiStop')}</button>
+              : <button className="mq-btn accent" onClick={send} disabled={disabled || !input.trim()}>{t('aiSend')}</button>}
           </div>
         </div>
       </section>
@@ -265,9 +295,10 @@ export function ChatPanel({ disabled }: Props) {
 }
 
 function MessageItem({ message }: { message: AIMessage }) {
+  const t = useStore(s => s.t)
   return (
     <div className={`ai-message ${message.role}`}>
-      <div className="ai-avatar">{message.role === 'user' ? '我' : 'AI'}</div>
+      <div className="ai-avatar">{message.role === 'user' ? t('aiRoleUser') : 'AI'}</div>
       <div className="ai-bubble">
         {(message.toolRuns || []).map(run => <ToolRunCard key={run.id} run={run} />)}
         {message.role === 'assistant'

@@ -26,33 +26,31 @@ export const PROVIDER_PRESETS: AIProviderPreset[] = [
     defaultModel: 'deepseek-v4-flash',
     suggestedModels: ['deepseek-v4-flash', 'deepseek-v4-pro', 'glm-5.3', 'glm-5.3-flash', 'qwen3.8-max', 'kimi-k3', 'grok-4.6']
   },
+
   {
-    // 腾讯云 CodeBuddy / Token Plan（广州）。接入地址与模型取自官方文档：
-    // https://www.tencentcloud.com/zh/document/product/1300/81494
-    id: 'codebuddy-cn',
-    name: 'CodeBuddy 腾讯云（广州）',
+    // OpenCode Zen：官方 AI 网关，OpenAI 兼容端点，模型列表 GET /v1/models。
+    // 与上面的 opencode-go（/zen/go/v1，订阅制）不是同一套：Zen 走按量付费，
+    // 并提供 6 个限时免费模型（名称带 free，以及隐身模型 Big Pickle）。
+    // 未列入 muse-spark-1.2-contributor-free：它走 /responses 而非 /chat/completions，
+    // 本应用目前只实现 chat/completions，选它会请求失败。
+    // ⚠️ 隐私提示：免费模型的服务方可能在免费期内收集数据用于改进模型，
+    // NVIDIA 的免费端点更明确写着「请勿提交个人或机密数据」。查询物料、BOM
+    // 等内部数据时请改用付费模型。
+    // 文档：https://opencode.ai/docs/zh-cn/zen/
+    id: 'opencode-zen',
+    name: 'OpenCode Zen（含免费模型）',
     protocol: 'openai-compatible',
-    baseUrl: 'https://tokenhub.tencentcloudmaas.com/plan/v3',
-    defaultModel: 'auto',
+    baseUrl: 'https://opencode.ai/zen/v1',
+    defaultModel: 'big-pickle',
     suggestedModels: [
-      'auto', 'glm-5.2', 'minimax-m3',
-      'kimi-k2.7-code', 'kimi-k2.7-code-highspeed',
+      // ── 免费 ──
+      'big-pickle', 'mimo-v2.5-free', 'ling-3.0-flash-fin-free',
+      'nemotron-3-ultra-free', 'nemotron-3.5-lightning-free',
+      // ── 付费（常用）──
       'deepseek-v4-flash', 'deepseek-v4-pro',
-      'deepseek-v4-flash-202605', 'deepseek-v4-pro-202606'
-    ]
-  },
-  {
-    // 同上，新加坡地域。国内网络优先用广州，海外或需要国际模型时选这个。
-    id: 'codebuddy-intl',
-    name: 'CodeBuddy 腾讯云（新加坡）',
-    protocol: 'openai-compatible',
-    baseUrl: 'https://tokenhub-intl.tencentcloudmaas.com/plan/v3',
-    defaultModel: 'auto',
-    suggestedModels: [
-      'auto', 'glm-5.2', 'minimax-m3',
-      'kimi-k2.7-code', 'kimi-k2.7-code-highspeed',
-      'deepseek-v4-flash', 'deepseek-v4-pro',
-      'deepseek-v4-flash-202605', 'deepseek-v4-pro-202606'
+      'glm-5.2', 'glm-5.1',
+      'kimi-k3', 'kimi-k2.7-code',
+      'minimax-m3', 'grok-4.6'
     ]
   },
   {
