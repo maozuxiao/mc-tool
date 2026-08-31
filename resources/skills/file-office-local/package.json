@@ -1,0 +1,23 @@
+{
+  "name": "file-office-local",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MC Tool 内置技能：本地文件读写（Markdown/TXT/CSV/Office 三件套/PDF），供 AI Build 模式调用",
+  "main": "scripts/file_office.js",
+  "scripts": {
+    "test": "node scripts/selftest.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "docx": "^9.1.0",
+    "exceljs": "^4.4.0",
+    "iconv-lite": "^0.6.3",
+    "jszip": "^3.10.1",
+    "mammoth": "^1.8.0",
+    "pdfjs-dist": "3.11.174",
+    "pptxgenjs": "^3.12.0"
+  },
+  "//": "iconv-lite 用于解码 GBK 编码的 txt/csv；pdfjs-dist 固定 3.x，因为 4.x 的 legacy build 为纯 ESM，CommonJS 脚本无法直接 require"
+}

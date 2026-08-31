@@ -25,6 +25,16 @@ extraResources:
     to: icon.png
   - from: resources/skills/mc-material-query-local
     to: skills/mc-material-query-local
+  # 文件读写技能（AI Build 模式）：随包分发，含自带的 node_modules。
+  # 依赖全部为纯 JS（已验证 0 个 .node），因此不需要 asarUnpack。
+  # filter 用于瘦身：source map 与 TS 类型定义运行时用不到，合计约 34MB。
+  - from: resources/skills/file-office-local
+    to: skills/file-office-local
+    filter:
+      - '**/*'
+      - '!**/*.map'
+      - '!**/node_modules/@types/**'
+      - '!**/node_modules/**/tsconfig.json'
 
 # 启用 asar 打包（减小体积 + 加快加载）
 asar: true
