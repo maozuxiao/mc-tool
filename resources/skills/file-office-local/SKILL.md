@@ -1,6 +1,6 @@
 ---
 name: file-office-local
-description: MC Tool 内置技能：在本地工作区内读写文件（Markdown/TXT/CSV、Office 三件套、PDF），供 AI Build 模式调用。统一入口 scripts/file_office.js，支持 ping/read 等子命令。所有路径强制限制在 --root 指定的工作区内。
+description: MC Tool 内置技能：在本地工作区内读写文件（Markdown/TXT/CSV、Office 三件套、PDF），供 AI Build 模式调用。统一入口 scripts/file_office.js，支持 ping/read/list/search/write 等子命令。所有路径强制限制在 --root 指定的工作区内。
 metadata:
   type: skill
   agent_created: true
@@ -29,11 +29,11 @@ $NODE = & "$SKILL\scripts\ensure_node.ps1"   # stdout 最后一行即 node.exe �
 | 命令 | 说明 | 状态 |
 |------|------|------|
 | `ping` | 健康检查，报告各格式依赖的加载状态（不校验 `--root`） | ✅ 可用 |
-| `read <path> [--offset N] [--limit N] [--max-bytes N]` | 读取文本类文件 | ✅ 可用（纯文本格式） |
-| `write <path>` | 写入文件 | 🚧 待接入 |
-| `list <dir>` | 列目录 | 🚧 待接入 |
-| `search <pattern>` | 搜索内容 | 🚧 待接入 |
-| `cmd <command>` | 执行命令 | 🚧 待接入 |
+| `read <path> [--offset N] [--limit N] [--max-bytes N]` | 读取文本/Office/PDF 文件 | ✅ 可用（含 docx/xlsx/pptx/pdf） |
+| `write <path> [--content "..."] [--append] [--encoding auto\|utf8\|gbk]` | 写入文本类文件 | ✅ 可用（二进制 Office/PDF 不支持写） |
+| `list <dir> [--type file\|dir]` | 列目录 | ✅ 可用 |
+| `search <pattern> [--dir <dir>] [--name] [--content] [--max N]` | 按文件名/内容搜索 | ✅ 可用 |
+| `cmd <command>` | 执行命令 | ❌ 已取消（不在 Build 模式范围内） |
 
 ## 安全约束（重要）
 
@@ -59,12 +59,12 @@ Windows 中文环境常见 GBK 编码的 `.txt` / `.csv`，Node 原生只认 UTF
 
 | 格式 | 读取 | 写入 |
 |------|------|------|
-| `.md` `.txt` `.csv` `.json` `.log` `.yml` 等纯文本 | ✅ | 🚧 |
-| `.docx` | 🚧 mammoth | 🚧 docx |
-| `.xlsx` | 🚧 exceljs | 🚧 exceljs |
-| `.pptx` | 🚧 jszip | 🚧 pptxgenjs |
-| `.pdf` | 🚧 pdfjs-dist | 🚧 Electron printToPDF |
-| `.doc` `.xls` `.ppt`（老二进制格式） | 🚧 需先转换 | ❌ |
+| `.md` `.txt` `.csv` `.json` `.log` `.yml` 等纯文本 | ✅ | ✅（覆盖写 / `--append` 追加） |
+| `.docx` | ✅ mammoth 提取文本 | ❌ 二进制格式不支持 |
+| `.xlsx` | ✅ exceljs 转 Markdown（公式取 result） | ❌ 二进制格式不支持 |
+| `.pptx` | ✅ jszip 提取 `<a:t>` 文本 | ❌ 二进制格式不支持 |
+| `.pdf` | ✅ pdfjs-dist（NodeCMapReaderFactory 解决中文丢失） | ❌ 二进制格式不支持 |
+| `.doc` `.xls` `.ppt`（老二进制格式） | ❌ 需先转换 | ❌ |
 
 ## 依赖说明
 
