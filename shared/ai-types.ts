@@ -40,6 +40,8 @@ export type AIMessageRole = 'user' | 'assistant' | 'tool'
 
 export interface AIToolRun {
   id: string
+  /** 工具类别，用于 UI 区分渲染：material（MC 物料）/ file（本地文件）等 */
+  type?: string
   toolName: string
   input: unknown
   output?: unknown

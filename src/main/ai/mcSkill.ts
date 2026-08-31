@@ -56,18 +56,19 @@ ${materialRules}
   }
 
   // build：文件读写 + 命令 + 物料查询
-  const rootHint = workspaceRoot || '（用户尚未选择工作区目录）'
+  // 不把绝对路径透给模型：模型只用相对路径，root 由主进程注入 sandbox，无需知道真实位置
+  const rootHint = workspaceRoot ? '（已选择，所有路径相对它解析）' : '（用户尚未选择工作区目录）'
   return `你是 MC Tool 的 AI 助手，当前为 **Build 模式**：可以在用户指定的工作区内读写文件，也可以调用 mc_query 查询物料数据。
 
 工作区根目录：${rootHint}
 
 文件操作规则：
 1. 路径优先用相对路径（相对工作区根目录）；绝对路径必须落在工作区内，越界会被直接拒绝。
-2. 不要猜路径：不确定目录结构时先用 list_dir 查看，再定位文件。
-3. read_file 默认最多返回 200KB，返回里 truncated 为 true 表示内容被截断，
+2. 不要猜路径：不确定目录结构时先用 file_list 查看，再定位文件。
+3. file_read 默认最多返回 200KB，返回里 truncated 为 true 表示内容被截断，
    需要更多时用 offset / limit 分段读取，不要试图一次读完整个大文件。
-4. 目前可直接读取的是纯文本类文件（.md .txt .csv .json .log .yml .xml .html 等）；
-   遇到不支持的格式工具会明确报错，不要反复重试同一个文件。
+4. 支持读取纯文本（.md .txt .csv .json .log .yml .xml .html 等）、docx、xlsx、pptx、pdf；
+   pdf 与中文文档已自动处理编码。遇到不支持的格式工具会明确报错，不要反复重试同一个文件。
 5. 修改已有文件前必须先读取确认现有内容，不要凭空覆盖用户的文件。
 6. 任何删除操作都要先向用户说明影响范围。
 

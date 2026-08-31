@@ -224,7 +224,9 @@ async function streamOpenAICompatible(input: {
       for (const call of toolCalls) {
         let parsed: any
         try { parsed = JSON.parse(call.function.arguments || '{}') } catch { parsed = {} }
+        const runType = call.function.name.startsWith('file_') ? 'file' : 'material'
         const runningRun = appendToolRun(assistantMessageId, {
+          type: runType,
           toolName: call.function.name,
           input: parsed,
           status: 'running',

@@ -11,7 +11,7 @@ export const FILE_READ_TOOL_DEFINITION = {
   type: 'function',
   function: {
     name: 'file_read',
-    description: '读取工作区内的文本文件（md/txt/csv/json/log/yml/xml/html 等）。单次最多返回 200KB，返回中 truncated 为 true 表示内容被截断，需要更多时用 offset/limit 分段读取。路径必须在工作区内，越界会被拒绝。',
+    description: '读取工作区内的文件。支持纯文本（md/txt/csv/json/log/yml/xml/html 等）、docx、xlsx、pptx、pdf；pdf 与中文文档会自动处理编码。单次最多返回约 200KB，返回中 truncated 为 true 表示被截断，需更多时用 offset/limit 分段读取。路径必须在工作区内，越界会被拒绝。',
     parameters: {
       type: 'object',
       properties: {
@@ -33,8 +33,87 @@ export const FILE_READ_TOOL_DEFINITION = {
   }
 }
 
+export const FILE_LIST_TOOL_DEFINITION = {
+  type: 'function',
+  function: {
+    name: 'file_list',
+    description: '列出工作区某个目录的内容。不确定目录结构时先调用它定位文件。',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: {
+          type: 'string',
+          description: '要列出的目录，相对工作区根目录，默认当前目录'
+        },
+        depth: {
+          type: 'number',
+          description: '递归深度，默认 1（仅当前目录）'
+        }
+      },
+      required: []
+    }
+  }
+}
+
+export const FILE_SEARCH_TOOL_DEFINITION = {
+  type: 'function',
+  function: {
+    name: 'file_search',
+    description: '在工作区内按文件名或内容搜索关键词，用于查找包含某内容的文件。',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: '搜索词'
+        },
+        path: {
+          type: 'string',
+          description: '搜索起始目录，相对工作区根目录，默认工作区根'
+        },
+        nameOnly: {
+          type: 'boolean',
+          description: '仅按文件名搜索、不扫描内容，默认 false'
+        }
+      },
+      required: ['query']
+    }
+  }
+}
+
+export const FILE_WRITE_TOOL_DEFINITION = {
+  type: 'function',
+  function: {
+    name: 'file_write',
+    description: '写入文本类文件（md/txt/csv/json/log/yml 等）。可分段追加。暂不支持生成 Office 二进制（docx/xlsx/pptx/pdf）。修改已有文件前必须先读取确认现有内容。',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: {
+          type: 'string',
+          description: '文件路径，相对工作区根目录'
+        },
+        content: {
+          type: 'string',
+          description: '要写入的文本，\\n 表示换行'
+        },
+        append: {
+          type: 'boolean',
+          description: '追加到末尾而非覆盖，默认 false'
+        }
+      },
+      required: ['path', 'content']
+    }
+  }
+}
+
 /** Build 模式下发的全部文件工具 */
-export const FILE_TOOL_DEFINITIONS = [FILE_READ_TOOL_DEFINITION]
+export const FILE_TOOL_DEFINITIONS = [
+  FILE_READ_TOOL_DEFINITION,
+  FILE_LIST_TOOL_DEFINITION,
+  FILE_SEARCH_TOOL_DEFINITION,
+  FILE_WRITE_TOOL_DEFINITION
+]
 
 export function fileSkillAvailable(): boolean {
   return skillExists(SKILL_FILE, SCRIPT)
