@@ -19,8 +19,6 @@ files:
 
 # 把图标作为额外资源放到 resources/ 下（asar 外），避免路径解析问题
 extraResources:
-  - from: build/icon.ico
-    to: icon.ico
   - from: build/icon.png
     to: icon.png
   - from: resources/skills/mc-material-query-local
@@ -35,6 +33,12 @@ extraResources:
       - '!**/*.map'
       - '!**/node_modules/@types/**'
       - '!**/node_modules/**/tsconfig.json'
+      # 瘦身：以下包运行时并未被引用（docx/pptxgenjs 的生成能力本次未启用），从安装包中剔除。
+      # 注意：exceljs 与 @fast-csv 必须随包分发——update 模式用它保留原 xlsx 样式。
+      - '!**/node_modules/docx/**'
+      - '!**/node_modules/pptxgenjs/**'
+      - '!**/node_modules/test/**'
+      - '!**/node_modules/tests/**'
 
 # 启用 asar 打包（减小体积 + 加快加载）
 asar: true
@@ -61,6 +65,8 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   shortcutName: MC物料查询
+  # 安装过程默认展开详细信息日志（见 build/installer.nsh）
+  include: build/installer.nsh
 
 publish:
   - provider: github

@@ -17,6 +17,8 @@ export interface AIPreferences {
   lastModelId?: string
   /** Build 模式的工作区根目录，空字符串表示未选择 */
   workspaceRoot?: string
+  /** 额外可访问目录白名单（工作区之外），跨启动持久化；会话内 open_folder 打开的目录不在此列 */
+  extraRoots?: { alias: string; path: string }[]
 }
 
 function readPrefs(): AIPreferences {
@@ -41,6 +43,8 @@ export function savePreferences(patch: AIPreferences): AIPreferences {
   if (patch.lastModelId) next.lastModelId = patch.lastModelId
   // workspaceRoot 允许被清空（传空字符串），所以用 undefined 判断而不是真值判断
   if (patch.workspaceRoot !== undefined) next.workspaceRoot = patch.workspaceRoot
+  // extraRoots 用 undefined 判断：传 [] 表示清空白名单
+  if (patch.extraRoots !== undefined) next.extraRoots = patch.extraRoots
   writePrefs(next)
   return next
 }

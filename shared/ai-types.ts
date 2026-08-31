@@ -65,6 +65,15 @@ export interface AIMessage {
 }
 
 /**
+ * 已授权目录（白名单）。alias 为空字符串表示主工作区（裸相对路径）；
+ * 其余为额外目录的别名，模型用「别名/路径」引用。
+ */
+export interface AIExtraRoot {
+  alias: string
+  path: string
+}
+
+/**
  * 运行模式。决定下发哪些工具、用哪套系统提示语。
  * - ask：纯对话，不下发任何工具（模型不会去调不存在的工具而编造结果）
  * - mc：只下发 mc_query，查 OA 物料数据
@@ -87,8 +96,11 @@ export interface AISendPayload {
    */
   useMcSkill?: boolean
   // Build 模式的工作区根目录：文件与命令操作都被限制在其中。
-  // 由渲染层在用户选目录后传入，未选择时 Build 模式不可用。
+  // 由渲染层在用户选目录后传入，未选择时 Build 模式仍可用（模型可用 open_folder 打开目录）。
   workspaceRoot?: string
+  // 会话级「额外可访问目录」白名单（工作区之外），由 UI 添加、跨启动持久化。
+  // 模型用 alias 前缀引用其中的文件，如 shared/report.xlsx。
+  extraRoots?: AIExtraRoot[]
   // 应用界面语言（zh / en），仅作为「提问语言无法判断时」的兜底
   lang?: string
 }
@@ -113,5 +125,8 @@ export const AI_IPC = {
   // Build 模式的工作区根目录：由主进程弹系统目录选择框，避免渲染层直接操作 fs
   SELECT_WORKSPACE: 'ai:select-workspace',
   CLEAR_WORKSPACE: 'ai:clear-workspace',
+  // 额外可访问目录（工作区之外）白名单：由主进程弹系统目录框选择，持久化到偏好
+  ADD_EXTRA_ROOT: 'ai:add-extra-root',
+  REMOVE_EXTRA_ROOT: 'ai:remove-extra-root',
   EVENT: 'ai:event'
 } as const

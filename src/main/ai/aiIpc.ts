@@ -4,6 +4,7 @@ import { resolve } from 'path'
 import { AI_IPC } from '@shared/ai-types'
 import { listModels, testProvider } from './providerApi'
 import { listProviders, saveProvider, getSuggestedModels, getPreferences, savePreferences } from './providerStore'
+import { dirBlockReason, makeAlias } from './rootGuard'
 import {
   createConversation, deleteConversation, getConversation,
   listConversations, renameConversation
@@ -85,5 +86,42 @@ export function registerAIIPC(): void {
   ipcMain.handle(AI_IPC.CLEAR_WORKSPACE, () => {
     savePreferences({ workspaceRoot: '' })
     return { ok: true, workspaceRoot: '' }
+  })
+
+  // 额外可访问目录（工作区之外）白名单：主进程弹系统目录框多选，持久化到偏好。
+  // 受保护的系统目录（C:\Windows、应用自身资源、AppData、用户主目录）一律拦截。
+  ipcMain.handle(AI_IPC.ADD_EXTRA_ROOT, async () => {
+    const win = BrowserWindow.getAllWindows().find(w => !w.isDestroyed())
+    if (!win) return { ok: false, error: 'no main window' }
+    const { canceled, filePaths } = await dialog.showOpenDialog(win, {
+      properties: ['openDirectory', 'createDirectory', 'multiSelections'],
+      title: '添加可访问目录（工作区之外，模型可读写）'
+    })
+    if (canceled || !filePaths.length) {
+      return { ok: true, canceled: true, extraRoots: getPreferences().extraRoots || [] }
+    }
+    const cur = getPreferences().extraRoots || []
+    const next = cur.slice()
+    const added: { alias: string; path: string }[] = []
+    const blocked: { path: string; reason: string }[] = []
+    for (const p of filePaths) {
+      const reason = dirBlockReason(p)
+      if (reason) { blocked.push({ path: p, reason }); continue }
+      if (next.some(r => resolve(r.path) === resolve(p))) continue
+      const alias = makeAlias(p, next)
+      next.push({ alias, path: p })
+      added.push({ alias, path: p })
+    }
+    savePreferences({ extraRoots: next })
+    return { ok: true, extraRoots: next, added, blocked }
+  })
+
+  ipcMain.handle(AI_IPC.REMOVE_EXTRA_ROOT, async (_e, input: { alias?: string; path?: string }) => {
+    const cur = getPreferences().extraRoots || []
+    const next = input?.alias
+      ? cur.filter(r => r.alias !== input.alias)
+      : cur.filter(r => resolve(r.path) !== resolve(input?.path || ''))
+    savePreferences({ extraRoots: next })
+    return { ok: true, extraRoots: next }
   })
 }

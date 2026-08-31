@@ -182,7 +182,13 @@ export const I18N: Record<string, Record<string, string | string[]>> = {
     aiWorkspaceTip: 'Build 模式的工作区根目录，文件操作都限制在其中',
     aiWorkspaceWarnBroad: '提示：把整个磁盘作为工作区风险较高，建议改选具体的项目目录',
     aiWorkspaceWarnHome: '提示：把用户主目录作为工作区风险较高，建议改选具体的项目目录',
-    aiBuildNoWorkspace: '请先选择工作区目录，再使用 Build 模式'
+    aiBuildNoWorkspace: '请先选择工作区目录，再使用 Build 模式',
+    aiExtraRootAdd: '添加目录',
+    aiExtraRootTip: '额外可访问目录（工作区之外，模型可读写）',
+    aiExtraRootRemove: '移除',
+    aiExtraRootWarnBlocked: '该目录受保护，不可作为可访问目录',
+    aiQueued: '已排队 {n} 条（AI 回复中，将依次发送）',
+    aiQueueRemove: '移除排队'
   },
   en: {
     appTitle: 'MC Material Query',
@@ -366,7 +372,13 @@ export const I18N: Record<string, Record<string, string | string[]>> = {
     aiWorkspaceTip: 'Build mode root directory; all file operations are confined to it',
     aiWorkspaceWarnBroad: 'Note: exposing an entire drive is risky, prefer a specific project folder',
     aiWorkspaceWarnHome: 'Note: exposing the home directory is risky, prefer a specific project folder',
-    aiBuildNoWorkspace: 'Pick a workspace folder before using Build mode'
+    aiBuildNoWorkspace: 'Pick a workspace folder before using Build mode',
+    aiExtraRootAdd: 'Add folder',
+    aiExtraRootTip: 'Extra accessible folders (outside workspace; readable & writable)',
+    aiExtraRootRemove: 'Remove',
+    aiExtraRootWarnBlocked: 'That directory is protected and cannot be added',
+    aiQueued: '{n} queued (will be sent in order)',
+    aiQueueRemove: 'Remove'
   }
 }
 

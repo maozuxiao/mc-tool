@@ -27,7 +27,8 @@ $NodeExe = Join-Path $NodeDir 'node.exe'
 $ZipName = "node-v$RequiredVersion-win-x64.zip"
 $Urls = @(
     "https://mirrors.cloud.tencent.com/nodejs-release/v$RequiredVersion/$ZipName",  # 首选：腾讯云镜像
-    "https://registry.npmmirror.com/-/binary/node/v$RequiredVersion/$ZipName"       # 备选：阿里云镜像
+    "https://registry.npmmirror.com/-/binary/node/v$RequiredVersion/$ZipName",      # 备选：阿里云镜像
+    "https://nodejs.org/dist/v$RequiredVersion/$ZipName"                            # 兜底：nodejs.org 官方源
 )
 
 function Log([string]$msg) { Write-Host "[ensure_node] $msg" }

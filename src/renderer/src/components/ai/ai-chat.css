@@ -220,8 +220,18 @@
 .ai-message.user { align-self: flex-end; flex-direction: row-reverse; }
 /* 气泡 + 复制按钮竖排，复制按钮不会挤到头像那一列 */
 .ai-message-body { display: flex; flex-direction: column; gap: 5px; min-width: 0; flex: 1; }
-.ai-message-actions { display: flex; }
+.ai-message-actions { display: flex; align-items: center; gap: 8px; }
 .ai-message.user .ai-message-actions { justify-content: flex-end; }
+.ai-msg-time {
+  margin-left: auto;
+  align-self: center;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--animal-text-soft);
+  opacity: .6;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
 .ai-copy-btn {
   border: 0;
   background: transparent;
@@ -357,6 +367,50 @@
 .ai-composer-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 8px; }
 .ai-title { font-size: 12px; color: var(--animal-text-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ai-notice { font-size: 12px; color: #b75d4d; margin-bottom: 8px; }
+
+/* 回复中排队的问题列表 */
+.ai-queue {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  background: rgba(25, 200, 185, .08);
+  border: 1px dashed var(--animal-green, #19c8b9);
+  border-radius: 10px;
+}
+.ai-queue-label { font-size: 12px; color: var(--animal-text-soft); margin-right: 2px; }
+.ai-queue-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 240px;
+  padding: 3px 6px 3px 9px;
+  background: #fff;
+  border: 1px solid var(--animal-line);
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--animal-text);
+}
+.ai-queue-item > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-queue-remove {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--animal-text-soft);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+}
+.ai-queue-remove:hover { background: rgba(0, 0, 0, .06); color: #b75d4d; }
 
 @media (max-width: 760px) {
   .ai-page { grid-template-columns: 1fr; }

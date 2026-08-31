@@ -14,35 +14,24 @@ async function readDocx(abs) {
 }
 
 // ── xlsx ───────────────────────────────────────────────────
-// exceljs 逐工作表转 Markdown 表格。公式只给计算结果（cell.value.result），
-// 避免把 {formula, result} 对象直接塞给模型。
+// 用 SheetJS（xlsx）逐工作表转 Markdown 表格。公式单元格返回其缓存结果（有则），
+// 无缓存时返回公式串；日期按 ISO 日期输出。复用 xlsx 后不再打包 exceljs（省 ~20MB）。
 async function readXlsx(abs) {
-  const ExcelJS = require('exceljs')
-  const wb = new ExcelJS.Workbook()
-  await wb.xlsx.readFile(abs)
+  const XLSX = require('xlsx')
+  const wb = XLSX.readFile(abs, { cellDates: true, cellNF: false })
   const blocks = []
-  for (const ws of wb.worksheets) {
-    if (ws.rowCount === 0) {
-      blocks.push(`# 工作表：${ws.name}（空）`)
-      continue
-    }
-    const rows = []
-    ws.eachRow((row) => {
-      const cells = []
-      row.eachCell({ includeEmpty: true }, (cell) => {
-        let v = cell.value
-        if (v && typeof v === 'object') {
-          if ('text' in v) v = v.text // RichText
-          else if ('result' in v) v = v.result // 公式结果
-          else if ('formula' in v) v = v.formula // 无结果的公式
-          else if (v instanceof Date) v = v.toISOString().slice(0, 10)
-          else v = JSON.stringify(v)
-        }
-        cells.push(v == null ? '' : String(v))
-      })
-      rows.push('| ' + cells.join(' | ') + ' |')
-    })
-    blocks.push(`# 工作表：${ws.name}（${ws.rowCount} 行 × ${ws.columnCount} 列）\n` + rows.join('\n'))
+  for (const name of wb.SheetNames) {
+    const ws = wb.Sheets[name]
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, defval: '' })
+    const maxCols = rows.reduce((m, r) => Math.max(m, r.length), 0)
+    const cells = rows.map(r => r.map((c) => {
+      if (c == null) return ''
+      if (c instanceof Date) return c.toISOString().slice(0, 10)
+      if (typeof c === 'object') return JSON.stringify(c)
+      return String(c)
+    }))
+    const md = cells.map(r => '| ' + r.join(' | ') + ' |').join('\n')
+    blocks.push(`# 工作表：${name}（${cells.length} 行 × ${maxCols} 列）\n` + md)
   }
   return { text: blocks.join('\n\n'), format: 'xlsx' }
 }

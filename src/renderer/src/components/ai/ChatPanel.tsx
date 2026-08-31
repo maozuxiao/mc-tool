@@ -10,17 +10,16 @@ import { useStore } from '../../store'
 interface ProviderBundle {
   providers: AIProviderConfig[]
   suggestions: Record<string, string[]>
-  // 全局偏好：上次使用的服务商 / 模型 / 工作区目录，跨会话、跨启动恢复
-  preferences?: { lastProviderId?: string; lastModelId?: string; workspaceRoot?: string }
+  // 全局偏好：上次使用的服务商 / 模型 / 工作区目录 / 额外目录，跨会话、跨启动恢复
+  preferences?: {
+    lastProviderId?: string
+    lastModelId?: string
+    workspaceRoot?: string
+    extraRoots?: { alias: string; path: string }[]
+  }
 }
 
 const MD_EDITOR_URL = 'https://maozuxiao.github.io/Streamax/Tools/KattyBB_MD_Editor/'
-
-// 工具栏里工作区路径太长时省略中间，完整路径通过按钮 title 展示
-function shortenPath(p: string, head = 18, tail = 16): string {
-  if (p.length <= head + tail + 1) return p
-  return `${p.slice(0, head)}…${p.slice(-tail)}`
-}
 
 interface Props {
   disabled: boolean
@@ -39,7 +38,15 @@ export function ChatPanel({ disabled }: Props) {
   const [conversations, setConversations] = useState<AIConversation[]>([])
   const [conversationId, setConversationId] = useState<string | null>(null)
   const [messages, setMessages] = useState<AIMessage[]>([])
-  const [input, setInput] = useState('')
+  const [drafts, setDrafts] = useState<Record<string, string>>({})
+  // 每会话独立的输入框草稿：键为会话 id（新会话视图用 '__new__'），切换会话互不串扰
+  const draftKey = conversationId ?? '__new__'
+  const input = drafts[draftKey] ?? ''
+  const setInput = useCallback((v: string) => {
+    setDrafts(prev => ({ ...prev, [draftKey]: v }))
+  }, [draftKey])
+  // 回复中用户继续提问时，把问题排队，待本轮结束后依次发送（序列式追问）
+  const [queue, setQueue] = useState<string[]>([])
   // 正在生成的会话 id 列表：支持多个会话并发，各会话独立流式推进
   const [streamingIds, setStreamingIds] = useState<string[]>([])
   // 新会话在 conversation-created 回来之前还没有 id，单独记一个生成态
@@ -48,8 +55,6 @@ export function ChatPanel({ disabled }: Props) {
   // 运行模式：ask 纯对话 / mc 物料查询 / build 文件读写与命令。
   // 刻意不做持久化：Build 是高风险模式，每次启动都回到 mc，由用户主动切换。
   const [mode, setMode] = useState<AIAgentMode>('mc')
-  // Build 模式的工作区根目录。存主进程 ai-prefs，避免每次重新选目录。
-  const [workspaceRoot, setWorkspaceRoot] = useState('')
   const [notice, setNotice] = useState('')
   const bottomRef = useRef<HTMLDivElement | null>(null)
   const messagesRef = useRef<HTMLDivElement | null>(null)
@@ -102,9 +107,6 @@ export function ChatPanel({ disabled }: Props) {
         skipModelResetRef.current = nextProviderId
         initializedRef.current = true
       }
-      // 工作区目录每次都同步：它不属于「只恢复一次」的初始化项，
-      // 用户随时可能通过别处改动，且恢复它没有任何副作用。
-      if (data.preferences?.workspaceRoot) setWorkspaceRoot(data.preferences.workspaceRoot)
     } catch (e: any) { setNotice(e.message) }
   }, [])
 
@@ -233,6 +235,16 @@ export function ChatPanel({ disabled }: Props) {
     return () => ro.disconnect()
   }, [])
 
+  // 本轮回复结束后，依次把排队的问题发出去
+  useEffect(() => {
+    if (!streaming && !disabled && queue.length > 0) {
+      const [next, ...rest] = queue
+      setQueue(rest)
+      void send(next)
+    }
+    // eslint-disable-line react-hooks/exhaustive-deps
+  }, [streaming, disabled, queue])
+
   const openConversation = async (id: string) => {
     try {
       // 切走前保存当前会话的滚动位置
@@ -276,19 +288,15 @@ export function ChatPanel({ disabled }: Props) {
     }
   }
 
-  const send = async () => {
-    const content = input.trim()
+  const send = async (override?: string) => {
+    const content = (override ?? input).trim()
     if (!content || streaming || disabled) return
     if (!selectedProvider?.hasApiKey && providerId !== 'ollama') {
       setShowSettings(true)
       setNotice(t('aiNeedApiKey'))
       return
     }
-    if (mode === 'build' && !workspaceRoot) {
-      setNotice(t('aiBuildNoWorkspace'))
-      return
-    }
-    setInput('')
+    if (override === undefined) setInput('')
     // 只标记「当前会话」进入生成态：别的会话仍可继续提问（并发）
     if (conversationId) markStreaming(conversationId, true)
     else setPendingNewStream(true)
@@ -318,7 +326,6 @@ export function ChatPanel({ disabled }: Props) {
         modelId,
         content,
         mode,
-        workspaceRoot: mode === 'build' ? workspaceRoot : undefined,
         lang
       })
       // 请求在发出事件之前就失败（如 API Key 缺失），事件不会来，这里兜底清理
@@ -329,6 +336,18 @@ export function ChatPanel({ disabled }: Props) {
       clearStreaming()
     } finally {
       setStopping(false)
+    }
+  }
+
+  // 提交：回复中按 Enter 时把问题排队，空闲时直接发送
+  const submit = () => {
+    const content = input.trim()
+    if (!content || disabled) return
+    if (streaming) {
+      setQueue(q => [...q, content])
+      setInput('')
+    } else {
+      void send()
     }
   }
 
@@ -361,6 +380,8 @@ export function ChatPanel({ disabled }: Props) {
       setActiveConversation(null)
       setMessages([])
     }
+    // 清掉该会话的草稿，避免内存里残留无主草稿
+    setDrafts(prev => { const n = { ...prev }; delete n[id]; return n })
     refreshConversations()
   }
 
@@ -440,35 +461,6 @@ export function ChatPanel({ disabled }: Props) {
               </button>
             ))}
           </div>
-          {mode === 'build' && (
-            <span className="ai-workspace">
-              <button
-                type="button"
-                className="mq-btn"
-                title={workspaceRoot || t('aiWorkspaceTip')}
-                onClick={async () => {
-                  const res = await window.mcApi.ai.selectWorkspace()
-                  if (res?.ok && res.workspaceRoot) {
-                    setWorkspaceRoot(res.workspaceRoot)
-                    if (res.warning === 'WORKSPACE_TOO_BROAD') setNotice(t('aiWorkspaceWarnBroad'))
-                    else if (res.warning === 'WORKSPACE_IS_HOME') setNotice(t('aiWorkspaceWarnHome'))
-                  }
-                }}
-              >
-                {workspaceRoot ? shortenPath(workspaceRoot) : t('aiWorkspacePick')}
-              </button>
-              {workspaceRoot && (
-                <button
-                  type="button"
-                  className="mq-btn ghost"
-                  onClick={async () => {
-                    const res = await window.mcApi.ai.clearWorkspace()
-                    if (res?.ok) setWorkspaceRoot('')
-                  }}
-                >{t('aiWorkspaceClear')}</button>
-              )}
-            </span>
-          )}
           <button className="mq-btn accent" onClick={() => setShowSettings(v => !v)}>
             {showSettings ? t('aiCollapseSettings') : t('aiSettings')}
           </button>
@@ -509,7 +501,7 @@ export function ChatPanel({ disabled }: Props) {
               key={m.id}
               message={m}
               // 最后一条助手消息还没收到任何内容时，显示「思考中…」而不是一个空气泡
-              thinking={streaming && i === messages.length - 1 && m.role === 'assistant' && !m.content}
+              thinking={streaming && i === messages.length - 1 && m.role === 'assistant'}
             />
           ))}
           <div ref={bottomRef} />
@@ -517,13 +509,29 @@ export function ChatPanel({ disabled }: Props) {
 
         <div className="ai-composer">
           {notice && <div className="ai-notice">{notice}</div>}
+          {queue.length > 0 && (
+            <div className="ai-queue">
+              <span className="ai-queue-label">{t('aiQueued', { n: queue.length })}</span>
+              {queue.map((q, i) => (
+                <span key={i} className="ai-queue-item" title={q}>
+                  {q.length > 24 ? q.slice(0, 24) + '…' : q}
+                  <button
+                    type="button"
+                    className="ai-queue-remove"
+                    title={t('aiQueueRemove')}
+                    onClick={() => setQueue(prev => prev.filter((_, j) => j !== i))}
+                  >×</button>
+                </span>
+              ))}
+            </div>
+          )}
           <textarea
             value={input}
             placeholder={disabled ? t('aiLoginRequired') : t('aiInputPh')}
-            disabled={disabled || streaming}
+            disabled={disabled}
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => {
-              if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
+              if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit() }
             }}
           />
           <div className="ai-composer-actions">
@@ -532,7 +540,7 @@ export function ChatPanel({ disabled }: Props) {
               ? <button className="mq-btn" onClick={stopGenerating} disabled={stopping}>
                   {stopping ? t('aiStopping') : t('aiStop')}
                 </button>
-              : <button className="mq-btn accent" onClick={send} disabled={disabled || !input.trim()}>{t('aiSend')}</button>}
+              : <button className="mq-btn accent" onClick={submit} disabled={disabled || !input.trim()}>{t('aiSend')}</button>}
           </div>
         </div>
       </section>
@@ -621,6 +629,15 @@ async function copyText(text: string): Promise<boolean> {
   } catch { return false }
 }
 
+// 把消息时间戳格式化为 YY:MM:DD HH:MM:SS（按本机时区）
+function fmtDate(ts?: number): string {
+  if (!ts) return ''
+  const d = new Date(ts)
+  const p = (n: number) => String(n).padStart(2, '0')
+  const yy = String(d.getFullYear()).slice(-2)
+  return `${yy}:${p(d.getMonth() + 1)}:${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+}
+
 function MessageItem({ message, thinking }: { message: AIMessage; thinking?: boolean }) {
   const t = useStore(s => s.t)
   const [copied, setCopied] = useState(false)
@@ -657,6 +674,7 @@ function MessageItem({ message, thinking }: { message: AIMessage; thinking?: boo
             : <div className="ai-plain">{message.content}</div>}
         </div>
         <div className="ai-message-actions">
+          <span className="ai-msg-time">{fmtDate(message.createdAt)}</span>
           <button className="ai-copy-btn" onClick={handleCopy} disabled={!message.content}>
             {copied ? `✓ ${t('aiCopied')}` : `⧉ ${t('aiCopy')}`}
           </button>

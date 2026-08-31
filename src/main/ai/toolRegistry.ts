@@ -1,6 +1,17 @@
-import type { AIAgentMode } from '@shared/ai-types'
+import type { AIAgentMode, AIExtraRoot } from '@shared/ai-types'
 import { MC_QUERY_TOOL_DEFINITION, runMcQuery, type McRunSink } from './mcSkill'
-import { FILE_TOOL_DEFINITIONS, fileSkillRead, runFileSkillCommand } from './fileSkill'
+import {
+  FILE_TOOL_DEFINITIONS, fileSkillRead, runFileSkillCommand,
+  FILE_READ_BATCH_TOOL_DEFINITION, FILE_OPEN_FOLDER_TOOL_DEFINITION
+} from './fileSkill'
+
+export interface OpenFolderResult {
+  ok: boolean
+  alias?: string
+  path?: string
+  error?: string
+  message?: string
+}
 
 /**
  * 工具执行上下文。
@@ -9,8 +20,13 @@ import { FILE_TOOL_DEFINITIONS, fileSkillRead, runFileSkillCommand } from './fil
  */
 export interface ToolContext {
   signal: AbortSignal
-  /** Build 模式的工作区根目录，文件/命令工具据此限制范围 */
-  workspaceRoot?: string
+  /** Build 模式的已授权目录白名单（多根）：文件/命令工具据此限制范围 */
+  allowedRoots: AIExtraRoot[]
+  /**
+   * 打开目录的控制回调（会话级）。open_folder 工具调用它做校验 + 用户确认，
+   * 并把新目录加入本会话的白名单。由 chatService 注入（需 conversationId）。
+   */
+  requestRoot?: (path: string) => Promise<OpenFolderResult>
   onRun?: McRunSink
 }
 
@@ -27,14 +43,10 @@ const REGISTRY: Record<string, ToolEntry> = {
   file_read: {
     definition: FILE_TOOL_DEFINITIONS[0],
     run: async (input, ctx) => {
-      const root = ctx.workspaceRoot
-      if (!root) {
-        return { ok: false, error: 'NO_WORKSPACE', message: '未选择工作区目录，无法读取文件。请先在工具栏选择工作区。' }
-      }
       const p = String(input?.path || '').trim()
       if (!p) return { ok: false, error: 'MISSING_ARG', message: '缺少 path 参数' }
       return fileSkillRead({
-        root,
+        roots: ctx.allowedRoots,
         path: p,
         offset: Number.isFinite(Number(input?.offset)) ? Number(input.offset) : undefined,
         limit: Number.isFinite(Number(input?.limit)) ? Number(input.limit) : undefined,
@@ -45,35 +57,54 @@ const REGISTRY: Record<string, ToolEntry> = {
   file_list: {
     definition: FILE_TOOL_DEFINITIONS[1],
     run: async (input, ctx) => {
-      if (!ctx.workspaceRoot) return { ok: false, error: 'NO_WORKSPACE', message: '未选择工作区目录。' }
       const args = []
       if (input?.path) args.push(input.path)
-      return runFileSkillCommand('list', args, ctx.workspaceRoot, ctx.signal, 30000)
+      if (typeof input?.depth === 'number') args.push('--depth', String(input.depth))
+      return runFileSkillCommand('list', args, ctx.allowedRoots, ctx.signal, 30000)
     }
   },
   file_search: {
     definition: FILE_TOOL_DEFINITIONS[2],
     run: async (input, ctx) => {
-      if (!ctx.workspaceRoot) return { ok: false, error: 'NO_WORKSPACE', message: '未选择工作区目录。' }
       const args = [String(input?.query || '')]
       if (input?.path) args.push(input.path)
       if (input?.nameOnly) args.push('--name-only')
       if (input?.regex) args.push('--regex')
       if (input?.glob) args.push('--glob', String(input.glob))
       if (input?.ext) args.push('--ext', String(input.ext))
-      return runFileSkillCommand('search', args, ctx.workspaceRoot, ctx.signal, 30000)
+      if (input?.index === true) args.push('--index')
+      return runFileSkillCommand('search', args, ctx.allowedRoots, ctx.signal, 30000)
     }
   },
   file_write: {
     definition: FILE_TOOL_DEFINITIONS[3],
     run: async (input, ctx) => {
-      if (!ctx.workspaceRoot) return { ok: false, error: 'NO_WORKSPACE', message: '未选择工作区目录。' }
       const p = String(input?.path || '').trim()
       if (!p) return { ok: false, error: 'MISSING_ARG', message: '缺少 path 参数' }
       const content = String(input?.content ?? '')
       const args = [p, '--content', content]
       if (input?.append) args.push('--append')
-      return runFileSkillCommand('write', args, ctx.workspaceRoot, ctx.signal, 30000)
+      if (input?.update) args.push('--update')
+      return runFileSkillCommand('write', args, ctx.allowedRoots, ctx.signal, 30000)
+    }
+  },
+  // 批量读取：一次读多个文件，只消耗 1 轮
+  [FILE_READ_BATCH_TOOL_DEFINITION.function.name]: {
+    definition: FILE_READ_BATCH_TOOL_DEFINITION,
+    run: async (input, ctx) => {
+      const paths = Array.isArray(input?.paths) ? input.paths.map(String) : []
+      if (!paths.length) return { ok: false, error: 'MISSING_ARG', message: '缺少 paths 参数' }
+      return runFileSkillCommand('read_batch', paths, ctx.allowedRoots, ctx.signal, 60000)
+    }
+  },
+  // 会话级打开目录：校验 + 用户确认，由 chatService 的 requestRoot 实现
+  [FILE_OPEN_FOLDER_TOOL_DEFINITION.function.name]: {
+    definition: FILE_OPEN_FOLDER_TOOL_DEFINITION,
+    run: async (input, ctx) => {
+      const p = String(input?.path || '').trim()
+      if (!p) return { ok: false, error: 'MISSING_ARG', message: '缺少 path 参数' }
+      if (!ctx.requestRoot) return { ok: false, error: 'NO_REQUEST_ROOT', message: '当前环境不支持打开目录' }
+      return ctx.requestRoot(p)
     }
   }
 }
@@ -82,7 +113,9 @@ const REGISTRY: Record<string, ToolEntry> = {
 export function toolNamesForMode(mode: AIAgentMode, hasWorkspace: boolean): string[] {
   if (mode === 'ask') return []
   if (mode === 'mc') return ['mc_query']
-  return hasWorkspace ? ['mc_query', ...FILE_TOOL_DEFINITIONS.map(t => t.function.name)] : ['mc_query']
+  // build：文件工具 + 打开目录 + mc_query 全量下发；未授权目录时文件工具会引导用 open_folder
+  void hasWorkspace
+  return [...FILE_TOOL_DEFINITIONS.map(t => t.function.name), 'mc_query']
 }
 
 /**
@@ -92,8 +125,9 @@ export function toolNamesForMode(mode: AIAgentMode, hasWorkspace: boolean): stri
 export function toolsForMode(mode: AIAgentMode, hasWorkspace: boolean): any[] {
   if (mode === 'ask') return []
   if (mode === 'mc') return [MC_QUERY_TOOL_DEFINITION]
-  // build：没选工作区时只保留 mc_query，避免模型调用必定失败的文件工具
-  return hasWorkspace ? [MC_QUERY_TOOL_DEFINITION, ...FILE_TOOL_DEFINITIONS] : [MC_QUERY_TOOL_DEFINITION]
+  // build：文件工具 + 打开目录 + mc_query 全量下发（不再强制先选工作区）
+  void hasWorkspace
+  return [...FILE_TOOL_DEFINITIONS, MC_QUERY_TOOL_DEFINITION]
 }
 
 // 非 mc_query 工具没有 runMcQuery 那种「内部回调 onRun」机制，
@@ -105,6 +139,9 @@ function buildFileSummary(name: string, result: any): string {
     case 'file_list': return `已列出 ${result.count ?? 0} 项`
     case 'file_search': return `找到 ${result.count ?? 0} 个匹配`
     case 'file_write': return `已写入 ${result.relative || result.path}`
+    case 'file_read_batch': return `已批量读取 ${result.count ?? 0} 个文件`
+    case 'open_folder':
+      return result.ok ? `已打开目录（别名 ${result.alias}）` : `打开目录被拒绝：${result.error || ''}`
     default: return `已完成 ${name}`
   }
 }

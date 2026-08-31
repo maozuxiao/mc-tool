@@ -1,10 +1,13 @@
-import { BrowserWindow, net } from 'electron'
+import { BrowserWindow, net, dialog } from 'electron'
 import { randomUUID } from 'crypto'
-import type { AISendPayload } from '@shared/ai-types'
+import { existsSync, statSync } from 'fs'
+import { dirname, resolve } from 'path'
+import type { AISendPayload, AIExtraRoot as AllowedRoot } from '@shared/ai-types'
 import { resolveMode } from '@shared/ai-types'
 import { getProvider, savePreferences } from './providerStore'
 import { mcSkillSystemPrompt } from './mcSkill'
-import { dispatchTool, toolsForMode } from './toolRegistry'
+import { dispatchTool, toolsForMode, type OpenFolderResult } from './toolRegistry'
+import { isInside, dirBlockReason, makeAlias } from './rootGuard'
 import {
   appendMessage, appendToolRun, completeToolRun, createConversation,
   getConversation, updateMessage
@@ -34,6 +37,61 @@ const activeMessageIds = new Map<string, AbortController>()
 const requestToConversation = new Map<string, string>()
 // 用户点停止时请求可能还没开始（IPC 竞态），先记下来，等请求注册时立刻取消
 const pendingStops = new Set<string>()
+
+// 会话级已授权目录白名单：Build 模式下文件工具据此限制范围。
+// 初始来自 UI 选择（workspaceRoot + extraRoots），运行时可由 open_folder 动态追加。
+// 仅存于内存，关对话即失效（不持久化），符合「随用随开，最安全」。
+const sessionRoots = new Map<string, AllowedRoot[]>()
+
+function mergeRoots(existing: AllowedRoot[], payload: AISendPayload): AllowedRoot[] {
+  const roots = existing ? existing.slice() : []
+  const covered = (p: string) => roots.some(r => isInside(r.path, p) || resolve(r.path) === resolve(p))
+  if (payload.workspaceRoot && !covered(resolve(payload.workspaceRoot))) {
+    roots.push({ alias: '', path: resolve(payload.workspaceRoot) })
+  }
+  for (const e of payload.extraRoots || []) {
+    const p = resolve(e.path)
+    if (!covered(p)) roots.push({ alias: e.alias, path: p })
+  }
+  return roots
+}
+
+// open_folder 的控制实现：校验存在性 / 拦截系统目录，首次访问新目录弹确认框，
+// 通过后把目录加入本会话白名单并返回别名。被读文件内容里的提示注入无法越权
+// （只能把已在白名单内的目录告知模型，无法凭空打开任意目录）。
+async function requestRoot(conversationId: string, p: string): Promise<OpenFolderResult> {
+  const roots = sessionRoots.get(conversationId) || []
+  const abs = resolve(p)
+  // 已落在某个已授权目录内（含子目录 / 文件）→ 直接复用该别名，无需再确认
+  const covering = roots.find(r => isInside(r.path, abs))
+  if (covering) return { ok: true, alias: covering.alias, path: covering.path }
+
+  if (!existsSync(abs)) return { ok: false, error: 'PATH_NOT_FOUND', message: `路径不存在：${p}` }
+  const isFile = statSync(abs).isFile()
+  const dir = isFile ? dirname(abs) : abs
+  const coveringDir = roots.find(r => isInside(r.path, dir))
+  if (coveringDir) return { ok: true, alias: coveringDir.alias, path: coveringDir.path }
+
+  const block = dirBlockReason(dir)
+  if (block) return { ok: false, error: 'DIR_BLOCKED', message: `该目录受保护，不允许作为可访问目录（${block}）：${dir}` }
+
+  const win = BrowserWindow.getAllWindows().find(w => !w.isDestroyed())
+  if (win) {
+    const { response } = await dialog.showMessageBox(win, {
+      type: 'question',
+      title: 'AI 请求访问目录',
+      message: `AI 希望在本会话内访问以下目录：\n${dir}\n${isFile ? `（来自文件：${abs}）` : ''}\n是否允许？`,
+      buttons: ['允许', '拒绝'],
+      defaultId: 0,
+      cancelId: 1
+    })
+    if (response !== 0) return { ok: false, error: 'DENIED', message: '用户拒绝了 AI 访问该目录' }
+  }
+
+  const alias = makeAlias(dir, roots)
+  sessionRoots.set(conversationId, [...roots, { alias, path: dir }])
+  return { ok: true, alias, path: dir }
+}
 
 function send(event: AIStreamEvent) {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -109,11 +167,14 @@ async function streamOpenAICompatible(input: {
   // 模式决定提示语与可用工具。旧渲染层只传 useMcSkill，由 resolveMode 兼容推导。
   const mode = resolveMode(payload)
   const hasWorkspace = !!payload.workspaceRoot
+  // 本会话已授权目录（多根白名单），供文件工具沙箱与 open_folder 动态追加使用
+  const allowedRoots = sessionRoots.get(conversationId) || []
 
   // 工具调用轮次上限：模型每轮可发起若干 tool_calls，整轮往复直到不再调用工具。
   // 之前上限仅 5，模型逐个读取多个文件或遇到失败重试时极易触顶并报「轮次过多」。
-  // 这里放宽到 12，并在最后一轮强制不带 tools，让模型基于已收集信息总结，而非把错误抛给用户。
-  const MAX_ROUNDS = 12
+  // 提升到 24，并配合 file_read_batch（一次读多文件只耗 1 轮），常规业务任务不再触顶；
+  // 最后一轮仍强制不带 tools，让模型基于已收集信息总结，而非把错误抛给用户。
+  const MAX_ROUNDS = 24
   let conversation = [...messages]
   for (let round = 0; round < MAX_ROUNDS; round++) {
     const isLastRound = round === MAX_ROUNDS - 1
@@ -123,7 +184,7 @@ async function streamOpenAICompatible(input: {
       messages: [
         {
           role: 'system',
-          content: mcSkillSystemPrompt(mode, payload.lang === 'en' ? 'en' : 'zh', payload.workspaceRoot)
+          content: mcSkillSystemPrompt(mode, payload.lang === 'en' ? 'en' : 'zh', allowedRoots)
         },
         ...conversation.map(m => {
           if (m.role === 'tool') return { role: 'tool', tool_call_id: m.tool_call_id, content: m.content }
@@ -240,7 +301,7 @@ async function streamOpenAICompatible(input: {
       for (const call of toolCalls) {
         let parsed: any
         try { parsed = JSON.parse(call.function.arguments || '{}') } catch { parsed = {} }
-        const runType = call.function.name.startsWith('file_') ? 'file' : 'material'
+        const runType = call.function.name.startsWith('file_') || call.function.name === 'open_folder' ? 'file' : 'material'
         const runningRun = appendToolRun(assistantMessageId, {
           type: runType,
           toolName: call.function.name,
@@ -252,7 +313,8 @@ async function streamOpenAICompatible(input: {
         try {
           const result = await dispatchTool(call.function.name, parsed, {
             signal: toolController.signal,
-            workspaceRoot: payload.workspaceRoot,
+            allowedRoots,
+            requestRoot: (pp: string) => requestRoot(conversationId, pp),
             onRun: persistedRun => {
               // runMcQuery 会回调两次：开始时登记 running 态、结束时回传终态。
               // 首次回调不能落「完成」态，否则工具刚起跑 UI 就把转圈收掉了。
@@ -300,6 +362,8 @@ export async function sendMessage(payload: AISendPayload): Promise<void> {
     send({ type: 'conversation-created', conversationId, message: conv.id })
   }
   const existing = getConversation(conversationId)
+  // 用 UI 选择的工作区 / 额外目录初始化本会话白名单（运行时 open_folder 可再追加）
+  sessionRoots.set(conversationId, mergeRoots(sessionRoots.get(conversationId) || [], payload))
   appendMessage({ conversationId, role: 'user', content: payload.content })
   const assistant = appendMessage({
     conversationId,

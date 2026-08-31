@@ -11,14 +11,12 @@
     "node": ">=18"
   },
   "dependencies": {
-    "docx": "^9.1.0",
-    "exceljs": "^4.4.0",
     "iconv-lite": "^0.6.3",
     "jszip": "^3.10.1",
     "mammoth": "^1.8.0",
     "pdfjs-dist": "3.11.174",
-    "pptxgenjs": "^3.12.0",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "exceljs": "^4.4.0"
   },
-  "//": "iconv-lite 用于解码 GBK 编码的 txt/csv；pdfjs-dist 固定 3.x，因为 4.x 的 legacy build 为纯 ESM，CommonJS 脚本无法直接 require"
+  "comment": "docx/exceljs/pptxgenjs 仅用于「生成」Office，本次未启用；读取已用 mammoth/jszip/xlsx 覆盖，故不打包这些依赖以减小安装包体积。iconv-lite 用于解码 GBK 编码的 txt/csv；pdfjs-dist 固定 3.x，因为 4.x 的 legacy build 为纯 ESM，CommonJS 脚本无法直接 require。"
 }
