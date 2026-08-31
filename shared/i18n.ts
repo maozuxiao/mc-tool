@@ -170,7 +170,19 @@ export const I18N: Record<string, Record<string, string | string[]>> = {
     aiModelsFailed: '模型列表获取失败：{m}，已显示推荐模型',
     aiNeedApiKey: '请先配置 API Key',
     aiRequestFailed: 'AI 请求失败',
-    aiSkill: 'MC Skill'
+    aiSkill: 'MC Skill',
+    aiMode: '模式',
+    aiModeAsk: '对话',
+    aiModeMc: '物料',
+    aiModeBuild: 'Build',
+    aiWorkspace: '工作区',
+    aiWorkspacePick: '选择目录',
+    aiWorkspaceClear: '清除',
+    aiWorkspaceNone: '未选择',
+    aiWorkspaceTip: 'Build 模式的工作区根目录，文件操作都限制在其中',
+    aiWorkspaceWarnBroad: '提示：把整个磁盘作为工作区风险较高，建议改选具体的项目目录',
+    aiWorkspaceWarnHome: '提示：把用户主目录作为工作区风险较高，建议改选具体的项目目录',
+    aiBuildNoWorkspace: '请先选择工作区目录，再使用 Build 模式'
   },
   en: {
     appTitle: 'MC Material Query',
@@ -342,7 +354,19 @@ export const I18N: Record<string, Record<string, string | string[]>> = {
     aiModelsFailed: 'Failed to fetch models: {m}, showing suggested ones',
     aiNeedApiKey: 'Please configure the API Key first',
     aiRequestFailed: 'AI request failed',
-    aiSkill: 'MC Skill'
+    aiSkill: 'MC Skill',
+    aiMode: 'Mode',
+    aiModeAsk: 'Chat',
+    aiModeMc: 'Material',
+    aiModeBuild: 'Build',
+    aiWorkspace: 'Workspace',
+    aiWorkspacePick: 'Pick folder',
+    aiWorkspaceClear: 'Clear',
+    aiWorkspaceNone: 'Not set',
+    aiWorkspaceTip: 'Build mode root directory; all file operations are confined to it',
+    aiWorkspaceWarnBroad: 'Note: exposing an entire drive is risky, prefer a specific project folder',
+    aiWorkspaceWarnHome: 'Note: exposing the home directory is risky, prefer a specific project folder',
+    aiBuildNoWorkspace: 'Pick a workspace folder before using Build mode'
   }
 }
 

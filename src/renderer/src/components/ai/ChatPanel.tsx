@@ -3,18 +3,24 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeSanitize from 'rehype-sanitize'
 import rehypeHighlight from 'rehype-highlight'
-import type { AIConversation, AIMessage, AIProviderConfig, AIToolRun } from '@shared/ai-types'
+import type { AIAgentMode, AIConversation, AIMessage, AIProviderConfig, AIToolRun } from '@shared/ai-types'
 import { OA_ORIGIN } from '@shared/constants'
 import { useStore } from '../../store'
 
 interface ProviderBundle {
   providers: AIProviderConfig[]
   suggestions: Record<string, string[]>
-  // 全局偏好：上次使用的服务商 / 模型，跨会话、跨启动恢复
-  preferences?: { lastProviderId?: string; lastModelId?: string }
+  // 全局偏好：上次使用的服务商 / 模型 / 工作区目录，跨会话、跨启动恢复
+  preferences?: { lastProviderId?: string; lastModelId?: string; workspaceRoot?: string }
 }
 
 const MD_EDITOR_URL = 'https://maozuxiao.github.io/Streamax/Tools/KattyBB_MD_Editor/'
+
+// 工具栏里工作区路径太长时省略中间，完整路径通过按钮 title 展示
+function shortenPath(p: string, head = 18, tail = 16): string {
+  if (p.length <= head + tail + 1) return p
+  return `${p.slice(0, head)}…${p.slice(-tail)}`
+}
 
 interface Props {
   disabled: boolean
@@ -39,7 +45,11 @@ export function ChatPanel({ disabled }: Props) {
   // 新会话在 conversation-created 回来之前还没有 id，单独记一个生成态
   const [pendingNewStream, setPendingNewStream] = useState(false)
   const [stopping, setStopping] = useState(false)
-  const [useSkill, setUseSkill] = useState(true)
+  // 运行模式：ask 纯对话 / mc 物料查询 / build 文件读写与命令。
+  // 刻意不做持久化：Build 是高风险模式，每次启动都回到 mc，由用户主动切换。
+  const [mode, setMode] = useState<AIAgentMode>('mc')
+  // Build 模式的工作区根目录。存主进程 ai-prefs，避免每次重新选目录。
+  const [workspaceRoot, setWorkspaceRoot] = useState('')
   const [notice, setNotice] = useState('')
   const bottomRef = useRef<HTMLDivElement | null>(null)
   const messagesRef = useRef<HTMLDivElement | null>(null)
@@ -92,6 +102,9 @@ export function ChatPanel({ disabled }: Props) {
         skipModelResetRef.current = nextProviderId
         initializedRef.current = true
       }
+      // 工作区目录每次都同步：它不属于「只恢复一次」的初始化项，
+      // 用户随时可能通过别处改动，且恢复它没有任何副作用。
+      if (data.preferences?.workspaceRoot) setWorkspaceRoot(data.preferences.workspaceRoot)
     } catch (e: any) { setNotice(e.message) }
   }, [])
 
@@ -271,6 +284,10 @@ export function ChatPanel({ disabled }: Props) {
       setNotice(t('aiNeedApiKey'))
       return
     }
+    if (mode === 'build' && !workspaceRoot) {
+      setNotice(t('aiBuildNoWorkspace'))
+      return
+    }
     setInput('')
     // 只标记「当前会话」进入生成态：别的会话仍可继续提问（并发）
     if (conversationId) markStreaming(conversationId, true)
@@ -300,7 +317,8 @@ export function ChatPanel({ disabled }: Props) {
         providerId,
         modelId,
         content,
-        useMcSkill: useSkill,
+        mode,
+        workspaceRoot: mode === 'build' ? workspaceRoot : undefined,
         lang
       })
       // 请求在发出事件之前就失败（如 API Key 缺失），事件不会来，这里兜底清理
@@ -409,10 +427,48 @@ export function ChatPanel({ disabled }: Props) {
             )}
           </div>
           <button className="mq-btn" onClick={loadModels}>{t('aiFetchModels')}</button>
-          <label className="ai-skill-toggle">
-            <input type="checkbox" checked={useSkill} onChange={e => setUseSkill(e.target.checked)} />
-            MC Skill
-          </label>
+          <div className="ai-mode-switch" role="group" aria-label={t('aiMode')}>
+            {(['ask', 'mc', 'build'] as AIAgentMode[]).map(m => (
+              <button
+                key={m}
+                type="button"
+                className={`ai-mode-btn${mode === m ? ' active' : ''}`}
+                onClick={() => setMode(m)}
+                title={m === 'build' ? t('aiWorkspaceTip') : undefined}
+              >
+                {m === 'ask' ? t('aiModeAsk') : m === 'mc' ? t('aiModeMc') : t('aiModeBuild')}
+              </button>
+            ))}
+          </div>
+          {mode === 'build' && (
+            <span className="ai-workspace">
+              <button
+                type="button"
+                className="mq-btn"
+                title={workspaceRoot || t('aiWorkspaceTip')}
+                onClick={async () => {
+                  const res = await window.mcApi.ai.selectWorkspace()
+                  if (res?.ok && res.workspaceRoot) {
+                    setWorkspaceRoot(res.workspaceRoot)
+                    if (res.warning === 'WORKSPACE_TOO_BROAD') setNotice(t('aiWorkspaceWarnBroad'))
+                    else if (res.warning === 'WORKSPACE_IS_HOME') setNotice(t('aiWorkspaceWarnHome'))
+                  }
+                }}
+              >
+                {workspaceRoot ? shortenPath(workspaceRoot) : t('aiWorkspacePick')}
+              </button>
+              {workspaceRoot && (
+                <button
+                  type="button"
+                  className="mq-btn ghost"
+                  onClick={async () => {
+                    const res = await window.mcApi.ai.clearWorkspace()
+                    if (res?.ok) setWorkspaceRoot('')
+                  }}
+                >{t('aiWorkspaceClear')}</button>
+              )}
+            </span>
+          )}
           <button className="mq-btn accent" onClick={() => setShowSettings(v => !v)}>
             {showSettings ? t('aiCollapseSettings') : t('aiSettings')}
           </button>

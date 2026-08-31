@@ -62,6 +62,14 @@ export interface AIMessage {
   createdAt: number
 }
 
+/**
+ * 运行模式。决定下发哪些工具、用哪套系统提示语。
+ * - ask：纯对话，不下发任何工具（模型不会去调不存在的工具而编造结果）
+ * - mc：只下发 mc_query，查 OA 物料数据
+ * - build：下发文件读写与命令工具，所有操作限制在 workspaceRoot 内
+ */
+export type AIAgentMode = 'ask' | 'mc' | 'build'
+
 export interface AISendPayload {
   conversationId?: string
   // 渲染层为每次发送生成的 id。新会话在服务端落地前 conversationId 还是空的，
@@ -70,9 +78,23 @@ export interface AISendPayload {
   providerId: string
   modelId: string
   content: string
-  useMcSkill: boolean
+  mode?: AIAgentMode
+  /**
+   * @deprecated 由 mode 取代。仅当 mode 缺失时用于推导（兼容旧渲染层/已排队请求），
+   * 渲染层不必再传。
+   */
+  useMcSkill?: boolean
+  // Build 模式的工作区根目录：文件与命令操作都被限制在其中。
+  // 由渲染层在用户选目录后传入，未选择时 Build 模式不可用。
+  workspaceRoot?: string
   // 应用界面语言（zh / en），仅作为「提问语言无法判断时」的兜底
   lang?: string
+}
+
+/** 由 mode / 旧字段推导出实际模式，保证新旧渲染层都能正确工作 */
+export function resolveMode(payload: Pick<AISendPayload, 'mode' | 'useMcSkill'>): AIAgentMode {
+  if (payload.mode === 'ask' || payload.mode === 'mc' || payload.mode === 'build') return payload.mode
+  return payload.useMcSkill ? 'mc' : 'ask'
 }
 
 export const AI_IPC = {
@@ -86,5 +108,8 @@ export const AI_IPC = {
   DELETE_CONVERSATION: 'ai:delete-conversation',
   SEND_MESSAGE: 'ai:send-message',
   STOP_MESSAGE: 'ai:stop-message',
+  // Build 模式的工作区根目录：由主进程弹系统目录选择框，避免渲染层直接操作 fs
+  SELECT_WORKSPACE: 'ai:select-workspace',
+  CLEAR_WORKSPACE: 'ai:clear-workspace',
   EVENT: 'ai:event'
 } as const

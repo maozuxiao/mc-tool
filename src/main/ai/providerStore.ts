@@ -15,6 +15,8 @@ const PREFS_PATH = () => join(app.getPath('userData'), 'ai-prefs.json')
 export interface AIPreferences {
   lastProviderId?: string
   lastModelId?: string
+  /** Build 模式的工作区根目录，空字符串表示未选择 */
+  workspaceRoot?: string
 }
 
 function readPrefs(): AIPreferences {
@@ -37,6 +39,8 @@ export function savePreferences(patch: AIPreferences): AIPreferences {
   const next = { ...readPrefs() }
   if (patch.lastProviderId) next.lastProviderId = patch.lastProviderId
   if (patch.lastModelId) next.lastModelId = patch.lastModelId
+  // workspaceRoot 允许被清空（传空字符串），所以用 undefined 判断而不是真值判断
+  if (patch.workspaceRoot !== undefined) next.workspaceRoot = patch.workspaceRoot
   writePrefs(next)
   return next
 }

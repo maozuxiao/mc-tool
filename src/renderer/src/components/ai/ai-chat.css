@@ -141,6 +141,39 @@
 }
 .ai-skill-toggle input { accent-color: var(--animal-green); }
 
+/* 模式切换（对话 / 物料 / Build）：胶囊分段控件 */
+.ai-mode-switch {
+  display: inline-flex;
+  padding: 3px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, .06);
+}
+.ai-mode-btn {
+  border: none;
+  background: transparent;
+  color: var(--animal-text);
+  font-size: 13px;
+  font-weight: 700;
+  padding: 6px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background .12s, color .12s;
+  white-space: nowrap;
+}
+.ai-mode-btn:hover { background: rgba(0, 0, 0, .04); }
+.ai-mode-btn.active {
+  background: var(--animal-green);
+  color: #fff;
+  box-shadow: 0 2px 6px rgba(25, 200, 185, .35);
+}
+.ai-workspace { display: inline-flex; align-items: center; gap: 6px; max-width: 300px; }
+.ai-workspace .mq-btn { max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
+.ai-workspace .mq-btn.ghost {
+  background: transparent; color: var(--animal-text);
+  box-shadow: none; border: 1px solid var(--animal-line); padding: 6px 12px;
+}
+.ai-workspace .mq-btn.ghost:hover { background: rgba(0, 0, 0, .05); }
+
 .ai-settings {
   padding: 14px 16px;
   border-bottom: 1px solid var(--animal-line);

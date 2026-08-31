@@ -68,6 +68,8 @@ const mcApi = {
     deleteConversation: (id: string) => ipcRenderer.invoke(AI_IPC.DELETE_CONVERSATION, id),
     sendMessage: (payload: any) => ipcRenderer.invoke(AI_IPC.SEND_MESSAGE, payload),
     stopMessage: (conversationId: string) => ipcRenderer.invoke(AI_IPC.STOP_MESSAGE, conversationId),
+    selectWorkspace: (): Promise<any> => ipcRenderer.invoke(AI_IPC.SELECT_WORKSPACE),
+    clearWorkspace: (): Promise<any> => ipcRenderer.invoke(AI_IPC.CLEAR_WORKSPACE),
     onEvent: (cb: (event: any) => void) => {
       const listener = (_e: any, event: any) => cb(event)
       ipcRenderer.on(AI_IPC.EVENT, listener)

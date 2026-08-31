@@ -1,8 +1,10 @@
 import { BrowserWindow, net } from 'electron'
 import { randomUUID } from 'crypto'
 import type { AISendPayload } from '@shared/ai-types'
+import { resolveMode } from '@shared/ai-types'
 import { getProvider, savePreferences } from './providerStore'
-import { MC_QUERY_TOOL_DEFINITION, mcSkillSystemPrompt, runMcQuery } from './mcSkill'
+import { mcSkillSystemPrompt } from './mcSkill'
+import { dispatchTool, toolsForMode } from './toolRegistry'
 import {
   appendMessage, appendToolRun, completeToolRun, createConversation,
   getConversation, updateMessage
@@ -89,15 +91,6 @@ function withAbort<T>(promise: Promise<T>, signal: AbortSignal, timeoutMs?: numb
   })
 }
 
-function openAIToolMessages(messages: any[], toolsEnabled: boolean) {
-  const payload: any[] = [{ role: 'system', content: mcSkillSystemPrompt('zh') }]
-  for (const m of messages) {
-    if (m.role === 'user') payload.push({ role: 'user', content: m.content })
-    else if (m.role === 'assistant' && m.content) payload.push({ role: 'assistant', content: m.content })
-  }
-  return payload
-}
-
 function openAIToolResponse(toolCallId: string, content: unknown): any {
   return { role: 'tool', tool_call_id: toolCallId, content: JSON.stringify(content) }
 }
@@ -113,13 +106,20 @@ async function streamOpenAICompatible(input: {
   const { preset, config, apiKey } = getProvider(payload.providerId)
   if (!apiKey && payload.providerId !== 'ollama') throw new Error('请先配置 API Key')
 
+  // 模式决定提示语与可用工具。旧渲染层只传 useMcSkill，由 resolveMode 兼容推导。
+  const mode = resolveMode(payload)
+  const hasWorkspace = !!payload.workspaceRoot
+
   let conversation = [...messages]
   for (let round = 0; round < 5; round++) {
     const body: any = {
       model: payload.modelId,
       stream: true,
       messages: [
-        { role: 'system', content: mcSkillSystemPrompt(payload.lang === 'en' ? 'en' : 'zh', !!payload.useMcSkill) },
+        {
+          role: 'system',
+          content: mcSkillSystemPrompt(mode, payload.lang === 'en' ? 'en' : 'zh', payload.workspaceRoot)
+        },
         ...conversation.map(m => {
           if (m.role === 'tool') return { role: 'tool', tool_call_id: m.tool_call_id, content: m.content }
           if (m.tool_calls) return { role: 'assistant', content: m.content || '', tool_calls: m.tool_calls }
@@ -127,7 +127,9 @@ async function streamOpenAICompatible(input: {
         })
       ]
     }
-    if (payload.useMcSkill) body.tools = [MC_QUERY_TOOL_DEFINITION]
+    // ask 模式返回空数组，不下发 tools——否则模型会去调用并不存在的工具
+    const tools = toolsForMode(mode, hasWorkspace)
+    if (tools.length) body.tools = tools
 
     // 本次请求独立取消器：用户 stop + 60s 超时都能中断
     const fetchController = new AbortController()
@@ -230,23 +232,25 @@ async function streamOpenAICompatible(input: {
         })
         send({ type: 'tool-start', conversationId, messageId: assistantMessageId, run: runningRun })
         try {
-          const result = call.function.name === 'mc_query'
-            ? await runMcQuery(parsed, persistedRun => {
-                // runMcQuery 会回调两次：开始时登记 running 态、结束时回传终态。
-                // 首次回调不能落「完成」态，否则工具刚起跑 UI 就把转圈收掉了。
-                if (persistedRun.status !== 'running') {
-                  completeToolRun(runningRun.id, {
-                    output: persistedRun.output,
-                    summary: persistedRun.summary,
-                    status: persistedRun.status,
-                    durationMs: persistedRun.durationMs
-                  })
-                  send({ type: 'tool-end', conversationId, messageId: assistantMessageId, run: { ...runningRun, ...persistedRun, id: runningRun.id } })
-                }
-                // 本调用方已在外部用 appendToolRun 建好 run，故回传既有 id 即可。
-                return { id: runningRun.id }
-              }, toolController.signal)
-            : { error: `不支持的工具：${call.function.name}` }
+          const result = await dispatchTool(call.function.name, parsed, {
+            signal: toolController.signal,
+            workspaceRoot: payload.workspaceRoot,
+            onRun: persistedRun => {
+              // runMcQuery 会回调两次：开始时登记 running 态、结束时回传终态。
+              // 首次回调不能落「完成」态，否则工具刚起跑 UI 就把转圈收掉了。
+              if (persistedRun.status !== 'running') {
+                completeToolRun(runningRun.id, {
+                  output: persistedRun.output,
+                  summary: persistedRun.summary,
+                  status: persistedRun.status,
+                  durationMs: persistedRun.durationMs
+                })
+                send({ type: 'tool-end', conversationId, messageId: assistantMessageId, run: { ...runningRun, ...persistedRun, id: runningRun.id } })
+              }
+              // 本调用方已在外部用 appendToolRun 建好 run，故回传既有 id 即可。
+              return { id: runningRun.id }
+            }
+          })
           conversation.push(openAIToolResponse(call.id, result))
         } catch (e: any) {
           if (e.name === 'AbortError' || /aborted/i.test(e.message)) {
@@ -327,5 +331,3 @@ export async function sendMessage(payload: AISendPayload): Promise<void> {
     }
   }
 }
-
-export { openAIToolMessages }

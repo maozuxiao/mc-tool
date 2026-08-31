@@ -1,4 +1,6 @@
-import { ipcMain } from 'electron'
+import { ipcMain, BrowserWindow, dialog } from 'electron'
+import { homedir } from 'os'
+import { resolve } from 'path'
 import { AI_IPC } from '@shared/ai-types'
 import { listModels, testProvider } from './providerApi'
 import { listProviders, saveProvider, getSuggestedModels, getPreferences, savePreferences } from './providerStore'
@@ -56,4 +58,32 @@ export function registerAIIPC(): void {
     }
   })
   ipcMain.handle(AI_IPC.STOP_MESSAGE, (_e, conversationId: string) => stopMessage(conversationId))
+
+  // Build 模式的工作区根目录。选目录必须由主进程弹系统对话框：
+  // 渲染层不直接碰 fs，也避免 <input type=file> 在 Electron 下的路径差异。
+  ipcMain.handle(AI_IPC.SELECT_WORKSPACE, async () => {
+    const win = BrowserWindow.getAllWindows().find(w => !w.isDestroyed())
+    if (!win) return { ok: false, error: 'no main window' }
+    const { canceled, filePaths } = await dialog.showOpenDialog(win, {
+      properties: ['openDirectory', 'createDirectory'],
+      title: '选择 AI 工作区目录'
+    })
+    if (canceled || !filePaths.length) return { ok: true, canceled: true }
+
+    const root = filePaths[0]
+    // 把磁盘根目录或用户主目录整个开放给 AI，爆炸半径过大，给个提示但仍然尊重用户选择
+    let warning: string | undefined
+    try {
+      if (/^[a-zA-Z]:[\\/]*$/.test(root)) warning = 'WORKSPACE_TOO_BROAD'
+      else if (resolve(root) === resolve(homedir())) warning = 'WORKSPACE_IS_HOME'
+    } catch { /* 路径比较失败不影响选择结果 */ }
+
+    savePreferences({ workspaceRoot: root })
+    return { ok: true, workspaceRoot: root, warning }
+  })
+
+  ipcMain.handle(AI_IPC.CLEAR_WORKSPACE, () => {
+    savePreferences({ workspaceRoot: '' })
+    return { ok: true, workspaceRoot: '' }
+  })
 }
