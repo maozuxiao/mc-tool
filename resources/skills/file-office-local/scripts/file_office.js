@@ -11,7 +11,7 @@
  *   read  <path> [--offset N] [--limit N] [--max-bytes N]
  *                                       读文本 / docx / xlsx / pptx / pdf
  *   list  <dir> [--depth N]             列目录
- *   search <词> [<dir>] [--name-only] [--depth N] [--max-results N]
+ *   search <词> [<dir>] [--name-only] [--regex] [--glob <文件名通配符>] [--ext <ext,...>] [--depth N] [--max-results N]
  *                                       按文件名 / 内容搜索
  *   write <path> [--content <文本>] [--append]
  *                                       写文本类文件（md/txt/csv/json...）
@@ -252,17 +252,55 @@ function cmdList(positional, flags, root) {
 }
 
 // ── 命令：search ──────────────────────────────────────────
+// 通配符（glob）转正则：* → .* ，? → . ，其余正则元字符转义
+function globToRegex(glob) {
+  let re = ''
+  for (const ch of String(glob)) {
+    if (ch === '*') re += '.*'
+    else if (ch === '?') re += '.'
+    else re += ch.replace(/[.+^${}()|[\]\\]/g, '\\$&')
+  }
+  return new RegExp('^' + re + '$', 'i')
+}
+
+// ── 命令：search ──────────────────────────────────────────
+// 类 FileLocatorPro 的保底搜索：
+//   - 查询模式：正则(--regex) > 文件名通配符(含 * ?) > 子串
+//   - --glob <通配>：只扫描匹配该文件名通配的文件（如 *.xls），相当于「限定文件类型」
+//   - --ext <csv>：只扫描指定扩展名（如 xls,xlsx），与 --glob 二选一即可
+//   - --name-only：仅匹配文件名，不扫描内容
 function cmdSearch(positional, flags, root) {
   const query = positional[0]
   if (!query) throw new CommandError('search 需要查询词', 'MISSING_ARG')
-  const q = query.toLowerCase()
   const dir = positional[1] || '.'
   const abs = resolveSafe(root, dir, { mustExist: true })
   const nameOnly = !!flags['name-only']
+  const useRegex = !!flags.regex
   const maxResults = toInt(flags['max-results'], 50)
   const maxDepth = toInt(flags.depth, 8)
-  const results = []
+  const globFilter = flags.glob ? globToRegex(String(flags.glob)) : null
+  const extFilter = flags.ext
+    ? String(flags.ext).split(',').map(s => '.' + s.trim().replace(/^\./, '').toLowerCase()).filter(Boolean)
+    : null
 
+  let nameMatcher
+  let contentMatcher
+  if (useRegex) {
+    const re = new RegExp(query, 'i')
+    nameMatcher = (n) => re.test(n)
+    contentMatcher = (t) => re.test(t)
+  } else if (/[*?]/.test(query)) {
+    // 查询词含通配符 → 视作文件名 glob 匹配（默认只匹配文件名，不扫内容）
+    const re = globToRegex(query)
+    nameMatcher = (n) => re.test(n)
+    contentMatcher = null
+  } else {
+    const q = query.toLowerCase()
+    nameMatcher = (n) => n.toLowerCase().includes(q)
+    contentMatcher = (t) => t.toLowerCase().includes(q)
+  }
+
+  const results = []
   function walk(d, current) {
     if (results.length >= maxResults || current > maxDepth) return
     let entries
@@ -274,12 +312,15 @@ function cmdSearch(positional, flags, root) {
         walk(full, current + 1)
       } else if (e.isFile()) {
         const rel = relOf(root, full)
-        if (e.name.toLowerCase().includes(q)) {
+        if (extFilter && !extFilter.includes(path.extname(e.name).toLowerCase())) continue
+        if (globFilter && !globFilter.test(e.name)) continue
+        if (nameMatcher(e.name)) {
           results.push({ relative: rel, name: e.name, match: 'name' })
-        } else if (!nameOnly && isTextFile(full)) {
+        } else if (!nameOnly && contentMatcher) {
+          if (!isTextFile(full)) continue
           try {
-            const txt = decodeText(fs.readFileSync(full)).text.toLowerCase()
-            if (txt.includes(q)) results.push({ relative: rel, name: e.name, match: 'content' })
+            const txt = decodeText(fs.readFileSync(full)).text
+            if (contentMatcher(txt)) results.push({ relative: rel, name: e.name, match: 'content' })
           } catch { /* 解码失败跳过 */ }
         }
       }
@@ -291,6 +332,8 @@ function cmdSearch(positional, flags, root) {
     ok: true,
     command: 'search',
     query,
+    mode: useRegex ? 'regex' : (/[*?]/.test(query) ? 'glob' : 'substring'),
+    filters: { nameOnly, glob: flags.glob || null, ext: flags.ext || null },
     root: dir === '.' ? '.' : relOf(root, abs),
     count: results.length,
     results
@@ -351,7 +394,7 @@ function usage() {
     '  node file_office.js ping [--json]',
     '  node file_office.js read <path> [--offset N] [--limit N] [--max-bytes N] --root <目录> [--json]',
     '  node file_office.js list <dir> [--depth N] --root <目录> [--json]',
-    '  node file_office.js search <词> [<dir>] [--name-only] [--depth N] [--max-results N] --root <目录> [--json]',
+    '  node file_office.js search <词> [<dir>] [--name-only] [--regex] [--glob <文件名通配符>] [--ext <ext,...>] [--depth N] [--max-results N] --root <目录> [--json]',
     '  node file_office.js write <path> [--content <文本>] [--append] --root <目录> [--json]'
   ].join('\n')
 }

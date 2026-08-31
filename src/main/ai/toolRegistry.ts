@@ -58,6 +58,9 @@ const REGISTRY: Record<string, ToolEntry> = {
       const args = [String(input?.query || '')]
       if (input?.path) args.push(input.path)
       if (input?.nameOnly) args.push('--name-only')
+      if (input?.regex) args.push('--regex')
+      if (input?.glob) args.push('--glob', String(input.glob))
+      if (input?.ext) args.push('--ext', String(input.ext))
       return runFileSkillCommand('search', args, ctx.workspaceRoot, ctx.signal, 30000)
     }
   },

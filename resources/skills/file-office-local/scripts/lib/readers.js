@@ -101,9 +101,26 @@ async function readPdf(abs) {
   return { text: blocks.join('\n\n'), format: 'pdf' }
 }
 
+// ── xls ────────────────────────────────────────────────────
+// 老版 Excel（.xls，BIFF 二进制格式）。exceljs 只能读写 .xlsx，无法读 .xls，
+// 这里改用 SheetJS（xlsx 社区版，纯 JS）读取，再转 CSV 文本交给模型。
+async function readXls(abs) {
+  const XLSX = require('xlsx')
+  const wb = XLSX.readFile(abs, { cellDates: true, cellNF: false })
+  const blocks = []
+  for (const name of wb.SheetNames) {
+    const ws = wb.Sheets[name]
+    const csv = XLSX.utils.sheet_to_csv(ws, { blankrows: false })
+    const rows = csv.split(/\r?\n/).filter(Boolean).length
+    blocks.push(`# 工作表：${name}（${rows} 行）\n${csv}`)
+  }
+  return { text: blocks.join('\n\n'), format: 'xls' }
+}
+
 const READERS = {
   '.docx': readDocx,
   '.xlsx': readXlsx,
+  '.xls': readXls,
   '.pptx': readPptx,
   '.pdf': readPdf
 }
@@ -112,4 +129,4 @@ function readerFor(ext) {
   return READERS[ext.toLowerCase()]
 }
 
-module.exports = { readDocx, readXlsx, readPptx, readPdf, readerFor }
+module.exports = { readDocx, readXlsx, readXls, readPptx, readPdf, readerFor }

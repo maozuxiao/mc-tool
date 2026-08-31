@@ -110,8 +110,13 @@ async function streamOpenAICompatible(input: {
   const mode = resolveMode(payload)
   const hasWorkspace = !!payload.workspaceRoot
 
+  // 工具调用轮次上限：模型每轮可发起若干 tool_calls，整轮往复直到不再调用工具。
+  // 之前上限仅 5，模型逐个读取多个文件或遇到失败重试时极易触顶并报「轮次过多」。
+  // 这里放宽到 12，并在最后一轮强制不带 tools，让模型基于已收集信息总结，而非把错误抛给用户。
+  const MAX_ROUNDS = 12
   let conversation = [...messages]
-  for (let round = 0; round < 5; round++) {
+  for (let round = 0; round < MAX_ROUNDS; round++) {
+    const isLastRound = round === MAX_ROUNDS - 1
     const body: any = {
       model: payload.modelId,
       stream: true,
@@ -127,8 +132,9 @@ async function streamOpenAICompatible(input: {
         })
       ]
     }
-    // ask 模式返回空数组，不下发 tools——否则模型会去调用并不存在的工具
-    const tools = toolsForMode(mode, hasWorkspace)
+    // ask 模式返回空数组，不下发 tools——否则模型会去调用并不存在的工具。
+    // 最后一轮强制不带 tools，让模型基于已收集的信息直接总结，而非再发起第 N+1 次工具调用。
+    const tools = isLastRound ? [] : toolsForMode(mode, hasWorkspace)
     if (tools.length) body.tools = tools
 
     // 本次请求独立取消器：用户 stop + 60s 超时都能中断
@@ -216,6 +222,16 @@ async function streamOpenAICompatible(input: {
       return
     }
 
+    // 已达轮次上限：不再执行工具，基于已生成内容收尾，避免把「轮次过多」错误抛给用户。
+    if (isLastRound) {
+      updateMessage(assistantMessageId, {
+        content: content || '（已达到工具调用轮次上限，模型未能在限定步数内完成。请尝试将任务拆分、或先用 file_search / file_list 缩小范围后再读取。）',
+        inputTokens: usage?.prompt_tokens,
+        outputTokens: usage?.completion_tokens
+      })
+      return
+    }
+
     const assistantToolMessage = { role: 'assistant', content, tool_calls: toolCalls }
     conversation.push(assistantToolMessage)
     const toolController = new AbortController()
@@ -266,7 +282,6 @@ async function streamOpenAICompatible(input: {
     }
     send({ type: 'delta', conversationId, messageId: assistantMessageId, content: '\n\n' })
   }
-  throw new Error('AI 工具调用轮次过多')
 }
 
 export async function sendMessage(payload: AISendPayload): Promise<void> {

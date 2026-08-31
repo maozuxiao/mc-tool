@@ -11,7 +11,7 @@ export const FILE_READ_TOOL_DEFINITION = {
   type: 'function',
   function: {
     name: 'file_read',
-    description: '读取工作区内的文件。支持纯文本（md/txt/csv/json/log/yml/xml/html 等）、docx、xlsx、pptx、pdf；pdf 与中文文档会自动处理编码。单次最多返回约 200KB，返回中 truncated 为 true 表示被截断，需更多时用 offset/limit 分段读取。路径必须在工作区内，越界会被拒绝。',
+    description: '读取工作区内的文件。支持纯文本（md/txt/csv/json/log/yml/xml/html 等）、docx、xls、xlsx、pptx、pdf；pdf 与中文文档会自动处理编码。单次最多返回约 200KB，返回中 truncated 为 true 表示被截断，需更多时用 offset/limit 分段读取。路径必须在工作区内，越界会被拒绝。',
     parameters: {
       type: 'object',
       properties: {
@@ -59,13 +59,15 @@ export const FILE_SEARCH_TOOL_DEFINITION = {
   type: 'function',
   function: {
     name: 'file_search',
-    description: '在工作区内按文件名或内容搜索关键词，用于查找包含某内容的文件。',
+    description: '在工作区内搜索文件（类 FileLocatorPro 的保底检索）。query 默认同时匹配文件名与内容；' +
+      '含 * 或 ? 时按文件名通配符匹配；--regex 时按正则表达式匹配。' +
+      '用 glob 限定只搜某类文件（如 *.xls），用 ext 限定扩展名（如 xls,xlsx）。',
     parameters: {
       type: 'object',
       properties: {
         query: {
           type: 'string',
-          description: '搜索词'
+          description: '搜索词/通配符/正则。含 * ? 视为文件名通配；配合 regex=true 视为正则'
         },
         path: {
           type: 'string',
@@ -73,7 +75,19 @@ export const FILE_SEARCH_TOOL_DEFINITION = {
         },
         nameOnly: {
           type: 'boolean',
-          description: '仅按文件名搜索、不扫描内容，默认 false'
+          description: '仅按文件名匹配、不扫描内容，默认 false'
+        },
+        regex: {
+          type: 'boolean',
+          description: '将 query 当作正则表达式（文件名与内容均按正则匹配），默认 false'
+        },
+        glob: {
+          type: 'string',
+          description: '只扫描文件名匹配该通配符的文件，如 "*.xls"，用于限定文件类型'
+        },
+        ext: {
+          type: 'string',
+          description: '只扫描指定扩展名，逗号分隔，如 "xls,xlsx"'
         }
       },
       required: ['query']

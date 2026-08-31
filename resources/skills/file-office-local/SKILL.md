@@ -32,7 +32,7 @@ $NODE = & "$SKILL\scripts\ensure_node.ps1"   # stdout 最后一行即 node.exe �
 | `read <path> [--offset N] [--limit N] [--max-bytes N]` | 读取文本/Office/PDF 文件 | ✅ 可用（含 docx/xlsx/pptx/pdf） |
 | `write <path> [--content "..."] [--append] [--encoding auto\|utf8\|gbk]` | 写入文本类文件 | ✅ 可用（二进制 Office/PDF 不支持写） |
 | `list <dir> [--type file\|dir]` | 列目录 | ✅ 可用 |
-| `search <pattern> [--dir <dir>] [--name] [--content] [--max N]` | 按文件名/内容搜索 | ✅ 可用 |
+| `search <pattern> [<dir>] [--name-only] [--regex] [--glob <文件名通配>] [--ext <ext,...>] [--depth N] [--max-results N]` | 类 FileLocatorPro 保底搜索：正则/通配符/文件类型过滤 | ✅ 可用 |
 | `cmd <command>` | 执行命令 | ❌ 已取消（不在 Build 模式范围内） |
 
 ## 安全约束（重要）
@@ -64,7 +64,8 @@ Windows 中文环境常见 GBK 编码的 `.txt` / `.csv`，Node 原生只认 UTF
 | `.xlsx` | ✅ exceljs 转 Markdown（公式取 result） | ❌ 二进制格式不支持 |
 | `.pptx` | ✅ jszip 提取 `<a:t>` 文本 | ❌ 二进制格式不支持 |
 | `.pdf` | ✅ pdfjs-dist（NodeCMapReaderFactory 解决中文丢失） | ❌ 二进制格式不支持 |
-| `.doc` `.xls` `.ppt`（老二进制格式） | ❌ 需先转换 | ❌ |
+| `.xls` | ✅ SheetJS(xlsx) 读取（老版 BIFF 二进制格式） | ❌ 二进制格式不支持 |
+| `.doc` `.ppt`（老二进制格式） | ❌ 需先转换 | ❌ |
 
 ## 依赖说明
 
@@ -79,6 +80,7 @@ Windows 中文环境常见 GBK 编码的 `.txt` / `.csv`，Node 原生只认 UTF
 | `pptxgenjs` | 生成 pptx | |
 | `jszip` | docx/pptx 的 XML 层修改 | |
 | `pdfjs-dist` | PDF 文本提取 | **固定 3.x**：4.x 的 legacy build 为纯 ESM，CommonJS 无法直接 require |
+| `xlsx` | 读取老版 `.xls`（SheetJS 社区版，纯 JS） | exceljs 已覆盖 .xlsx，此库专补 .xls |
 | `iconv-lite` | GBK 解码 | |
 
 ### 打包瘦身

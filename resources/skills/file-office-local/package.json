@@ -17,7 +17,8 @@
     "jszip": "^3.10.1",
     "mammoth": "^1.8.0",
     "pdfjs-dist": "3.11.174",
-    "pptxgenjs": "^3.12.0"
+    "pptxgenjs": "^3.12.0",
+    "xlsx": "^0.18.5"
   },
   "//": "iconv-lite 用于解码 GBK 编码的 txt/csv；pdfjs-dist 固定 3.x，因为 4.x 的 legacy build 为纯 ESM，CommonJS 脚本无法直接 require"
 }
