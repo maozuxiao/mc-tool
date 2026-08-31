@@ -12,6 +12,11 @@ out/
 # 临时打包目录：build_now.ps1 / 手动 electron-builder --config electron-builder-test.yml 产生
 dist-test*/
 
+# 历史版本安装包归档：build_now.ps1 打包前会清空 dist/，
+# 归档到此处（如 dist-archive/1.0.27/）便于随时回滚重装。
+# 体积大，不入库；回滚锚点以 git 标签 v1.0.27 与 backup/v1.0.27 分支为准。
+dist-archive/
+
 *.log
 .DS_Store
 
