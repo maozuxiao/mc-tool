@@ -137,12 +137,13 @@ export function appendMessage(input: {
   return msg
 }
 
-export function updateMessage(id: string, patch: { content?: string; reasoning?: string; inputTokens?: number; outputTokens?: number }): void {
+export function updateMessage(id: string, patch: { content?: string; reasoning?: string; inputTokens?: number; outputTokens?: number; createdAt?: number }): void {
   const data = load()
   const m = data.messages.find(x => x.id === id)
   if (!m) return
   if (patch.content !== undefined) m.content = patch.content
   if (patch.reasoning !== undefined) m.reasoning = patch.reasoning
+  if (patch.createdAt !== undefined) m.createdAt = patch.createdAt
   if (patch.inputTokens !== undefined) m.inputTokens = patch.inputTokens
   if (patch.outputTokens !== undefined) m.outputTokens = patch.outputTokens
   persist()

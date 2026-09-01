@@ -85,6 +85,13 @@ const REGISTRY: Record<string, ToolEntry> = {
       const args = [p, '--content', content]
       if (input?.append) args.push('--append')
       if (input?.update) args.push('--update')
+      if (input?.newsheet && input.newsheet !== 'false' && input.newsheet !== 'False') {
+        const ns = typeof input.newsheet === 'string' && input.newsheet.toLowerCase() !== 'true'
+          ? input.newsheet
+          : undefined
+        if (ns) args.push('--newsheet', ns)
+        else args.push('--newsheet')
+      }
       return runFileSkillCommand('write', args, ctx.allowedRoots, ctx.signal, 30000)
     }
   },

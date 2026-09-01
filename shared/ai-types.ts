@@ -111,6 +111,14 @@ export function resolveMode(payload: Pick<AISendPayload, 'mode' | 'useMcSkill'>)
   return payload.useMcSkill ? 'mc' : 'ask'
 }
 
+/** 用户存储的自定义提示词（快捷调用） */
+export interface SavedPrompt {
+  id: string
+  title: string
+  text: string
+  createdAt: number
+}
+
 export const AI_IPC = {
   GET_PROVIDERS: 'ai:get-providers',
   SAVE_PROVIDER: 'ai:save-provider',
@@ -128,5 +136,10 @@ export const AI_IPC = {
   // 额外可访问目录（工作区之外）白名单：由主进程弹系统目录框选择，持久化到偏好
   ADD_EXTRA_ROOT: 'ai:add-extra-root',
   REMOVE_EXTRA_ROOT: 'ai:remove-extra-root',
+  // 用户自定义提示词（快捷调用）：列表 / 保存 / 删除，持久化到 userData
+  LIST_PROMPTS: 'ai:list-prompts',
+  SAVE_PROMPT: 'ai:save-prompt',
+  UPDATE_PROMPT: 'ai:update-prompt',
+  DELETE_PROMPT: 'ai:delete-prompt',
   EVENT: 'ai:event'
 } as const

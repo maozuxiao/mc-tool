@@ -10,6 +10,7 @@ import {
   listConversations, renameConversation
 } from './historyStore'
 import { sendMessage, stopMessage } from './chatService'
+import { listPrompts, savePrompt, updatePrompt, deletePrompt } from './promptStore'
 
 export function registerAIIPC(): void {
   ipcMain.handle(AI_IPC.GET_PROVIDERS, () => {
@@ -124,4 +125,14 @@ export function registerAIIPC(): void {
     savePreferences({ extraRoots: next })
     return { ok: true, extraRoots: next }
   })
+
+  // 用户自定义提示词（快捷调用）：列表 / 保存当前输入框 / 删除
+  ipcMain.handle(AI_IPC.LIST_PROMPTS, () => listPrompts())
+  ipcMain.handle(AI_IPC.SAVE_PROMPT, (_e, input: { text: string; title?: string }) => {
+    return savePrompt(input?.text || '', input?.title)
+  })
+  ipcMain.handle(AI_IPC.UPDATE_PROMPT, (_e, input: { id: string; text: string; title?: string }) => {
+    return updatePrompt(input?.id || '', input?.text || '', input?.title)
+  })
+  ipcMain.handle(AI_IPC.DELETE_PROMPT, (_e, id: string) => deletePrompt(id))
 }

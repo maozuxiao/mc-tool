@@ -14,8 +14,9 @@
  *   search <词> [<dir>] [--name-only] [--regex] [--glob <文件名通配符>] [--ext <ext,...>] [--depth N] [--max-results N] [--index] [--rebuild-index]
  *                                       按文件名 / 内容搜索（内容覆盖 xlsx/xls/docx/pptx/pdf，xlsx 命中定位到 sheet+行号）。
  *                                       默认不使用缓存索引，每次直接读取文件；加 --index 启用索引缓存（按 hash+版本校验），命中缓存却零命中时自动全量兜底重扫防漏查；--rebuild-index 强制忽略旧缓存重建。
- *   write <path> [--content <文本>] [--append] [--update]
- *                                       写文本类文件（md/txt/csv/json...）；电子表格 --update 时 content 为 JSON { key, rows } 原地按关键列回填
+ *   write <path> [--content <文本>] [--append] [--update] [--newsheet [名称]]
+ *                                       写文本类文件（md/txt/csv/json...）；电子表格 --update 时 content 为 JSON { key, rows } 原地按关键列回填；
+ *                                       --newsheet 在已存在的工作簿里追加一个新工作表（与 Sheet1 并存、保留原表样式），省略名称则自动 Sheet2/Sheet3…
  *   read_batch <path1> [path2 ...] [--path <p> ...]
  *                                       一次读取多个文件（最多 12 个），返回结果数组
  *
@@ -172,22 +173,25 @@ function decodeText(buf) {
 }
 
 // 统一截断：把任意长度文本按行/字节约束成模型可消化的片段
+// truncatedBy: 'bytes'（超过单读字节上限）/ 'rows'（受 --limit 行数限制）/ null（未截断）
 function applyTruncation(text, maxBytes, offset, limit) {
   let content = text
   let truncated = false
+  let truncatedBy = null
   if (Buffer.byteLength(content, 'utf8') > maxBytes) {
     // Office/PDF 没有「行」概念，这里按字符数近似截断（避免截断半个多字节字符）
     const maxChars = Math.floor(maxBytes / 2)
     content = content.slice(0, maxChars)
     truncated = true
+    truncatedBy = 'bytes'
   }
   if (offset > 0 || limit > 0) {
     const lines = content.split(/\r?\n/)
     const slice = lines.slice(offset, limit > 0 ? offset + limit : undefined)
     content = slice.join('\n')
-    if (offset + slice.length < lines.length) truncated = true
+    if (offset + slice.length < lines.length) { truncated = true; truncatedBy = truncatedBy || 'rows' }
   }
-  return { content, truncated }
+  return { content, truncated, truncatedBy }
 }
 
 // ── 命令：ping ────────────────────────────────────────────
@@ -267,7 +271,7 @@ async function readOne(roots, target, opts = {}) {
     )
   }
 
-  const { content, truncated } = applyTruncation(text, maxBytes, offset, limit)
+  const { content, truncated, truncatedBy } = applyTruncation(text, maxBytes, offset, limit)
   return {
     abs,
     relative: displayRel(aliasOf(roots, root), root, abs),
@@ -275,6 +279,7 @@ async function readOne(roots, target, opts = {}) {
     format,
     bytesRead: Buffer.byteLength(content, 'utf8'),
     truncated,
+    truncatedBy,
     content
   }
 }
@@ -294,7 +299,14 @@ async function cmdRead(positional, flags, roots) {
     format: r.format,
     bytesRead: r.bytesRead,
     truncated: r.truncated,
-    ...(r.truncated ? { truncatedNote: `内容已截断（上限 ${maxBytes} 字节），如需更多请指定 --offset/--limit 分段读取` } : {}),
+    ...(r.truncated
+      ? {
+          truncatedNote:
+            r.truncatedBy === 'bytes'
+              ? `内容已超过单读上限（约 ${Math.round(maxBytes / 1024)} KB），后续请用 --offset/--limit 分段读取；对大文件判断「某值是否存在 / 查找某关键词」，建议优先用 search <关键词> 命令直接定位内容，避免整篇读取。`
+              : `内容已按 --limit 行数截断，后续请用 --offset 继续读取（如 --offset 40）；大文件中查「是否存在 / 某值」建议改用 search <关键词> 直接定位。`
+        }
+      : {}),
     text: r.content
   }
 }
@@ -322,6 +334,14 @@ async function cmdReadBatch(positional, flags, roots) {
         size: r.size,
         format: r.format,
         truncated: r.truncated,
+        ...(r.truncated
+          ? {
+              truncatedNote:
+                r.truncatedBy === 'bytes'
+                  ? `内容已超过单读上限（约 ${Math.round(BATCH_PER_FILE_BYTES / 1024)} KB），后续请用 --offset/--limit 分段读取；对大文件判断「某值是否存在 / 查找某关键词」，建议优先用 search <关键词> 命令直接定位内容。`
+                  : `内容已按 --limit 行数截断，后续请用 --offset 继续读取；大文件中查「是否存在 / 某值」建议改用 search <关键词> 直接定位。`
+            }
+          : {}),
         text: r.content
       })
     } catch (e) {
@@ -686,14 +706,49 @@ function writeSpreadsheet(target, content, opts) {
   const bookType = ext === '.xls' ? 'xls' : 'xlsx'
   const { root, rest } = pickRoot(target, opts.roots)
   const abs = resolveSafe(root, rest)
+  const { values, fills, rowFills, fillWarnings } = buildSheetGrid(content)
+  if (opts.append && fs.existsSync(abs)) {
+    const wb = XLSX.readFile(abs, { cellDates: true })
+    const first = wb.SheetNames[0]
+    const ws = wb.Sheets[first]
+    const range = ws['!ref'] ? XLSX.utils.decode_range(ws['!ref']) : null
+    const nextRow = range ? range.e.r + 1 : 0
+    XLSX.utils.sheet_add_aoa(ws, values, { origin: { r: nextRow, c: 0 } })
+    applyFillsSheetJS(ws, fills, rowFills, values, nextRow, 0)
+    XLSX.writeFile(wb, abs, { bookType })
+  } else {
+    const ws = XLSX.utils.aoa_to_sheet(values)
+    applyFillsSheetJS(ws, fills, rowFills, values, 0, 0)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Sheet1')
+    XLSX.writeFile(wb, abs, { bookType })
+  }
+  const after = fs.statSync(abs)
+  const out = {
+    ok: true,
+    command: 'write',
+    path: abs,
+    relative: displayRel(aliasOf(opts.roots, root), root, abs),
+    format: bookType,
+    bytes: after.size,
+    append: !!opts.append,
+    size: after.size
+  }
+  if (fillWarnings.length) {
+    out.unsupportedFills = fillWarnings
+    out.supportedFills = Object.keys(FILL_PALETTE)
+    out.fillNote = '单元格填充色仅支持上述名称或 #RRGGBB 十六进制；未识别的颜色已忽略、未上色，请改用支持的颜色。'
+  }
+  return out
+}
+
+// 把模型给出的 content 解析成「普通值网格 + 填充色映射」，供新建 / 追加 / 新增 Sheet 复用。
+function buildSheetGrid(content) {
   const rawRows = parseSheetRows(content)
-  // 行级填充保留键（__rowFill / rowFill）：整行上色用，不应成为普通列写出
   const ROW_FILL_KEYS = new Set(['__rowFill', 'rowFill'])
   const fillWarnings = []
   const header = rawRows[0] || []
   const isRowFillCol = (header || []).map(h => ROW_FILL_KEYS.has(String(h)))
-  // 抽出普通值网格与填充色映射：对象式单元格 { value, fill } 先取 value 写值，
-  // 再由 fills 单独上色（避免把对象直接丢进 aoa_to_sheet 被误当成单元格值）。
   const values = []
   const fills = []
   const rowFills = []
@@ -725,57 +780,100 @@ function writeSpreadsheet(target, content, opts) {
     values.push(outRow)
     rowFills.push(rf)
   }
-  const applyFills = (ws, r0, c0) => {
-    for (const f of fills) {
-      const addr = XLSX.utils.encode_cell({ r: r0 + f.r, c: c0 + f.c })
+  return { values, fills, rowFills, fillWarnings }
+}
+
+// 把填充色映射到 SheetJS 工作表（cell.s.fill），r0/c0 为起始偏移（追加到已有表时非零）。
+function applyFillsSheetJS(ws, fills, rowFills, values, r0, c0) {
+  const XLSX = require('xlsx')
+  for (const f of fills) {
+    const addr = XLSX.utils.encode_cell({ r: r0 + f.r, c: c0 + f.c })
+    const cell = ws[addr]
+    if (!cell) continue
+    cell.s = cell.s || {}
+    cell.s.fill = { fgColor: { rgb: f.argb }, patternType: 'solid' }
+  }
+  // 整行填充：把该行的所有单元格填满指定颜色
+  for (let r = 0; r < rowFills.length; r++) {
+    const rf = rowFills[r]
+    if (!rf) continue
+    const outRow = values[r] || []
+    for (let c = 0; c < outRow.length; c++) {
+      const addr = XLSX.utils.encode_cell({ r: r0 + r, c: c0 + c })
       const cell = ws[addr]
       if (!cell) continue
       cell.s = cell.s || {}
-      cell.s.fill = { fgColor: { rgb: f.argb }, patternType: 'solid' }
-    }
-    // 整行填充：把该行的所有单元格填满指定颜色
-    for (let r = 0; r < rowFills.length; r++) {
-      const rf = rowFills[r]
-      if (!rf) continue
-      const outRow = values[r] || []
-      for (let c = 0; c < outRow.length; c++) {
-        const addr = XLSX.utils.encode_cell({ r: r0 + r, c: c0 + c })
-        const cell = ws[addr]
-        if (!cell) continue
-        cell.s = cell.s || {}
-        cell.s.fill = { fgColor: { rgb: rf }, patternType: 'solid' }
-      }
+      cell.s.fill = { fgColor: { rgb: rf }, patternType: 'solid' }
     }
   }
-  if (opts.append && fs.existsSync(abs)) {
+}
+
+// 为新增 Sheet 选一个不与已有表重名的名字：指定了就用指定名（已存在则报错），否则 Sheet2/Sheet3…
+function pickSheetName(existing, requested) {
+  if (requested) {
+    const name = String(requested).slice(0, 31)
+    if (existing.includes(name)) throw new CommandError(`工作表已存在：${name}`, 'SHEET_EXISTS')
+    return name
+  }
+  let i = 2
+  while (existing.includes(`Sheet${i}`)) i++
+  return `Sheet${i}`
+}
+
+// 在「已存在」的工作簿中追加一个新工作表，与 Sheet1 等原有工作表并存、保留其样式。
+// xlsx 用 ExcelJS 读写，完整保留字体/列宽/合并单元格/数字格式；xls 走 SheetJS 尽力保留。
+async function writeSpreadsheetAddSheet(target, content, opts, sheetName) {
+  const ext = path.extname(target).toLowerCase()
+  const { root, rest } = pickRoot(target, opts.roots)
+  const abs = resolveSafe(root, rest, { mustExist: true }) // 必须已存在：是往里加 Sheet，不是新建文件
+  const grid = buildSheetGrid(content)
+  let name
+  let sheets
+  if (ext === '.xls') {
+    const XLSX = require('xlsx')
     const wb = XLSX.readFile(abs, { cellDates: true })
-    const first = wb.SheetNames[0]
-    const ws = wb.Sheets[first]
-    const range = ws['!ref'] ? XLSX.utils.decode_range(ws['!ref']) : null
-    const nextRow = range ? range.e.r + 1 : 0
-    XLSX.utils.sheet_add_aoa(ws, values, { origin: { r: nextRow, c: 0 } })
-    applyFills(ws, nextRow, 0)
-    XLSX.writeFile(wb, abs, { bookType })
+    name = pickSheetName(wb.SheetNames, sheetName)
+    const ws = XLSX.utils.aoa_to_sheet(grid.values)
+    applyFillsSheetJS(ws, grid.fills, grid.rowFills, grid.values, 0, 0)
+    XLSX.utils.book_append_sheet(wb, ws, name)
+    XLSX.writeFile(wb, abs, { bookType: 'xls' })
+    sheets = wb.SheetNames
   } else {
-    const ws = XLSX.utils.aoa_to_sheet(values)
-    applyFills(ws, 0, 0)
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, 'Sheet1')
-    XLSX.writeFile(wb, abs, { bookType })
+    const ExcelJS = loadExcelJs()
+    const wb = new ExcelJS.Workbook()
+    await wb.xlsx.readFile(abs) // 保留原有全部工作表与样式
+    name = pickSheetName(wb.worksheets.map(w => w.name), sheetName)
+    const ws = wb.addWorksheet(name)
+    for (let r = 0; r < grid.values.length; r++) {
+      const row = ws.getRow(r + 1)
+      const vals = grid.values[r]
+      for (let c = 0; c < vals.length; c++) row.getCell(c + 1).value = fmtCell(vals[c])
+    }
+    for (const f of grid.fills) applyExcelFill(ws.getCell(f.r + 1, f.c + 1), f.argb)
+    for (let r = 0; r < grid.rowFills.length; r++) {
+      const rf = grid.rowFills[r]
+      if (!rf) continue
+      const outRow = grid.values[r] || []
+      for (let c = 0; c < outRow.length; c++) applyExcelFill(ws.getCell(r + 1, c + 1), rf)
+    }
+    await wb.xlsx.writeFile(abs)
+    sheets = wb.worksheets.map(w => w.name)
   }
   const after = fs.statSync(abs)
   const out = {
     ok: true,
     command: 'write',
+    mode: 'newsheet',
     path: abs,
     relative: displayRel(aliasOf(opts.roots, root), root, abs),
-    format: bookType,
+    sheet: name,
+    sheets,
+    rows: grid.values.length,
     bytes: after.size,
-    append: !!opts.append,
     size: after.size
   }
-  if (fillWarnings.length) {
-    out.unsupportedFills = fillWarnings
+  if (grid.fillWarnings.length) {
+    out.unsupportedFills = grid.fillWarnings
     out.supportedFills = Object.keys(FILL_PALETTE)
     out.fillNote = '单元格填充色仅支持上述名称或 #RRGGBB 十六进制；未识别的颜色已忽略、未上色，请改用支持的颜色。'
   }
@@ -1142,6 +1240,14 @@ function cmdWrite(positional, flags, roots) {
   if (doUpdate) {
     return updateSpreadsheet(target, content, { roots })
   }
+  // 在已存在的工作簿中追加新工作表（与 Sheet1 等并存、保留原表与样式）：
+  // 仅对已有的 xlsx/xls 生效，--newsheet 后可跟表名（如 --newsheet 汇总），省略则自动命名 Sheet2/Sheet3…
+  if (isSheet && !!flags.newsheet) {
+    return writeSpreadsheetAddSheet(
+      target, content, { roots },
+      typeof flags.newsheet === 'string' ? flags.newsheet : undefined
+    )
+  }
   // 电子表格（xlsx / xls）：把 CSV/TSV/JSON 内容写成真正的二进制工作簿。
   // 护栏：禁止用「无 --update」的 write 直接覆盖已存在的表格——那样会丢失原工作表名
   // （如 Sheet2）与全部样式，重建内容也未必符合预期。已有文件要做新增/修改/标记颜色，
@@ -1198,7 +1304,7 @@ function usage() {
     '  node file_office.js read_batch <path1> [path2 ...] [--path <p> ...] --root <目录> [--extra-root <别名>|<目录> ...] [--json]',
     '  node file_office.js list <dir> [--depth N] --root <目录> [--extra-root <别名>|<目录> ...] [--json]',
     '  node file_office.js search <词> [<dir>] [--name-only] [--regex] [--glob <通配>] [--ext <ext,...>] [--depth N] [--max-results N] [--index] [--rebuild-index] --root <目录> [--extra-root <别名>|<目录> ...] [--json]',
-    '  node file_office.js write <path> [--content <文本>] [--append] [--update] --root <目录> [--extra-root <别名>|<目录> ...] [--json]'
+    '  node file_office.js write <path> [--content <文本>] [--append] [--update] [--newsheet [名称]] --root <目录> [--extra-root <别名>|<目录> ...] [--json]'
   ].join('\n')
 }
 

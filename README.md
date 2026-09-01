@@ -4,7 +4,7 @@
 
 - 仓库：https://github.com/maozuxiao/mc-tool
 - 技术栈：Electron 33 + electron-vite + React 18 + TypeScript + Zustand，UI 组件库 [`animal-island-ui`](https://www.npmjs.com/package/animal-island-ui)
-- 当前版本：`1.0.28`（`package.json` 的 `version` 为准）
+- 当前版本：`1.0.29`（`package.json` 的 `version` 为准）
 
 ---
 
@@ -162,6 +162,17 @@
 - 查询结果由模型总结，关键料号请对照气泡里的原始返回核对。
 - 查询内部物料数据时，建议避免使用标注「免费」的模型（部分免费端点会收集数据用于改进模型）。
 
+**⑥ 快捷提示词**
+
+输入框左下角的 `+` 按钮用于保存与复用常用提示词，内容常驻本地、不随会话切换。
+
+- **展开 / 收起**：点击 `+` 弹出可滚动的提示词列表面板，按钮平滑旋转 45° 变 `×`；点击面板外任意处或再点一次即收起。
+- **填入**：点击列表里的提示词 → 内容直接填入输入框（不自动发送，可改完再发）。
+- **快速操作**：每个提示词右侧有「编辑 / 删除」。
+- **管理弹窗**：面板底部「管理提示词」打开弹窗，可新增（标题可选 + 内容）、编辑、删除、查看全部；编辑走 `ai:update-prompt` 通道。
+- **保存当前**：输入框有内容时，面板底部出现「保存当前」，把当前输入一键存为提示词。
+- 数据持久化在 `userData/promptStore.json`，增删改查全部经主进程 IPC（渲染层只调 `window.mcApi.ai.*`），不影响 API Key 等其它配置。
+
 ### 3.6 其他操作
 
 | 操作 | 说明 |
@@ -191,6 +202,7 @@ mc-tool/
 │  │     ├─ providerApi.ts      # OpenAI 兼容 / Anthropic 协议适配
 │  │     ├─ providerStore.ts    # 服务商预设与 API Key 加密存储
 │  │     ├─ historyStore.ts     # 会话历史（JSON 持久化到 userData）
+│  │     ├─ promptStore.ts      # 快捷提示词增删改查（JSON 持久化到 userData/promptStore.json）
 │  │     └─ mcSkill.ts          # 内置 MC 查询工具（调用 resources/skills 的脚本）
 │  ├─ preload/index.ts          # contextBridge 桥接，向渲染层暴露 window.mcApi
 │  └─ renderer/                 # 渲染进程（React）
@@ -305,9 +317,9 @@ npm run pack:all   # 全平台
 ```
 dist/
 ├─ latest.yml                            # 自动更新元数据
-├─ MC物料查询 Setup 1.0.28.exe            # NSIS 安装包
-├─ MC物料查询 Setup 1.0.28.exe.blockmap  # 增量更新块映射
-└─ MC物料查询 1.0.28.exe                  # 便携版
+├─ MC物料查询 Setup 1.0.29.exe            # NSIS 安装包
+├─ MC物料查询 Setup 1.0.29.exe.blockmap  # 增量更新块映射
+└─ MC物料查询 1.0.29.exe                  # 便携版
 ```
 
 > macOS 交叉编译在 Windows 上不可靠，DMG 请在 macOS 上打包。

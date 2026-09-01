@@ -116,7 +116,7 @@ export const FILE_WRITE_TOOL_DEFINITION = {
   type: 'function',
   function: {
     name: 'file_write',
-    description: '写入文件。文本类（md/txt/csv/json/log/yml 等）直接给文本内容；电子表格（xlsx / xls）把内容以 CSV/TSV（首行表头）或 JSON（二维数组 / 对象数组）形式给出，工具会生成真正的二进制工作簿（支持 --append 分段追加）。回填/修复已有电子表格时设 update=true，content 给 JSON：{ "key": "关键列名", "rows": [ { "关键列": "值", "要填的列": "值", ... } ] }，工具按关键列匹配原表行、把其余列写回（原表没有的列自动追加到最右），原地保存不另存新文件。【重要】已存在的表格做任何改动都必须用 update=true 在原表上原地处理，禁止用无 update 的 write 重建文件（会丢失原工作表名与样式）。单元格背景色：任意单元格值可写成 { "value": "文本", "fill": "green" }；整行上色加 "__rowFill": "yellow"（用户说「当前行」/「这一行」标色时必须用整行填充，会填满从 A 列到最右列，不要只给单个单元格上色；多路径判断时按「任一命中即绿，全部未命中才黄」统一整行颜色：例如「Murat记录」和「Order summary记录」两列，只要任一列不是「无」/「无记录」（如有具体记录），该行 __rowFill 就必须为 green；只有当两列都是「无」/「无记录」时才为 yellow；禁止把一行拆成 A-D 绿、E-J 黄几段分别上色）。fill 支持 green/yellow/red/blue/gray/orange（及 light 前缀变体）或 #RRGGBB。修改已有文件前必须先读取确认现有内容，不要凭空覆盖。写入前若目标列在原表已有内容（非空白），应先向用户确认是否覆盖，待用户明确确认后再写入。路径用法同 file_read（可直接绝对路径或「别名/路径」）。',
+    description: '写入文件。文本类（md/txt/csv/json/log/yml 等）直接给文本内容；电子表格（xlsx / xls）把内容以 CSV/TSV（首行表头）或 JSON（二维数组 / 对象数组）形式给出，工具会生成真正的二进制工作簿（支持 --append 分段追加）。回填/修复已有电子表格时设 update=true，content 给 JSON：{ "key": "关键列名", "rows": [ { "关键列": "值", "要填的列": "值", ... } ] }，工具按关键列匹配原表行、把其余列写回（原表没有的列自动追加到最右），原地保存不另存新文件。要在已存在的工作簿里新增一个 Sheet（与 Sheet1 等原表并存、保留原表样式）则传 newsheet：可传具体名称（如 "汇总"）或 true 表示自动命名 Sheet2/Sheet3…；newsheet 与 update 互斥，且目标文件必须已存在。用户要求「新建子表/新工作表/Sheet2」时必须用 newsheet，不要用 update 在原表上追加列。【重要】已存在的表格做任何改动（新增行/列、写回数据、标记颜色、新建子表）都必须用 update=true 或 newsheet 在原工作簿上原地处理，禁止用无 update/newsheet 的 write 重建文件（会丢失原工作表名与样式）。单元格背景色：任意单元格值可写成 { "value": "文本", "fill": "green" }；整行上色加 "__rowFill": "yellow"（用户说「当前行」/「这一行」标色时必须用整行填充，会填满从 A 列到最右列，不要只给单个单元格上色；多路径判断时按「任一命中即绿，全部未命中才黄」统一整行颜色：例如「Murat记录」和「Order summary记录」两列，只要任一列不是「无」/「无记录」（如有具体记录），该行 __rowFill 就必须为 green；只有当两列都是「无」/「无记录」时才为 yellow；禁止把一行拆成 A-D 绿、E-J 黄几段分别上色）。fill 支持 green/yellow/red/blue/gray/orange（及 light 前缀变体）或 #RRGGBB。修改已有文件前必须先读取确认现有内容，不要凭空覆盖。写入前若目标列在原表已有内容（非空白），应先向用户确认是否覆盖，待用户明确确认后再写入；用户明确指定写入某列时，必须严格写到该列，禁止因为原表存在同名的其他列就改写到别处。路径用法同 file_read（可直接绝对路径或「别名/路径」）。',
     parameters: {
       type: 'object',
       properties: {
@@ -135,6 +135,10 @@ export const FILE_WRITE_TOOL_DEFINITION = {
         update: {
           type: 'boolean',
           description: '仅对 xlsx/xls 生效：true 时按 content 的 key 列原地回填/追加列，而非生成新工作簿'
+        },
+        newsheet: {
+          type: 'string',
+          description: '仅对 xlsx/xls 生效：在已存在的工作簿中追加一个新工作表（与 Sheet1 等原表并存、保留原表样式）。传具体字符串作为新表名称（如 "汇总"）；传 "true" 表示自动命名为 Sheet2/Sheet3…。与 update 互斥，目标文件必须已存在。'
         }
       },
       required: ['path', 'content']

@@ -429,11 +429,13 @@ async function queryMaterial(orgId, paramName, paramValue) {
 }
 
 async function queryOneItem(orgId, itemNumber) {
-  let result = await queryMaterial(orgId, 'q.ITEM_NUMBER', itemNumber);
+  const clean = normStr(itemNumber);
+  if (!clean) return { itemNumber, rows: [], error: '未找到' };
+  let result = await queryMaterial(orgId, 'q.ITEM_NUMBER', clean);
   if (result.rows.length > 0) return { itemNumber, rows: result.rows, method: 'ITEM_NUMBER' };
 
   console.log(`  [INFO] ITEM_NUMBER 无结果，回退 ITEM_DESC 模糊匹配...`);
-  result = await queryMaterial(orgId, 'q.ITEM_DESC', itemNumber);
+  result = await queryMaterial(orgId, 'q.ITEM_DESC', clean);
   if (result.rows.length > 0) return { itemNumber, rows: result.rows, method: 'ITEM_DESC' };
   return { itemNumber, rows: [], error: '未找到' };
 }

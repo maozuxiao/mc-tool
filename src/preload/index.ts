@@ -73,6 +73,12 @@ const mcApi = {
     addExtraRoot: (): Promise<any> => ipcRenderer.invoke(AI_IPC.ADD_EXTRA_ROOT),
     removeExtraRoot: (input: { alias?: string; path?: string }): Promise<any> =>
       ipcRenderer.invoke(AI_IPC.REMOVE_EXTRA_ROOT, input),
+    listPrompts: (): Promise<any> => ipcRenderer.invoke(AI_IPC.LIST_PROMPTS),
+    savePrompt: (input: { text: string; title?: string }): Promise<any> =>
+      ipcRenderer.invoke(AI_IPC.SAVE_PROMPT, input),
+    updatePrompt: (input: { id: string; text: string; title?: string }): Promise<any> =>
+      ipcRenderer.invoke(AI_IPC.UPDATE_PROMPT, input),
+    deletePrompt: (id: string): Promise<any> => ipcRenderer.invoke(AI_IPC.DELETE_PROMPT, id),
     onEvent: (cb: (event: any) => void) => {
       const listener = (_e: any, event: any) => cb(event)
       ipcRenderer.on(AI_IPC.EVENT, listener)

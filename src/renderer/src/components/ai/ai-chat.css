@@ -368,6 +368,153 @@
 .ai-title { font-size: 12px; color: var(--animal-text-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ai-notice { font-size: 12px; color: #b75d4d; margin-bottom: 8px; }
 
+/* 自定义提示词：+ 按钮在输入框左下角，展开可滚动列表面板，支持管理弹窗增删查改 */
+.ai-composer-input-wrap { position: relative; display: block; }
+.ai-composer-input-wrap textarea { padding-left: 38px; }
+.ai-prompt-toggle {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1px solid var(--animal-line);
+  background: #fbf7ef;
+  color: var(--animal-text);
+  cursor: pointer;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  font-size: 20px;
+  line-height: 1;
+  padding: 0;
+  transition: background .12s, color .12s, transform .12s;
+}
+.ai-prompt-toggle:hover, .ai-prompt-toggle.open { background: var(--animal-green); color: #fff; transform: scale(1.05) rotate(45deg); }
+.ai-prompt-toggle:not(.open):hover { transform: scale(1.05); }
+.ai-prompt-panel {
+  position: absolute;
+  left: 0;
+  bottom: 38px;
+  width: 340px;
+  max-width: calc(100vw - 32px);
+  max-height: 320px;
+  background: #fff;
+  border: 1px solid var(--animal-line);
+  border-radius: 16px;
+  box-shadow: var(--animal-shadow);
+  display: flex;
+  flex-direction: column;
+  z-index: 30;
+  overflow: hidden;
+}
+.ai-prompt-list { flex: 1; overflow-y: auto; padding: 6px; }
+.ai-prompt-empty { padding: 18px; text-align: center; color: var(--animal-text-soft); font-size: 13px; }
+.ai-prompt-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 10px;
+}
+.ai-prompt-item:hover { background: #f6f0e5; }
+.ai-prompt-item-title {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  text-align: left;
+  color: var(--animal-text);
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.ai-prompt-item-actions { display: flex; gap: 4px; flex: none; }
+.ai-prompt-item-action {
+  border: none;
+  background: transparent;
+  color: var(--animal-text-soft);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+.ai-prompt-item-action:hover { background: rgba(0, 0, 0, .06); }
+.ai-prompt-item-action.danger:hover { background: #f7e2de; color: var(--animal-red); }
+.ai-prompt-panel-foot {
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-top: 1px solid var(--animal-line);
+  background: #fbf8f1;
+}
+
+/* 提示词管理弹窗：增删查改 */
+.ai-prompt-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, .35);
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+.ai-prompt-modal {
+  background: #fff;
+  border-radius: 18px;
+  width: 540px;
+  max-width: 100%;
+  max-height: 82vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: var(--animal-shadow);
+  overflow: hidden;
+}
+.ai-prompt-modal-head { padding: 16px 18px; border-bottom: 1px solid var(--animal-line); font-weight: 700; font-size: 15px; }
+.ai-prompt-modal-body { flex: 1; overflow-y: auto; padding: 16px 18px; display: flex; flex-direction: column; gap: 16px; }
+.ai-prompt-form { display: flex; flex-direction: column; gap: 10px; }
+.ai-prompt-form-title {
+  height: 36px;
+  border: 1px solid var(--animal-line);
+  border-radius: 10px;
+  padding: 0 10px;
+  outline: none;
+  font: inherit;
+}
+.ai-prompt-form-title:focus { border-color: var(--animal-green); box-shadow: 0 0 0 3px rgba(25, 200, 185, .12); }
+.ai-prompt-form-text {
+  width: 100%;
+  min-height: 120px;
+  border: 1px solid var(--animal-line);
+  border-radius: 10px;
+  padding: 10px;
+  font: inherit;
+  outline: none;
+  resize: vertical;
+}
+.ai-prompt-form-text:focus { border-color: var(--animal-green); box-shadow: 0 0 0 3px rgba(25, 200, 185, .12); }
+.ai-prompt-form-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.ai-prompt-manager-list { display: flex; flex-direction: column; gap: 8px; }
+.ai-prompt-manager-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--animal-line);
+  border-radius: 12px;
+  background: #fbf8f1;
+}
+.ai-prompt-manager-info { flex: 1; min-width: 0; }
+.ai-prompt-manager-title { font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+.ai-prompt-manager-text { font-size: 12px; color: var(--animal-text-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ai-prompt-manager-actions { display: flex; gap: 6px; flex: none; }
+.mq-btn.ghost.danger { color: var(--animal-red); }
+.mq-btn.ghost.danger:hover { background: #f7e2de; }
+.ai-prompt-save-row { display: flex; justify-content: flex-end; margin-bottom: 8px; }
+
 /* 回复中排队的问题列表 */
 .ai-queue {
   display: flex;

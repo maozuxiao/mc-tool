@@ -41,7 +41,7 @@ Build 模式支持**多个已授权目录**（主工作区 + 额外目录白名�
 | `ping` | 健康检查，报告各格式依赖的加载状态（不校验 `--root`） | ✅ 可用 |
 | `read <path> [--offset N] [--limit N] [--max-bytes N]` | 读取文本/Office/PDF 文件 | ✅ 可用（含 docx/xls/xlsx/pptx/pdf） |
 | `read_batch <path1> [path2 ...] [--path <p> ...]` | 一次读取多个文件（最多 12 个），只消耗 1 次工具调用 | ✅ 可用（每个文件返回 {ok, relative, format, text, truncated}） |
-| `write <path> [--content "..."] [--append] [--update] [--force]` | 写文本类 / 生成或原地修改电子表格（xlsx/xls） | ✅ 可用；xlsx/xls 可生成，或 `--update` 在原表上原地新增/修改/标记颜色（保留原工作表名与样式）；已有文件禁止用无 `--update` 的 write 重建 |
+| `write <path> [--content "..."] [--append] [--update] [--newsheet [名称]] [--force]` | 写文本类 / 生成或原地修改电子表格（xlsx/xls） | ✅ 可用；xlsx/xls 可生成，或 `--update` 在原表上原地新增/修改/标记颜色（保留原工作表名与样式）；`--newsheet [名称]` 在**已存在**的工作簿中追加一个新工作表（与 Sheet1 并存、保留原表样式，xlsx 用 ExcelJS 完整保样式）；已有文件禁止用无 `--update`/`--newsheet` 的 write 重建 |
 | `list <dir> [--type file\|dir]` | 列目录 | ✅ 可用 |
 | `search <pattern> [<dir>] [--name-only] [--regex] [--glob <文件名通配>] [--ext <ext,...>] [--depth N] [--max-results N]` | 类 FileLocatorPro 保底搜索：正则/通配符/文件类型过滤 | ✅ 可用；用 `--regex` 并把多个料号用 `\|` 连成一条正则（如 `5190012100066\|1260030100035`）时，每个料号最多返回一条命中（按首次出现）并带 `matched` 字段，便于逐码判断「是否有记录」，不会因为大文件里某码命中很多行而把其他码挤出结果 |
 | `cmd <command>` | 执行命令 | ❌ 已取消（不在 Build 模式范围内） |
@@ -72,7 +72,7 @@ Windows 中文环境常见 GBK 编码的 `.txt` / `.csv`，Node 原生只认 UTF
 |------|------|------|
 | `.md` `.txt` `.csv` `.json` `.log` `.yml` 等纯文本 | ✅ | ✅（覆盖写 / `--append` 追加） |
 | `.docx` | ✅ mammoth 提取文本 | ❌ 二进制格式不支持 |
-| `.xlsx` | ✅ exceljs 转 Markdown（公式取 result） | ✅ 生成 / `--update` 原地修改（保留样式）；新建用 `write`、改已有用 `write --update`，禁止无 `--update` 重建 |
+| `.xlsx` | ✅ exceljs 转 Markdown（公式取 result） | ✅ 生成 / `--update` 原地修改（保留样式）/ `--newsheet` 追加新工作表（保留原表样式）；新建用 `write`、改已有用 `write --update` 或 `write --newsheet`，禁止无 `--update`/`--newsheet` 重建 |
 | `.pptx` | ✅ jszip 提取 `<a:t>` 文本 | ❌ 二进制格式不支持 |
 | `.pdf` | ✅ pdfjs-dist（NodeCMapReaderFactory 解决中文丢失） | ❌ 二进制格式不支持 |
 | `.xls` | ✅ SheetJS(xlsx) 读取（老版 BIFF 二进制格式） | ❌ 二进制格式不支持 |
@@ -94,6 +94,7 @@ Windows 中文环境常见 GBK 编码的 `.txt` / `.csv`，Node 原生只认 UTF
   }
   ```
 - **严禁重建已有文件**：对已存在的表格做任何改动（新增/修改/标记颜色）都必须用 `write --update`，在**原表**上原地处理；切勿用无 `--update` 的 `write` 重新生成整个文件——那样会丢失原工作表名（如 Sheet2）以及字体、列宽、合并单元格等全部样式，且可能丢数据。确需覆盖重建时由用户明确要求并加 `--force`。
+- **在原工作簿里新增一个 Sheet（而非重建）**：用 `write --newsheet [名称] 内容`。它会在已存在的工作簿中追加一个新工作表（名称省略时自动 Sheet2/Sheet3…，指定名称已存在则报错），与 Sheet1 等原有工作表并存，且完整保留其字体/列宽/合并单元格/数字格式等样式。xlsx 走 ExcelJS 读写、保样式最完整；xls 走 SheetJS、样式为尽力保留。该命令只对**已存在**的文件生效，目标不存在时应改用普通 `write` 新建。
 - **颜色取值**：
   - 名称：`green` / `lightgreen` / `yellow` / `lightyellow` / `red` / `lightred` / `blue` / `lightblue` / `gray`(grey) / `orange` / `white`
   - 或十六进制 `#RRGGBB`（也可带 Alpha 写成 `FFRRGGBB`）

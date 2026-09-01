@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeSanitize from 'rehype-sanitize'
 import rehypeHighlight from 'rehype-highlight'
-import type { AIAgentMode, AIConversation, AIMessage, AIProviderConfig, AIToolRun } from '@shared/ai-types'
+import type { AIAgentMode, AIConversation, AIMessage, AIProviderConfig, AIToolRun, SavedPrompt } from '@shared/ai-types'
 import { OA_ORIGIN } from '@shared/constants'
 import { useStore } from '../../store'
 
@@ -56,6 +56,86 @@ export function ChatPanel({ disabled }: Props) {
   // 刻意不做持久化：Build 是高风险模式，每次启动都回到 mc，由用户主动切换。
   const [mode, setMode] = useState<AIAgentMode>('mc')
   const [notice, setNotice] = useState('')
+  // 用户存储的自定义提示词（快捷调用）：点击填入输入框，用户修改后自行发送
+  const [savedPrompts, setSavedPrompts] = useState<SavedPrompt[]>([])
+  const [promptPanelOpen, setPromptPanelOpen] = useState(false)
+  const [managerOpen, setManagerOpen] = useState(false)
+  const [editingPrompt, setEditingPrompt] = useState<SavedPrompt | null>(null)
+  const [formTitle, setFormTitle] = useState('')
+  const [formText, setFormText] = useState('')
+  const promptPanelRef = useRef<HTMLDivElement | null>(null)
+  const promptToggleRef = useRef<HTMLButtonElement | null>(null)
+  useEffect(() => {
+    window.mcApi.ai.listPrompts().then((r: SavedPrompt[]) => setSavedPrompts(r || [])).catch(() => {})
+  }, [])
+  useEffect(() => {
+    if (!promptPanelOpen) return
+    const onDocClick = (e: MouseEvent) => {
+      if (!promptPanelRef.current || !promptToggleRef.current) return
+      if (!promptPanelRef.current.contains(e.target as Node) && !promptToggleRef.current.contains(e.target as Node)) {
+        setPromptPanelOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onDocClick)
+    return () => document.removeEventListener('mousedown', onDocClick)
+  }, [promptPanelOpen])
+  const refreshPrompts = async () => {
+    try {
+      const list = await window.mcApi.ai.listPrompts()
+      setSavedPrompts(list || [])
+    } catch { /* 忽略 */ }
+  }
+  const applyPrompt = (p: SavedPrompt) => { setInput(p.text); setPromptPanelOpen(false) }
+  const saveCurrentAsPrompt = async () => {
+    const text = input.trim()
+    if (!text) return
+    try {
+      await window.mcApi.ai.savePrompt({ text })
+      await refreshPrompts()
+      setPromptPanelOpen(false)
+    } catch { /* 忽略 */ }
+  }
+  const removePrompt = async (id: string) => {
+    try {
+      await window.mcApi.ai.deletePrompt(id)
+      await refreshPrompts()
+    } catch { /* 忽略 */ }
+  }
+  const openManager = () => {
+    setPromptPanelOpen(false)
+    setManagerOpen(true)
+    setEditingPrompt(null)
+    setFormTitle('')
+    setFormText('')
+  }
+  const closeManager = () => {
+    setManagerOpen(false)
+    setEditingPrompt(null)
+    setFormTitle('')
+    setFormText('')
+  }
+  const startEdit = (p: SavedPrompt) => {
+    setEditingPrompt(p)
+    setFormTitle(p.title)
+    setFormText(p.text)
+    setManagerOpen(true)
+    setPromptPanelOpen(false)
+  }
+  const savePromptFromForm = async () => {
+    const text = formText.trim()
+    if (!text) return
+    try {
+      if (editingPrompt) {
+        await window.mcApi.ai.updatePrompt({ id: editingPrompt.id, text, title: formTitle || text })
+      } else {
+        await window.mcApi.ai.savePrompt({ text, title: formTitle || text })
+      }
+      await refreshPrompts()
+      setEditingPrompt(null)
+      setFormTitle('')
+      setFormText('')
+    } catch { /* 忽略 */ }
+  }
   const bottomRef = useRef<HTMLDivElement | null>(null)
   const messagesRef = useRef<HTMLDivElement | null>(null)
   // 每次发送生成，新会话还没拿到 conversationId 时也能靠它取消
@@ -181,6 +261,8 @@ export function ChatPanel({ disabled }: Props) {
       if (event.type === 'done') {
         markStreaming(event.conversationId, false)
         if (isActive) {
+          // 把 AI 回复的时间戳更新为「回复完成」时刻，而不是请求发起时刻
+          setMessages(prev => prev.map(m => m.id === event.messageId ? { ...m, createdAt: Date.now() } : m))
           setStopping(false)
           if (event.reason === 'timeout') setNotice(t('aiTimeout'))
           else if (event.reason === 'stopped') setNotice(t('aiStopped'))
@@ -525,15 +607,54 @@ export function ChatPanel({ disabled }: Props) {
               ))}
             </div>
           )}
-          <textarea
-            value={input}
-            placeholder={disabled ? t('aiLoginRequired') : t('aiInputPh')}
-            disabled={disabled}
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit() }
-            }}
-          />
+          <div className="ai-composer-input-wrap">
+            <button
+              type="button"
+              ref={promptToggleRef}
+              className={`ai-prompt-toggle${promptPanelOpen ? ' open' : ''}`}
+              title="快捷提示词"
+              onClick={() => setPromptPanelOpen(v => !v)}
+            >+</button>
+            {promptPanelOpen && (
+              <div ref={promptPanelRef} className="ai-prompt-panel">
+                <div className="ai-prompt-list">
+                  {savedPrompts.length === 0 ? (
+                    <div className="ai-prompt-empty">暂无保存的提示词</div>
+                  ) : (
+                    savedPrompts.map(p => (
+                      <div key={p.id} className="ai-prompt-item">
+                        <button
+                          type="button"
+                          className="ai-prompt-item-title"
+                          title={p.text}
+                          onClick={() => applyPrompt(p)}
+                        >{p.title || p.text.slice(0, 20)}</button>
+                        <div className="ai-prompt-item-actions">
+                          <button type="button" className="ai-prompt-item-action" onClick={() => startEdit(p)}>编辑</button>
+                          <button type="button" className="ai-prompt-item-action danger" onClick={() => removePrompt(p.id)}>删除</button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+                <div className="ai-prompt-panel-foot">
+                  <button type="button" className="mq-btn ghost" onClick={openManager}>管理提示词</button>
+                  {input.trim() && (
+                    <button type="button" className="mq-btn ghost" onClick={saveCurrentAsPrompt}>保存当前</button>
+                  )}
+                </div>
+              </div>
+            )}
+            <textarea
+              value={input}
+              placeholder={disabled ? t('aiLoginRequired') : t('aiInputPh')}
+              disabled={disabled}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit() }
+              }}
+            />
+          </div>
           <div className="ai-composer-actions">
             <span className="ai-title">{title}</span>
             {streaming
@@ -544,6 +665,53 @@ export function ChatPanel({ disabled }: Props) {
           </div>
         </div>
       </section>
+      {managerOpen && (
+        <div className="ai-prompt-modal-overlay" onClick={closeManager}>
+          <div className="ai-prompt-modal" onClick={e => e.stopPropagation()}>
+            <div className="ai-prompt-modal-head">管理提示词</div>
+            <div className="ai-prompt-modal-body">
+              <div className="ai-prompt-form">
+                <input
+                  className="ai-prompt-form-title"
+                  placeholder="标题（可选，默认取内容前 30 字）"
+                  value={formTitle}
+                  onChange={e => setFormTitle(e.target.value)}
+                />
+                <textarea
+                  className="ai-prompt-form-text"
+                  placeholder="提示词内容"
+                  value={formText}
+                  onChange={e => setFormText(e.target.value)}
+                  rows={6}
+                />
+                <div className="ai-prompt-form-actions">
+                  <button type="button" className="mq-btn accent" onClick={savePromptFromForm} disabled={!formText.trim()}>
+                    {editingPrompt ? '保存修改' : '新增提示词'}
+                  </button>
+                  <button type="button" className="mq-btn ghost" onClick={() => { setEditingPrompt(null); setFormTitle(''); setFormText('') }}>重置</button>
+                  <button type="button" className="mq-btn ghost" onClick={closeManager}>关闭</button>
+                </div>
+              </div>
+              {savedPrompts.length > 0 && (
+                <div className="ai-prompt-manager-list">
+                  {savedPrompts.map(p => (
+                    <div key={p.id} className="ai-prompt-manager-item">
+                      <div className="ai-prompt-manager-info">
+                        <div className="ai-prompt-manager-title">{p.title || p.text.slice(0, 20)}</div>
+                        <div className="ai-prompt-manager-text" title={p.text}>{p.text}</div>
+                      </div>
+                      <div className="ai-prompt-manager-actions">
+                        <button type="button" className="mq-btn ghost" onClick={() => startEdit(p)}>编辑</button>
+                        <button type="button" className="mq-btn ghost danger" onClick={() => removePrompt(p.id)}>删除</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -629,13 +797,13 @@ async function copyText(text: string): Promise<boolean> {
   } catch { return false }
 }
 
-// 把消息时间戳格式化为 YY:MM:DD HH:MM:SS（按本机时区）
+// 把消息时间戳格式化为 YYYY/MM/DD HH:MM:SS（按本机时区，年份补全为 4 位；日期用斜杠、时间用冒号）
 function fmtDate(ts?: number): string {
   if (!ts) return ''
   const d = new Date(ts)
   const p = (n: number) => String(n).padStart(2, '0')
-  const yy = String(d.getFullYear()).slice(-2)
-  return `${yy}:${p(d.getMonth() + 1)}:${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+  const yyyy = String(d.getFullYear())
+  return `${yyyy}/${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
 }
 
 function MessageItem({ message, thinking }: { message: AIMessage; thinking?: boolean }) {

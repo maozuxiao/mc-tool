@@ -403,6 +403,8 @@ export async function sendMessage(payload: AISendPayload): Promise<void> {
     }
     send({ type: 'error', conversationId, messageId: assistant.id, message: e.message })
   } finally {
+    // 记录 AI 回复的完成时间（含停止/出错），让会话时间戳反映「回复完成」而非「请求发起」。
+    try { updateMessage(assistant.id, { createdAt: Date.now() }) } catch { /* 落库失败不影响本次回复 */ }
     controllers.delete(conversationId)
     toolControllers.delete(conversationId)
     activeMessageIds.delete(assistant.id)
