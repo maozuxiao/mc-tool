@@ -1,4 +1,5 @@
 import { runSkill, SKILL_FILE, skillExists } from './skillRuntime'
+import { downloadToDir } from './fileDownload'
 import type { AIExtraRoot } from '@shared/ai-types'
 
 const SCRIPT = 'file_office.js'
@@ -190,14 +191,47 @@ export const FILE_OPEN_FOLDER_TOOL_DEFINITION = {
   }
 }
 
-/** Build 模式下发的全部文件工具（含批量读取与打开目录） */
+// 下载文件到指定目录：下载在主进程完成（Cookie 不出主进程），
+// 目录受已授权工作区白名单约束，目录不存在自动创建、同名文件自动重命名。
+export const FILE_DOWNLOAD_TOOL_DEFINITION = {
+  type: 'function',
+  function: {
+    name: 'file_download',
+    description: '把 URL 下载到指定目录。url 为必填（OA 规格文件链接或任意 http(s) 链接），dir 为必填目标目录（绝对路径或「别名/路径」，必须在已授权工作区内）。' +
+      'OA 域文件会自动复用当前 OA 登录态，未登录时返回 NEED_RELOGIN（此时提示用户先在应用内登录 OA）。' +
+      'dir 不存在会自动创建；同名文件自动重命名为「名称(1).ext」「名称(2).ext」，不会覆盖已有文件。' +
+      '可选 name 指定保存的文件名，省略则由链接推断（OA 规格文件取 fileName= 参数）。' +
+      '单次下载上限 200MB、超时 60 秒。若返回 PATH_OUTSIDE_ROOT 说明目录不在已授权工作区内，应引导用户用 open_folder 打开该目录后再下载。',
+    parameters: {
+      type: 'object',
+      properties: {
+        url: {
+          type: 'string',
+          description: '要下载的文件 URL。OA 规格文件链接（oa.streamax.com 的 specificationFileDownload）或任意 http/https 直链'
+        },
+        dir: {
+          type: 'string',
+          description: '保存到的目录。若用户已给出完整绝对路径（含盘符，如 D:/资料/规格文件），必须原样完整传入；否则可用 open_folder 返回的「别名/路径」；必须在已授权工作区内'
+        },
+        name: {
+          type: 'string',
+          description: '可选。保存时使用的文件名（可含扩展名）；省略则由 URL 推断'
+        }
+      },
+      required: ['url', 'dir']
+    }
+  }
+}
+
+/** Build 模式下发的全部文件工具（含批量读取、打开目录、下载） */
 export const FILE_TOOL_DEFINITIONS = [
   FILE_READ_TOOL_DEFINITION,
   FILE_LIST_TOOL_DEFINITION,
   FILE_SEARCH_TOOL_DEFINITION,
   FILE_WRITE_TOOL_DEFINITION,
   FILE_READ_BATCH_TOOL_DEFINITION,
-  FILE_OPEN_FOLDER_TOOL_DEFINITION
+  FILE_OPEN_FOLDER_TOOL_DEFINITION,
+  FILE_DOWNLOAD_TOOL_DEFINITION
 ]
 
 export function fileSkillAvailable(): boolean {
@@ -248,6 +282,25 @@ export async function fileSkillRead(opts: FileReadOptions): Promise<any> {
     signal: opts.signal
   })
   return json
+}
+
+/**
+ * 下载 URL 到指定目录。
+ * 由主进程的 downloadToDir 完成：目录归属校验（必须在已授权工作区内）、
+ * 目录不存在自动创建、同名自动重命名、OA 文件自动带登录态。
+ * 下载不经过子进程脚本，Cookie 始终留在主进程内。
+ */
+export async function fileSkillDownload(opts: {
+  url: string
+  dir: string
+  name?: string
+  roots: AIExtraRoot[]
+}): Promise<any> {
+  const url = String(opts?.url || '').trim()
+  const dir = String(opts?.dir || '').trim()
+  if (!url) return { ok: false, error: 'MISSING_ARG', message: '缺少 url 参数' }
+  if (!dir) return { ok: false, error: 'MISSING_ARG', message: '缺少 dir 参数' }
+  return downloadToDir({ url, dir, name: opts?.name, roots: opts.roots })
 }
 
 /**

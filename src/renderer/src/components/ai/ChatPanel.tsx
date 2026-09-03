@@ -21,6 +21,23 @@ interface ProviderBundle {
 
 const MD_EDITOR_URL = 'https://maozuxiao.github.io/Streamax/Tools/KattyBB_MD_Editor/'
 
+// 与 CSS 的断点保持一致：窄窗口下会话栏改为「抽屉」浮层，宽窗口下沿用 44px 竖条收起
+const NARROW_QUERY = '(max-width: 760px)'
+function useIsNarrow(): boolean {
+  const [narrow, setNarrow] = useState(() => {
+    try { return window.matchMedia(NARROW_QUERY).matches } catch { return false }
+  })
+  useEffect(() => {
+    try {
+      const mq = window.matchMedia(NARROW_QUERY)
+      const onChange = (e: MediaQueryListEvent) => setNarrow(e.matches)
+      mq.addEventListener('change', onChange)
+      return () => mq.removeEventListener('change', onChange)
+    } catch { /* 不支持 matchMedia 时退化为非窄窗 */ }
+  }, [])
+  return narrow
+}
+
 interface Props {
   disabled: boolean
 }
@@ -56,6 +73,21 @@ export function ChatPanel({ disabled }: Props) {
   // 刻意不做持久化：Build 是高风险模式，每次启动都回到 mc，由用户主动切换。
   const [mode, setMode] = useState<AIAgentMode>('mc')
   const [notice, setNotice] = useState('')
+  // 会话历史栏收起/展开：记住用户偏好，跨启动保留
+  const [sideCollapsed, setSideCollapsed] = useState(() => {
+    try { return localStorage.getItem('ai.sidebarCollapsed') === '1' } catch { return false }
+  })
+  const toggleSidebar = () => {
+    setSideCollapsed(v => {
+      const next = !v
+      try { localStorage.setItem('ai.sidebarCollapsed', next ? '1' : '0') } catch { /* 忽略 */ }
+      return next
+    })
+  }
+  // 窄窗口：会话栏改为抽屉浮层（不占布局高度），由工具栏 ☰/遮罩/关闭按钮控制显隐
+  const isNarrow = useIsNarrow()
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const closeDrawer = useCallback(() => setDrawerOpen(false), [])
   // 用户存储的自定义提示词（快捷调用）：点击填入输入框，用户修改后自行发送
   const [savedPrompts, setSavedPrompts] = useState<SavedPrompt[]>([])
   const [promptPanelOpen, setPromptPanelOpen] = useState(false)
@@ -476,16 +508,37 @@ export function ChatPanel({ disabled }: Props) {
   }, [modelOptions, modelId])
 
   return (
-    <div className="ai-page">
+    <div className={`ai-page${sideCollapsed ? ' side-collapsed' : ''}${isNarrow && drawerOpen ? ' side-open' : ''}`}>
+      {isNarrow && drawerOpen && (
+        <div className="ai-side-backdrop" onClick={closeDrawer} />
+      )}
       <aside className="ai-sidebar">
         <div className="ai-sidebar-head">
-          <span>{t('viewAi')}</span>
-          <button className="mq-btn" onClick={() => { setActiveConversation(null); setMessages([]) }}>{t('aiNewChat')}</button>
+          {/* 宽窗口：« 收起为竖条 / » 展开；窄窗口：× 关闭抽屉 */}
+          <button
+            type="button"
+            className="ai-side-toggle"
+            title={isNarrow ? t('aiSideCollapse') : (sideCollapsed ? t('aiSideExpand') : t('aiSideCollapse'))}
+            onClick={isNarrow ? closeDrawer : toggleSidebar}
+          >{isNarrow ? '×' : (sideCollapsed ? '»' : '«')}</button>
+          {(!sideCollapsed || isNarrow) && <span>{t('viewAi')}</span>}
+          {!sideCollapsed && (
+            <button className="mq-btn" onClick={() => { setActiveConversation(null); setMessages([]); if (isNarrow) setDrawerOpen(false) }}>{t('aiNewChat')}</button>
+          )}
+          {sideCollapsed && !isNarrow && (
+            <button
+              type="button"
+              className="ai-side-new"
+              title={t('aiNewChat')}
+              onClick={() => { setActiveConversation(null); setMessages([]) }}
+            >+</button>
+          )}
         </div>
         <div className="ai-history">
           {conversations.map(c => (
             <div key={c.id} className={`ai-history-item${c.id === conversationId ? ' active' : ''}`}>
-              <button className="ai-history-title" onClick={() => openConversation(c.id)}>{c.title}</button>
+              {/* 窄窗口下点会话后自动收起抽屉，避免浮层挡住对话区 */}
+              <button className="ai-history-title" onClick={() => { void openConversation(c.id); setDrawerOpen(false) }}>{c.title}</button>
               <button className="ai-history-delete" onClick={() => removeConversation(c.id)}>×</button>
             </div>
           ))}
@@ -503,6 +556,13 @@ export function ChatPanel({ disabled }: Props) {
 
       <section className="ai-main card">
         <div className="ai-toolbar">
+          {/* 窄窗口专用：唤起会话抽屉（宽窗口由 CSS 隐藏） */}
+          <button
+            type="button"
+            className="ai-side-menu-btn"
+            title={t('aiSideExpand')}
+            onClick={() => setDrawerOpen(true)}
+          >☰</button>
           <select className="ai-select" value={providerId} onChange={e => setProviderId(e.target.value)}>
             {providers.providers.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>

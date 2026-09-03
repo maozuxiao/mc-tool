@@ -59,6 +59,65 @@
   line-height: 1;
   font-size: 12.5px;
 }
+/* 会话历史栏收起/展开 */
+.ai-sidebar-head > span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ai-side-toggle,
+.ai-side-new {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--animal-line);
+  border-radius: 8px;
+  background: #fbf7ef;
+  color: var(--animal-text);
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: background .12s, color .12s;
+}
+.ai-side-toggle:hover, .ai-side-new:hover { background: var(--animal-green); color: #fff; }
+/* 收起：左侧栏变成 44px 竖条，只保留「展开」与「新对话」两个圆角小按钮 */
+.ai-page.side-collapsed { grid-template-columns: 44px minmax(0, 1fr); }
+.ai-page.side-collapsed .ai-sidebar-head {
+  border-bottom: none;
+  padding: 8px 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+}
+.ai-page.side-collapsed .ai-history,
+.ai-page.side-collapsed .ai-sidebar-foot { display: none; }
+/* 抽屉相关元素只在窄窗口出现，宽窗口保持原布局（不显示 ☰ 与遮罩） */
+.ai-side-menu-btn,
+.ai-side-backdrop { display: none; }
+.ai-side-menu-btn {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--animal-line);
+  border-radius: 8px;
+  background: #fbf7ef;
+  color: var(--animal-text);
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: background .12s, color .12s;
+}
+.ai-side-menu-btn:hover { background: var(--animal-green); color: #fff; }
 .ai-history-item {
   display: flex;
   align-items: center;
@@ -559,7 +618,57 @@
 }
 .ai-queue-remove:hover { background: rgba(0, 0, 0, .06); color: #b75d4d; }
 
+/* 小窗口优化：会话栏改为左侧抽屉浮层（不占布局高度，避免横向滚动条） */
 @media (max-width: 760px) {
-  .ai-page { grid-template-columns: 1fr; }
-  .ai-sidebar { max-height: 160px; }
+  .ai-page { grid-template-columns: 1fr; gap: 10px; padding-bottom: 72px; }
+  /* 抽屉态：单列铺满，侧栏脱离文档流（.side-collapsed 的两列规则优先级更高，需显式覆盖） */
+  .ai-page,
+  .ai-page.side-collapsed { grid-template-columns: 1fr; }
+
+  /* 侧栏浮在内容之上：默认滑出屏幕左侧，.side-open 时滑入 */
+  .ai-page { position: relative; }
+  .ai-sidebar {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 50;
+    width: 260px;
+    max-width: 82%;
+    max-height: none;
+    border-radius: 14px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, .18);
+    transform: translateX(calc(-100% - 20px));
+    transition: transform .22s cubic-bezier(.4, 0, .2, 1);
+  }
+  .ai-page.side-open .ai-sidebar { transform: translateX(0); }
+  /* 抽屉里始终显示完整内容（不受宽窗「收起竖条」规则影响） */
+  .ai-page .ai-sidebar-head,
+  .ai-page.side-collapsed .ai-sidebar-head {
+    flex-direction: row;
+    align-items: center;
+    padding: 12px 12px;
+    border-bottom: 1px solid var(--animal-line);
+  }
+  .ai-page .ai-history,
+  .ai-page.side-collapsed .ai-history { display: block; flex: 1; overflow-y: auto; padding: 8px; }
+  .ai-page .ai-sidebar-foot,
+  .ai-page.side-collapsed .ai-sidebar-foot { display: flex; border-top: 1px solid var(--animal-line); padding: 10px; }
+
+  /* 遮罩：点空白处收起抽屉 */
+  .ai-side-backdrop {
+    display: block;
+    position: absolute;
+    inset: 0;
+    z-index: 40;
+    background: rgba(0, 0, 0, .28);
+  }
+  /* 窄窗显示 ☰ 唤起按钮 */
+  .ai-side-menu-btn { display: inline-flex; }
+
+  /* 工具栏紧凑化：减小内边距，输入控件可收缩换行 */
+  .ai-toolbar { padding: 10px 12px; gap: 6px; }
+  .ai-select { max-width: 150px; }
+  .ai-model-input { width: 180px; }
+  .ai-composer textarea { min-height: 60px; }
 }

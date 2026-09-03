@@ -4,7 +4,7 @@
 
 - 仓库：https://github.com/maozuxiao/mc-tool
 - 技术栈：Electron 33 + electron-vite + React 18 + TypeScript + Zustand，UI 组件库 [`animal-island-ui`](https://www.npmjs.com/package/animal-island-ui)
-- 当前版本：`1.0.29`（`package.json` 的 `version` 为准）
+- 当前版本：`1.0.30`（`package.json` 的 `version` 为准）
 
 ---
 
@@ -134,6 +134,7 @@
 - 输入框 `Enter` 发送，`Shift + Enter` 换行。
 - 回复为流式输出，Markdown 渲染（表格、代码高亮）；生成中可点「停止」中断。
 - 左侧「+ 新对话」开新会话，点击历史记录可回看，`×` 删除。历史存在 `userData/ai-history.json`。
+- **会话栏可收起 / 展开**：点标题栏左侧按钮收起为窄条（仅留展开与新建），再点展开，偏好跨启动保留。窗口较窄（≤760px）时会话栏自动变为**左侧滑出抽屉**（不占内容区高度），由工具栏 `☰` 唤起，点遮罩、`×` 或选中某个会话都会自动收起。
 - 每条消息带时间戳，格式 `YY:MM:DD HH:MM:SS`。
 
 **③ 让 AI 查物料（MC Skill）**
@@ -153,6 +154,7 @@
 - **按关键列更新**：对已有 Excel 指定关键列（如「物料代码」），模型只把改动落地到匹配行，其余行保持不动（`update` 模式）。
 - **整行染色**：更新 / 写入时可用 `__rowFill` / `rowFill` / `行色` / `整行颜色` / `rowColor` 键指定 `green` / `yellow` / `red`（或具体 ARGB 色），把该关键列所在行从 A 列到工作表最右列整体重染、覆盖旧色；未指定颜色键时回退到该行最右侧有填充的单元格颜色。
 - **目录与搜索**：`file_search` 支持正则（`--regex`）、文件名通配符（`*`/`?`）、按类型过滤（`--glob` / `--ext`），类似 FileLocatorPro 的保底检索。
+- **下载文件到目录**：`file_download` 把 URL 下载到你指定的目录。支持 OA 物料规格文件链接（自动复用当前 OA 登录态）与任意 http/https 直链；目录不存在自动创建，同名文件自动重命名（`名称(1).ext`）**不覆盖**已有文件，单次上限 200MB、超时 60 秒。目标目录必须在已授权工作区内，越界会提示先用 `open_folder` 打开该目录；OA 未登录时会提示先在应用内登录 OA。
 
 > 文件读写同样由主进程执行，文件不出主进程；首次调用会自动准备 Node 22 运行时（约 1~2 分钟，需联网一次）。
 
@@ -317,9 +319,9 @@ npm run pack:all   # 全平台
 ```
 dist/
 ├─ latest.yml                            # 自动更新元数据
-├─ MC物料查询 Setup 1.0.29.exe            # NSIS 安装包
-├─ MC物料查询 Setup 1.0.29.exe.blockmap  # 增量更新块映射
-└─ MC物料查询 1.0.29.exe                  # 便携版
+├─ MC物料查询 Setup 1.0.30.exe            # NSIS 安装包
+├─ MC物料查询 Setup 1.0.30.exe.blockmap  # 增量更新块映射
+└─ MC物料查询 1.0.30.exe                  # 便携版
 ```
 
 > macOS 交叉编译在 Windows 上不可靠，DMG 请在 macOS 上打包。

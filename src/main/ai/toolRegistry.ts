@@ -2,7 +2,8 @@ import type { AIAgentMode, AIExtraRoot } from '@shared/ai-types'
 import { MC_QUERY_TOOL_DEFINITION, runMcQuery, type McRunSink } from './mcSkill'
 import {
   FILE_TOOL_DEFINITIONS, fileSkillRead, runFileSkillCommand,
-  FILE_READ_BATCH_TOOL_DEFINITION, FILE_OPEN_FOLDER_TOOL_DEFINITION
+  FILE_READ_BATCH_TOOL_DEFINITION, FILE_OPEN_FOLDER_TOOL_DEFINITION,
+  FILE_DOWNLOAD_TOOL_DEFINITION, fileSkillDownload
 } from './fileSkill'
 
 export interface OpenFolderResult {
@@ -113,6 +114,16 @@ const REGISTRY: Record<string, ToolEntry> = {
       if (!ctx.requestRoot) return { ok: false, error: 'NO_REQUEST_ROOT', message: '当前环境不支持打开目录' }
       return ctx.requestRoot(p)
     }
+  },
+  // 下载文件到目录：主进程执行，目录受授权工作区约束
+  [FILE_DOWNLOAD_TOOL_DEFINITION.function.name]: {
+    definition: FILE_DOWNLOAD_TOOL_DEFINITION,
+    run: async (input, ctx) => fileSkillDownload({
+      url: input?.url,
+      dir: input?.dir,
+      name: input?.name,
+      roots: ctx.allowedRoots
+    })
   }
 }
 
@@ -146,6 +157,7 @@ function buildFileSummary(name: string, result: any): string {
     case 'file_list': return `已列出 ${result.count ?? 0} 项`
     case 'file_search': return `找到 ${result.count ?? 0} 个匹配`
     case 'file_write': return `已写入 ${result.relative || result.path}`
+    case 'file_download': return `已下载 ${result.relative || result.savedPath || ''}（${result.size ?? 0} 字节）`
     case 'file_read_batch': return `已批量读取 ${result.count ?? 0} 个文件`
     case 'open_folder':
       return result.ok ? `已打开目录（别名 ${result.alias}）` : `打开目录被拒绝：${result.error || ''}`

@@ -15,7 +15,7 @@ function load(): SavedPrompt[] {
   } catch {
     cache = []
   }
-  return cache
+  return cache || []
 }
 
 function persist(list: SavedPrompt[]): SavedPrompt[] {

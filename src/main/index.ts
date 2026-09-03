@@ -9,12 +9,13 @@ import { OA_LOGIN_URL, OA_ORIGIN } from '@shared/constants'
 import { IPC } from '@shared/types'
 import { initAutoUpdater } from './updater'
 import { registerAIIPC } from './ai/aiIpc'
-
-let mainWindow: BrowserWindow | null = null
 // 使用持久化 partition，让 OA 登录 Cookie 自动写入磁盘并跨启动保留。
 // 这是最可靠的方案：Electron 会为每个 persist:* partition 维护独立的
 // Cookie/Storage 目录，进程退出后依然保留，无需手动文件备份。
-const PARTITION = 'persist:mc-query'
+// 定义收敛在 ai/fileDownload.ts（手动下载与 AI 下载共用同一份）。
+import { downloadOaBuffer, PARTITION } from './ai/fileDownload'
+
+let mainWindow: BrowserWindow | null = null
 const APP_ID = 'com.streamax.mcquery'
 
 // 开发时从项目根目录 build/ 读取；打包后从 resources/ 读取（extraResources 配置）
@@ -1610,46 +1611,9 @@ ipcMain.handle(IPC.OA_FETCH, async (_e, url: string): Promise<any> => {
 ipcMain.handle(IPC.OA_FILE_DOWNLOAD, async (_e, payload: { url: string; filename?: string }): Promise<any> => {
   const { url, filename } = payload || {}
   if (!url) return { ok: false, error: 'empty url' }
-  const sess = session.fromPartition(PARTITION)
-  const cookies = await sess.cookies.get({})
-  const cookieStr = cookies.map(c => `${c.name}=${c.value}`).join('; ')
-
   try {
-    const buf: Buffer = await new Promise((resolve, reject) => {
-      const reqUrl = new URL(url)
-      const useHttps = reqUrl.protocol === 'https:'
-      const lib = useHttps ? https : http
-      const req = lib.request({
-        hostname: reqUrl.hostname,
-        port: reqUrl.port || (useHttps ? 443 : 80),
-        path: reqUrl.pathname + reqUrl.search,
-        method: 'GET',
-        headers: {
-          'Cookie': cookieStr,
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
-          'Accept': '*/*',
-          'Referer': OA_ORIGIN
-        }
-      }, (res) => {
-        // 若 OA 要求重新登录（302 到 IAM 认证），说明会话已失效，无法下载
-        const loc = res.headers.location
-        const isReauth = loc && /iam\.streamax\.com/i.test(loc) && /(authCenter\/authenticate|state=IAM_OA_SSO|authnEngine|idp\/)/i.test(loc)
-        if (isReauth) {
-          reject(new Error('NEED_RELOGIN'))
-          return
-        }
-        if ((res.statusCode || 0) >= 400) {
-          reject(new Error('HTTP ' + res.statusCode))
-          return
-        }
-        const chunks: Buffer[] = []
-        res.on('data', c => chunks.push(Buffer.from(c)))
-        res.on('end', () => resolve(Buffer.concat(chunks)))
-      })
-      req.on('error', reject)
-      req.setTimeout(30000, () => { req.destroy(); reject(new Error('download timeout')) })
-      req.end()
-    })
+    // 复用与 AI file_download 相同的下载核心：自动带 OA 登录态、识别会话失效、跟随重定向
+    const buf: Buffer = await downloadOaBuffer(url)
 
     // 让用户选择保存位置；默认文件名优先用链接里的 fileName=，其次 payload.filename
     let defaultName = filename || 'specification-file'
