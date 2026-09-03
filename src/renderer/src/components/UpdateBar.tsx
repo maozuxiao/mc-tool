@@ -27,7 +27,9 @@ export function UpdateBar() {
   if (!update.hasUpdate) return null
 
   const pct = Math.min(100, Math.max(0, update.progress ?? 0))
-  const downloading = !update.downloaded && (update.downloading || (pct > 0 && pct < 100))
+  // 满了也算「收尾中」：pct>=100 但还没收到 update-downloaded 时，
+  // 不把「下载」按钮交回用户（否则再点一次就是整包重下）
+  const downloading = !update.downloaded && (update.downloading || pct > 0)
 
   return (
     <div className="update-bar">

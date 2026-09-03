@@ -7,7 +7,7 @@ import https from 'https'
 import zlib from 'zlib'
 import { OA_LOGIN_URL, OA_ORIGIN } from '@shared/constants'
 import { IPC } from '@shared/types'
-import { initAutoUpdater } from './updater'
+import { initAutoUpdater, isUpdateDownloaded, startUpdateDownload } from './updater'
 import { registerAIIPC } from './ai/aiIpc'
 // 使用持久化 partition，让 OA 登录 Cookie 自动写入磁盘并跨启动保留。
 // 这是最可靠的方案：Electron 会为每个 persist:* partition 维护独立的
@@ -658,11 +658,15 @@ ipcMain.handle(IPC.CHECK_UPDATE, async () => {
   }
 })
 
-// 用户点击「下载」后，由主进程真正开始下载
+// 用户点击「下载」后，由主进程真正开始下载。
+// 重入保护收敛在 updater.ts 的 startUpdateDownload()：electron-updater 的
+// downloadUpdate() 被重复调用会整包重新下载（「进度条满了以后又重新跑一遍」），
+// 顶栏「下载」按钮与帮助菜单「立即下载」两条路径都从这里走，重复调用直接短路。
 ipcMain.handle(IPC.START_DOWNLOAD, async () => {
   try {
-    await autoUpdater.downloadUpdate()
-    return { ok: true }
+    const alreadyDownloaded = isUpdateDownloaded()
+    if (!alreadyDownloaded) await startUpdateDownload()
+    return { ok: true, alreadyDownloaded }
   } catch (e: any) {
     debugLog('[START_DOWNLOAD] error: ' + (e?.message || e))
     return { ok: false, error: e?.message || String(e) }
@@ -1701,17 +1705,31 @@ ipcMain.handle(IPC.INSTALL_UPDATE, () => {
 // 那两个是同步阻塞渲染进程的，弹窗若被主窗口挡住（或用户没留意到），
 // 整个界面会表现为「全局无法输入」，只能重启应用才恢复。
 // showMessageBox 由主进程弹出、正确挂在 mainWindow 上，且不阻塞渲染进程。
+// 按钮 / 标题随界面语言：渲染层启动与切换语言时经 setUiLang 同步过来；
+// 未同步前按系统语言兜底（中文系统给中文按钮，其余给英文）。
+let uiLang: '' | 'zh' | 'en' = ''
+ipcMain.on('dialog:setLang', (_e, lang: string) => {
+  uiLang = lang === 'en' ? 'en' : 'zh'
+})
+function dialogLang(): { title: string; ok: string; cancel: string } {
+  const lang = uiLang
+    || (app.getLocale().toLowerCase().startsWith('zh') ? 'zh' : 'en')
+  return lang === 'en'
+    ? { title: 'MC Material Query', ok: 'OK', cancel: 'Cancel' }
+    : { title: 'MC物料查询', ok: '确定', cancel: '取消' }
+}
 ipcMain.handle('dialog:message', async (_e, opts: {
   message?: string
   title?: string
   type?: 'none' | 'info' | 'error' | 'warning' | 'question'
 }) => {
   if (!mainWindow || mainWindow.isDestroyed()) return
+  const L = dialogLang()
   await dialog.showMessageBox(mainWindow, {
     type: opts?.type || 'info',
-    title: opts?.title || 'MC物料查询',
+    title: opts?.title || L.title,
     message: String(opts?.message ?? ''),
-    buttons: ['确定'],
+    buttons: [L.ok],
     defaultId: 0,
     cancelId: 0
   })
@@ -1719,11 +1737,12 @@ ipcMain.handle('dialog:message', async (_e, opts: {
 
 ipcMain.handle('dialog:confirm', async (_e, opts: { message?: string; title?: string }) => {
   if (!mainWindow || mainWindow.isDestroyed()) return false
+  const L = dialogLang()
   const res = await dialog.showMessageBox(mainWindow, {
     type: 'question',
-    title: opts?.title || 'MC物料查询',
+    title: opts?.title || L.title,
     message: String(opts?.message ?? ''),
-    buttons: ['取消', '确定'],
+    buttons: [L.cancel, L.ok],
     defaultId: 1,
     cancelId: 0
   })

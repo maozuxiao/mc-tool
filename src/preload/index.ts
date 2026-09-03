@@ -49,6 +49,9 @@ const mcApi = {
   }): Promise<void> => ipcRenderer.invoke('dialog:message', opts),
   showConfirm: (opts: { message: string; title?: string }): Promise<boolean> =>
     ipcRenderer.invoke('dialog:confirm', opts),
+  // 同步当前界面语言给主进程：dialog.showMessageBox 的按钮（确定/OK、取消/Cancel）
+  // 与默认标题随语言切换（原生弹窗不会自己跟随应用内语言设置）
+  setUiLang: (lang: 'zh' | 'en'): void => { ipcRenderer.send('dialog:setLang', lang) },
 
   appVersion: (): string => ipcRenderer.sendSync(IPC.APP_VERSION),
 

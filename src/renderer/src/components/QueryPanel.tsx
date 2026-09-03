@@ -207,6 +207,17 @@ export function QueryPanel({ disabled }: { disabled: boolean }) {
                   const res: any = await checkUpdate()
                   if (!res) return
                   if (res.ok && res.hasUpdate) {
+                    // 下载状态防重：已下载完成直接提示安装；进行中提示正在下载，
+                    // 两种情况都不再触发 startDownload（主进程也有重入保护兜底）
+                    const st = useStore.getState().updateInfo
+                    if (st.downloaded) {
+                      void window.mcApi.showMessage({ message: t('updateDownloaded') })
+                      return
+                    }
+                    if (st.downloading) {
+                      void window.mcApi.showMessage({ message: t('updateDownloading', { p: st.progress ?? 0 }) })
+                      return
+                    }
                     const ok = await window.mcApi.showConfirm({
                       message: t('updateConfirmDownload', { v: res.version || '' })
                     })

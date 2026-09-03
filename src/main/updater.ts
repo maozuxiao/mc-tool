@@ -23,6 +23,27 @@ export interface UpdatePayload {
   message?: string
 }
 
+// 下载重入保护：electron-updater 的 downloadUpdate() 被重复调用会整包重新下载
+// （表现为「进度条满了以后又重新跑一遍」）。这里集中记录状态，供 START_DOWNLOAD 短路。
+let downloadInFlight = false
+let updateDownloadedFlag = false
+
+/** 更新包是否已下载完成 */
+export function isUpdateDownloaded(): boolean {
+  return updateDownloadedFlag
+}
+
+/** 开始下载更新包；已下载完成或下载进行中时直接返回，绝不重复发起 */
+export async function startUpdateDownload(): Promise<void> {
+  if (updateDownloadedFlag || downloadInFlight) return
+  downloadInFlight = true
+  try {
+    await autoUpdater.downloadUpdate()
+  } finally {
+    downloadInFlight = false
+  }
+}
+
 export function initAutoUpdater(win: BrowserWindow) {
   // 不自动下载：检测到更新后由用户在 UI 中点击「下载」再开始下载
   autoUpdater.autoDownload = false
@@ -62,6 +83,7 @@ export function initAutoUpdater(win: BrowserWindow) {
   })
 
   autoUpdater.on('update-downloaded', () => {
+    updateDownloadedFlag = true
     win.webContents.send('update-downloaded', { hasUpdate: true, downloaded: true } as UpdatePayload)
   })
 

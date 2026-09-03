@@ -178,7 +178,12 @@ export const useStore = create<State>((set, get) => ({
   appVersion: (() => { try { return window.mcApi.appVersion() } catch { return '1.0.10' } })(),
 
   t: makeT(initialLang),
-  setLang: (l) => { localStorage.setItem('mc-lang', l); set({ lang: l, t: makeT(l) }) },
+  setLang: (l) => {
+    localStorage.setItem('mc-lang', l)
+    set({ lang: l, t: makeT(l) })
+    // 同步给主进程：原生弹窗（showMessageBox）的按钮与标题跟随界面语言
+    try { window.mcApi.setUiLang(l) } catch { /* 忽略 */ }
+  },
   setLoggedIn: (v) => set({ loggedIn: v }),
   setCheckingLogin: (v) => set({ checkingLogin: v }),
   setLanding: (v) => set({ landing: v }),
@@ -436,7 +441,11 @@ export const useStore = create<State>((set, get) => ({
             hasUpdate: true,
             latest: false,
             version: res.version,
-            downloading: res.downloading || false
+            // 主进程 CHECK_UPDATE 固定返回 downloading:false；正在下载/已下载完成时
+            // 不能被它冲掉，否则进度满后「下载」按钮重现，再点就是整包重下
+            downloading: (s.updateInfo.downloading || s.updateInfo.downloaded)
+              ? s.updateInfo.downloading
+              : (res.downloading || false)
           }
         }))
       } else if (!res?.ok) {
@@ -471,5 +480,9 @@ export const useStore = create<State>((set, get) => ({
     try { window.mcApi.reloadLogin() } catch {}
   }
 }))
+
+// 启动时把上次选择的语言同步给主进程：原生弹窗（showMessageBox）的
+// 按钮「确定/OK」「取消/Cancel」与默认标题需要跟随界面语言
+try { window.mcApi.setUiLang(useStore.getState().lang) } catch { /* 忽略 */ }
 
 export { STATUS_CLS_MAP }
