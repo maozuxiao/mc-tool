@@ -5,6 +5,7 @@ import { dirname, resolve } from 'path'
 import type { AISendPayload, AIExtraRoot as AllowedRoot } from '@shared/ai-types'
 import { resolveMode } from '@shared/ai-types'
 import { getProvider, savePreferences } from './providerStore'
+import { opencodeSessionHeaders } from './providerApi'
 import { mcSkillSystemPrompt } from './mcSkill'
 import { dispatchTool, toolsForMode, type OpenFolderResult } from './toolRegistry'
 import { isInside, dirBlockReason, makeAlias } from './rootGuard'
@@ -215,6 +216,8 @@ async function streamOpenAICompatible(input: {
         signal: fetchController.signal,
         headers: {
           'Content-Type': 'application/json',
+          // OpenCode（Go / Zen）要求每会话带稳定的 x-opencode-session 头，缺头 09/06 起会报错
+          ...opencodeSessionHeaders(config.baseUrl, conversationId),
           ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {})
         },
         body: JSON.stringify(body)

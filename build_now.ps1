@@ -64,7 +64,27 @@ $distDir = Join-Path $PWD 'dist'
 if (-not $NoClean) {
     if (Test-Path -LiteralPath $distDir) {
         Write-Output "清理旧产物：$distDir"
-        Remove-Item -LiteralPath $distDir -Recurse -Force
+        # 容错：先结束可能占用 dist 的残留进程（含托盘常驻实例——关窗不退出会锁住
+        # win-unpacked/resources/app.asar），再删除；删除失败则重试，给进程退出与
+        # 系统释放文件句柄留时间，避免被自己上一轮留下的进程卡死。
+        try { taskkill /IM "MC物料查询.exe" /F 2>$null } catch { }
+        try { Stop-Process -Name 'MC物料查询' -Force -ErrorAction SilentlyContinue } catch { }
+        $cleaned = $false
+        for ($i = 1; $i -le 5; $i++) {
+            try {
+                Remove-Item -LiteralPath $distDir -Recurse -Force -ErrorAction Stop
+                $cleaned = $true
+                break
+            } catch {
+                if ($i -lt 5) {
+                    Write-Output "  dist 仍被占用，重试删除 ($i/5)..."
+                    Start-Sleep -Seconds 1
+                } else {
+                    Write-Output "  无法删除 dist：可能仍有 MC物料查询 进程占用（请到任务管理器结束后再试）。错误：$($_.Exception.Message)"
+                    throw
+                }
+            }
+        }
     }
 }
 
