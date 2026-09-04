@@ -447,6 +447,103 @@ body {
   width: auto !important;
 }
 .lang-btn { min-width: 48px; font-weight: 700; letter-spacing: .5px; }
+
+/* ── 「设置」按钮 + 弹出设置面板（animal-island 配色）────────── */
+.settings-wrap { position: relative; }
+/* 触发按钮与旁边 Select 触发器同风格：奶油底 + 棕字 + 32px 高 */
+.settings-trigger {
+  height: 32px;
+  min-width: 70px;
+  padding: 0 12px;
+  border: 1px solid var(--animal-line);
+  border-radius: 10px;
+  background: #fbf7ef;
+  color: rgb(121, 79, 39);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .12s, box-shadow .12s;
+}
+.settings-trigger:hover,
+.settings-trigger.open {
+  background: #fffdf8;
+  box-shadow: var(--animal-shadow-soft);
+}
+/* 点击面板外的透明遮罩层：收起面板 */
+.settings-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: transparent;
+}
+.settings-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 100;
+  min-width: 300px;
+  padding: 4px 16px 6px;
+  background: var(--animal-cream-2);
+  border: 1px solid var(--animal-line);
+  border-radius: 14px;
+  box-shadow: var(--animal-shadow);
+}
+.settings-panel-title {
+  padding: 10px 0 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--animal-text);
+}
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--animal-line);
+}
+.settings-row:last-child { border-bottom: none; }
+.settings-label {
+  font-size: 12.5px;
+  color: var(--animal-text);
+  white-space: nowrap;
+}
+.settings-label.disabled { color: var(--animal-text-soft); opacity: .7; }
+/* 语言分段选择器：中文 | English */
+.settings-seg {
+  display: inline-flex;
+  border: 1px solid var(--animal-line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fbf7ef;
+}
+.settings-seg button {
+  border: none;
+  background: transparent;
+  color: var(--animal-text);
+  font-size: 12px;
+  padding: 4px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.settings-seg button.active {
+  background: var(--animal-green);
+  color: #fff;
+  font-weight: 600;
+}
+/* 关闭按钮行为小下拉 */
+.settings-select {
+  height: 28px;
+  border: 1px solid var(--animal-line);
+  border-radius: 8px;
+  background: #fbf7ef;
+  color: var(--animal-text);
+  font-size: 12.5px;
+  padding: 0 6px;
+  outline: none;
+  cursor: pointer;
+}
+.settings-select:disabled { color: var(--animal-text-soft); cursor: not-allowed; }
 .logout-btn { font-weight: 600; }
 /* 退出登录按钮（ghost 默认按钮）文本色 */
 .logout-btn,

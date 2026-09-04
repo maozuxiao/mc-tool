@@ -3,7 +3,8 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeSanitize from 'rehype-sanitize'
 import rehypeHighlight from 'rehype-highlight'
-import type { AIAgentMode, AIConversation, AIMessage, AIProviderConfig, AIToolRun, SavedPrompt } from '@shared/ai-types'
+import type { AIAgentMode, AIConversation, AIMessage, AIProviderConfig, AIToolRun, SavedPrompt, AIProtocol } from '@shared/ai-types'
+import { AI_PROTOCOL_LABELS } from '@shared/ai-types'
 import { OA_ORIGIN } from '@shared/constants'
 import { useStore } from '../../store'
 
@@ -51,6 +52,15 @@ export function ChatPanel({ disabled }: Props) {
   const [modelOptions, setModelOptions] = useState<string[]>([])
   const [apiKey, setApiKey] = useState('')
   const [showSettings, setShowSettings] = useState(false)
+  // 自定义供应商编辑态：协议可改（仅自定义）；内置预设的协议为只读
+  const [providerProtocol, setProviderProtocol] = useState<AIProtocol>('openai-compatible')
+  // 新增自定义供应商弹窗与表单
+  const [addProviderOpen, setAddProviderOpen] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [newProtocol, setNewProtocol] = useState<AIProtocol>('openai-compatible')
+  const [newBaseUrl, setNewBaseUrl] = useState('')
+  const [newModel, setNewModel] = useState('')
+  const [newApiKey, setNewApiKey] = useState('')
   const [modelOpen, setModelOpen] = useState(false)
   const [conversations, setConversations] = useState<AIConversation[]>([])
   const [conversationId, setConversationId] = useState<string | null>(null)
@@ -203,7 +213,7 @@ export function ChatPanel({ disabled }: Props) {
     try { setConversations(await window.mcApi.ai.listConversations()) } catch {}
   }, [])
 
-  const refreshProviders = useCallback(async () => {
+  const refreshProviders = useCallback(async (): Promise<ProviderBundle | undefined> => {
     try {
       const data = await window.mcApi.ai.getProviders() as ProviderBundle
       setProviders(data)
@@ -219,7 +229,8 @@ export function ChatPanel({ disabled }: Props) {
         skipModelResetRef.current = nextProviderId
         initializedRef.current = true
       }
-    } catch (e: any) { setNotice(e.message) }
+      return data
+    } catch (e: any) { setNotice(e.message); return undefined }
   }, [])
 
   useEffect(() => {
@@ -311,12 +322,14 @@ export function ChatPanel({ disabled }: Props) {
       skipModelResetRef.current = null
       setModelOptions((providers.suggestions[providerId] || []).slice())
       setApiKey('')
+      setProviderProtocol(selectedProvider?.protocol || 'openai-compatible')
       return
     }
     if (selectedProvider) {
       setModelId(selectedProvider.defaultModel)
       setModelOptions((providers.suggestions[providerId] || []).slice())
       setApiKey('')
+      setProviderProtocol(selectedProvider.protocol || 'openai-compatible')
     }
   }, [providerId])  // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -381,10 +394,68 @@ export function ChatPanel({ disabled }: Props) {
         id: providerId,
         baseUrl: selectedProvider?.baseUrl,
         defaultModel: modelId,
+        // 自定义供应商允许改协议；内置预设忽略（服务端回落到预设）
+        ...(selectedProvider?.isCustom ? { protocol: providerProtocol } : {}),
         ...(apiKey ? { apiKey } : {})
       })
       setApiKey('')
       setNotice(t('aiSaved'))
+      await refreshProviders()
+    } catch (e: any) { setNotice(e.message) }
+  }
+
+  // 重置为默认：内置供应商恢复默认 Base URL / 模型并清空 API Key；自定义仅清空 Key
+  const resetCurrentProvider = async () => {
+    if (!providerId) return
+    try {
+      const config = await window.mcApi.ai.resetProvider(providerId) as AIProviderConfig
+      setApiKey('')
+      setProviderProtocol(config.protocol || 'openai-compatible')
+      setNotice(t('aiProviderReset'))
+      await refreshProviders()
+    } catch (e: any) { setNotice(e.message) }
+  }
+
+  // 删除自定义供应商（内置预设不可删），删除后回退到第一个内置供应商
+  const deleteCurrentProvider = async () => {
+    if (!providerId || !selectedProvider?.isCustom) return
+    try {
+      const name = selectedProvider.name
+      await window.mcApi.ai.deleteCustomProvider(providerId)
+      const data = await refreshProviders()
+      const fallback = data?.providers.find(p => !p.isCustom) || data?.providers[0]
+      setProviderId(fallback?.id || '')
+      setModelId(fallback?.defaultModel || '')
+      setApiKey('')
+      setNotice(t('aiProviderDeleted', { name }))
+    } catch (e: any) { setNotice(e.message) }
+  }
+
+  const openAddProvider = () => {
+    setNewName('')
+    setNewProtocol('openai-compatible')
+    setNewBaseUrl('')
+    setNewModel('')
+    setNewApiKey('')
+    setAddProviderOpen(true)
+  }
+  const closeAddProvider = () => setAddProviderOpen(false)
+  const submitAddProvider = async () => {
+    if (!newName.trim()) { setNotice(t('aiProviderNameRequired')); return }
+    if (!newBaseUrl.trim()) { setNotice(t('aiProviderBaseRequired')); return }
+    try {
+      const config = await window.mcApi.ai.addCustomProvider({
+        name: newName.trim(),
+        protocol: newProtocol,
+        baseUrl: newBaseUrl.trim(),
+        defaultModel: newModel.trim(),
+        ...(newApiKey.trim() ? { apiKey: newApiKey.trim() } : {})
+      }) as AIProviderConfig
+      setAddProviderOpen(false)
+      setProviderId(config.id)
+      setModelId(config.defaultModel || '')
+      setApiKey('')
+      setNotice(t('aiProviderAdded', { name: config.name }))
       await refreshProviders()
     } catch (e: any) { setNotice(e.message) }
   }
@@ -522,17 +593,13 @@ export function ChatPanel({ disabled }: Props) {
             onClick={isNarrow ? closeDrawer : toggleSidebar}
           >{isNarrow ? '×' : (sideCollapsed ? '»' : '«')}</button>
           {(!sideCollapsed || isNarrow) && <span>{t('viewAi')}</span>}
-          {!sideCollapsed && (
-            <button className="mq-btn" onClick={() => { setActiveConversation(null); setMessages([]); if (isNarrow) setDrawerOpen(false) }}>{t('aiNewChat')}</button>
-          )}
-          {sideCollapsed && !isNarrow && (
-            <button
-              type="button"
-              className="ai-side-new"
-              title={t('aiNewChat')}
-              onClick={() => { setActiveConversation(null); setMessages([]) }}
-            >+</button>
-          )}
+          {/* 新对话统一用 26px 图标按钮：文字按钮在英文（AI Assistant + New chat）下会把标题挤到截断 */}
+          <button
+            type="button"
+            className="ai-side-new"
+            title={t('aiNewChat')}
+            onClick={() => { setActiveConversation(null); setMessages([]); if (isNarrow) setDrawerOpen(false) }}
+          >+</button>
         </div>
         <div className="ai-history">
           {conversations.map(c => (
@@ -563,8 +630,24 @@ export function ChatPanel({ disabled }: Props) {
             title={t('aiSideExpand')}
             onClick={() => setDrawerOpen(true)}
           >☰</button>
-          <select className="ai-select" value={providerId} onChange={e => setProviderId(e.target.value)}>
-            {providers.providers.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          <select
+            className="ai-select"
+            value={providerId}
+            onChange={e => {
+              // 下拉末项是「添加自定义供应商」入口：不改当前选中，直接打开新增弹窗
+              if (e.target.value === '__add_custom__') { openAddProvider(); return }
+              setProviderId(e.target.value)
+            }}
+          >
+            <optgroup label={t('aiBuiltinProvider')}>
+              {providers.providers.filter(p => !p.isCustom).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </optgroup>
+            {providers.providers.some(p => p.isCustom) && (
+              <optgroup label={t('aiCustomProvider')}>
+                {providers.providers.filter(p => p.isCustom).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </optgroup>
+            )}
+            <option value="__add_custom__">+ {t('aiAddCustom')}</option>
           </select>
           <div className="ai-model-combo">
             <input
@@ -621,11 +704,31 @@ export function ChatPanel({ disabled }: Props) {
               <span>{t('aiApiKey')}</span>
               <input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder={selectedProvider?.hasApiKey ? t('aiKeyConfigured') : t('aiKeyPlaceholder')} />
             </label>
+            <label className="ai-field">
+              <span>{t('aiProtocol')}</span>
+              {selectedProvider?.isCustom ? (
+                <select
+                  className="ai-select"
+                  value={providerProtocol}
+                  onChange={e => setProviderProtocol(e.target.value as AIProtocol)}
+                >
+                  {(['openai-compatible', 'anthropic'] as AIProtocol[]).map(p => (
+                    <option key={p} value={p}>{AI_PROTOCOL_LABELS[p]}</option>
+                  ))}
+                </select>
+              ) : (
+                <input value={AI_PROTOCOL_LABELS[selectedProvider?.protocol || 'openai-compatible']} disabled />
+              )}
+            </label>
             <div className="ai-settings-actions">
               <button className="mq-btn" onClick={async () => {
                 const res = await window.mcApi.ai.testProvider({ providerId, modelId })
                 setNotice(res.ok ? res.message : res.error)
               }}>{t('aiTest')}</button>
+              <button className="mq-btn" onClick={resetCurrentProvider} title={selectedProvider?.isCustom ? undefined : t('aiProviderBaseRequired')}>{t('aiResetDefault')}</button>
+              {selectedProvider?.isCustom && (
+                <button className="mq-btn danger" onClick={deleteCurrentProvider}>{t('aiDeleteProvider')}</button>
+              )}
               <button className="mq-btn accent" onClick={saveProvider}>{t('aiSave')}</button>
             </div>
           </div>
@@ -672,14 +775,14 @@ export function ChatPanel({ disabled }: Props) {
               type="button"
               ref={promptToggleRef}
               className={`ai-prompt-toggle${promptPanelOpen ? ' open' : ''}`}
-              title="快捷提示词"
+              title={t('aiPromptQuick')}
               onClick={() => setPromptPanelOpen(v => !v)}
             >+</button>
             {promptPanelOpen && (
               <div ref={promptPanelRef} className="ai-prompt-panel">
                 <div className="ai-prompt-list">
                   {savedPrompts.length === 0 ? (
-                    <div className="ai-prompt-empty">暂无保存的提示词</div>
+                    <div className="ai-prompt-empty">{t('aiPromptEmpty')}</div>
                   ) : (
                     savedPrompts.map(p => (
                       <div key={p.id} className="ai-prompt-item">
@@ -698,9 +801,9 @@ export function ChatPanel({ disabled }: Props) {
                   )}
                 </div>
                 <div className="ai-prompt-panel-foot">
-                  <button type="button" className="mq-btn ghost" onClick={openManager}>管理提示词</button>
+                  <button type="button" className="mq-btn ghost" onClick={openManager}>{t('aiPromptManager')}</button>
                   {input.trim() && (
-                    <button type="button" className="mq-btn ghost" onClick={saveCurrentAsPrompt}>保存当前</button>
+                    <button type="button" className="mq-btn ghost" onClick={saveCurrentAsPrompt}>{t('aiPromptSaveCurrent')}</button>
                   )}
                 </div>
               </div>
@@ -725,31 +828,82 @@ export function ChatPanel({ disabled }: Props) {
           </div>
         </div>
       </section>
-      {managerOpen && (
-        <div className="ai-prompt-modal-overlay" onClick={closeManager}>
+      {addProviderOpen && (
+        <div className="ai-prompt-modal-overlay" onClick={closeAddProvider}>
           <div className="ai-prompt-modal" onClick={e => e.stopPropagation()}>
-            <div className="ai-prompt-modal-head">管理提示词</div>
+            <div className="ai-prompt-modal-head">{t('aiAddCustom')}</div>
             <div className="ai-prompt-modal-body">
               <div className="ai-prompt-form">
                 <input
                   className="ai-prompt-form-title"
-                  placeholder="标题（可选，默认取内容前 30 字）"
+                  placeholder={t('aiCustomName')}
+                  value={newName}
+                  onChange={e => setNewName(e.target.value)}
+                />
+                <select
+                  className="ai-select"
+                  value={newProtocol}
+                  onChange={e => setNewProtocol(e.target.value as AIProtocol)}
+                >
+                  {(['openai-compatible', 'anthropic'] as AIProtocol[]).map(p => (
+                    <option key={p} value={p}>{AI_PROTOCOL_LABELS[p]}</option>
+                  ))}
+                </select>
+                <input
+                  placeholder={t('aiBaseUrl')}
+                  value={newBaseUrl}
+                  onChange={e => setNewBaseUrl(e.target.value)}
+                />
+                <input
+                  placeholder={t('aiModel')}
+                  value={newModel}
+                  onChange={e => setNewModel(e.target.value)}
+                />
+                <input
+                  type="password"
+                  placeholder={t('aiApiKey')}
+                  value={newApiKey}
+                  onChange={e => setNewApiKey(e.target.value)}
+                />
+                <div className="ai-prompt-form-actions">
+                  <button
+                    type="button"
+                    className="mq-btn accent"
+                    onClick={submitAddProvider}
+                    disabled={!newName.trim() || !newBaseUrl.trim()}
+                  >{t('aiAddCustom')}</button>
+                  <button type="button" className="mq-btn ghost" onClick={closeAddProvider}>{t('aiPromptClose')}</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {managerOpen && (
+        <div className="ai-prompt-modal-overlay" onClick={closeManager}>
+          <div className="ai-prompt-modal" onClick={e => e.stopPropagation()}>
+            <div className="ai-prompt-modal-head">{t('aiPromptManager')}</div>
+            <div className="ai-prompt-modal-body">
+              <div className="ai-prompt-form">
+                <input
+                  className="ai-prompt-form-title"
+                  placeholder={t('aiPromptTitlePh')}
                   value={formTitle}
                   onChange={e => setFormTitle(e.target.value)}
                 />
                 <textarea
                   className="ai-prompt-form-text"
-                  placeholder="提示词内容"
+                  placeholder={t('aiPromptTextPh')}
                   value={formText}
                   onChange={e => setFormText(e.target.value)}
                   rows={6}
                 />
                 <div className="ai-prompt-form-actions">
                   <button type="button" className="mq-btn accent" onClick={savePromptFromForm} disabled={!formText.trim()}>
-                    {editingPrompt ? '保存修改' : '新增提示词'}
+                    {editingPrompt ? t('aiPromptSave') : t('aiPromptAdd')}
                   </button>
-                  <button type="button" className="mq-btn ghost" onClick={() => { setEditingPrompt(null); setFormTitle(''); setFormText('') }}>重置</button>
-                  <button type="button" className="mq-btn ghost" onClick={closeManager}>关闭</button>
+                  <button type="button" className="mq-btn ghost" onClick={() => { setEditingPrompt(null); setFormTitle(''); setFormText('') }}>{t('aiPromptReset')}</button>
+                  <button type="button" className="mq-btn ghost" onClick={closeManager}>{t('aiPromptClose')}</button>
                 </div>
               </div>
               {savedPrompts.length > 0 && (

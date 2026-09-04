@@ -30,9 +30,9 @@ export async function listModels(providerId: string): Promise<AIModelInfo[]> {
 }
 
 export async function testProvider(providerId: string, modelId?: string): Promise<{ ok: boolean; models: number; message: string }> {
-  const { config, apiKey, preset } = getProvider(providerId)
+  const { config, apiKey } = getProvider(providerId)
   if (!apiKey && providerId !== 'ollama') throw new Error('请先配置 API Key')
-  const model = modelId || config.defaultModel || preset.defaultModel
+  const model = modelId || config.defaultModel || ''
   await requestJSON<any>(`${config.baseUrl}/chat/completions`, apiKey, {
     method: 'POST',
     body: JSON.stringify({

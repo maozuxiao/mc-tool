@@ -1,4 +1,4 @@
-import { app, BrowserWindow, session, ipcMain, shell, dialog, Menu, MenuItem } from 'electron'
+import { app, BrowserWindow, session, ipcMain, shell, dialog, Menu, MenuItem, Tray } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import { join, dirname } from 'path'
 import { appendFileSync, existsSync, readFileSync, unlinkSync, writeFileSync, mkdirSync } from 'fs'
@@ -20,11 +20,104 @@ const APP_ID = 'com.streamax.mcquery'
 
 // 开发时从项目根目录 build/ 读取；打包后从 resources/ 读取（extraResources 配置）
 function getIconPath() {
-  const name = process.platform === 'win32' ? 'icon.ico' : 'icon.png'
-  if (app.isPackaged) {
-    return join(process.resourcesPath, name)
+  const base = app.isPackaged ? process.resourcesPath : join(__dirname, '../../build')
+  // Windows 托盘/窗口图标优先用 icon.ico，缺失时回退到 icon.png（避免 build 目录没放 ico 导致托盘无法创建）
+  const names = process.platform === 'win32' ? ['icon.ico', 'icon.png'] : ['icon.png']
+  for (const n of names) {
+    const p = join(base, n)
+    if (existsSync(p)) return p
   }
-  return join(__dirname, `../../build/${name}`)
+  return join(base, names[0])
+}
+
+// ── 系统托盘常驻 + 应用偏好 ────────────────────────────────
+// 三项设置（持久化到 userData/app-prefs.json）：
+//   minimizeToTray — 最小化按钮 `_` 时缩进托盘后台（默认开）
+//   closeToTray    — 关闭按钮 ❌ 时隐藏到托盘（默认开；仅在 minimizeToTray 开启时生效）
+//   autoLaunch     — 开机自启，静默启动到托盘不弹窗（默认关）
+// 托盘左键单击 = 显示主窗口；右键菜单：显示主窗口 / 物料查询 / AI 助手 / 检查更新 / 退出。
+const APP_PREFS_PATH = () => join(app.getPath('userData'), 'app-prefs.json')
+// uiLang：原生弹窗按钮与托盘菜单文案随界面语言（渲染层经 setUiLang 同步）。
+// 声明在文件顶部，供下方托盘菜单与后文 dialogLang 共用。
+let uiLang: '' | 'zh' | 'en' = ''
+let minimizeToTray = true
+let closeToTray = true
+let autoLaunch = false
+let tray: Tray | null = null
+// 正在退出应用（区分「关到托盘」与「真退出」：退出前最后关窗不能再拦截）
+let quitting = false
+// 以 --hidden 参数启动（开机自启）：主窗口创建时不显示，静默驻留托盘
+const startHidden = process.argv.some(a => a === '--hidden' || a === '/--hidden')
+
+interface AppPrefs { minimizeToTray?: boolean; closeToTray?: boolean; autoLaunch?: boolean }
+function loadAppPrefs(): void {
+  try {
+    if (existsSync(APP_PREFS_PATH())) {
+      const p = JSON.parse(readFileSync(APP_PREFS_PATH(), 'utf8')) as AppPrefs
+      // 旧版只有 minimizeToTray 一个键，缺省的按新默认值补齐
+      minimizeToTray = p.minimizeToTray !== undefined ? !!p.minimizeToTray : true
+      closeToTray = p.closeToTray !== undefined ? !!p.closeToTray : true
+      autoLaunch = !!p.autoLaunch
+    }
+  } catch { /* 损坏时按默认值处理 */ }
+}
+function saveAppPrefs(): void {
+  try {
+    writeFileSync(APP_PREFS_PATH(), JSON.stringify({ minimizeToTray, closeToTray, autoLaunch }, null, 2), 'utf8')
+  } catch { /* 忽略写入失败 */ }
+}
+function showMainWindow(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) { createWindow(); return }
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
+}
+// 托盘菜单「物料查询 / AI 助手」：显示窗口 + 通知渲染层切换视图（视图状态在渲染层 store）
+function switchView(view: 'query' | 'ai'): void {
+  showMainWindow()
+  try { mainWindow?.webContents.send('tray:switch-view', view) } catch { /* 忽略 */ }
+}
+// 托盘菜单文案随界面语言（切换语言时由 dialog:setLang 触发重建）
+function trayMenu(): Menu {
+  const en = uiLang === 'en'
+  return Menu.buildFromTemplate([
+    { label: en ? 'Show Window' : '显示主窗口', click: showMainWindow },
+    { type: 'separator' },
+    { label: en ? 'Material Query (MC)' : '物料查询（MC 模式）', click: () => switchView('query') },
+    { label: en ? 'AI Assistant' : 'AI 助手', click: () => switchView('ai') },
+    { type: 'separator' },
+    {
+      label: en ? 'Check for Update' : '检查更新',
+      click: () => {
+        // 显示窗口 + 通知渲染层复用已有的 checkUpdate()（含「正在检查/已是最新/有更新/失败」反馈）
+        showMainWindow()
+        try { mainWindow?.webContents.send('tray:check-update') } catch { /* 忽略 */ }
+      }
+    },
+    { label: en ? 'Quit' : '退出', click: () => { quitting = true; app.quit() } }
+  ])
+}
+function createTray(): void {
+  if (tray) return
+  const icon = getIconPath()
+  if (!icon || !existsSync(icon)) {
+    debugLog('[TRAY] icon not found: ' + icon)
+    return
+  }
+  tray = new Tray(icon)
+  tray.setToolTip('MC物料查询')
+  tray.setContextMenu(trayMenu())
+  // 左键单击托盘图标 = 显示主窗口（不做「再点隐藏」的 toggle，避免误触）
+  tray.on('click', showMainWindow)
+}
+function destroyTray(): void {
+  try { tray?.destroy() } catch { /* 忽略 */ }
+  tray = null
+}
+function applyAutoLaunch(): void {
+  try {
+    app.setLoginItemSettings({ openAtLogin: autoLaunch, args: autoLaunch ? ['--hidden'] : [] })
+  } catch (e: any) { debugLog('[APP_PREFS] setLoginItemSettings failed: ' + (e?.message || e)) }
 }
 
 // 调试日志文件
@@ -275,6 +368,8 @@ function createWindow() {
     title: 'MC物料查询',
     backgroundColor: '#f8f8f0',
     icon: getIconPath(),
+    // 开机自启（--hidden）时静默启动：不弹主窗口，驻留托盘
+    show: !startHidden,
     // 隐藏默认菜单栏，任务栏右键只保留窗口基本项
     autoHideMenuBar: true,
     webPreferences: {
@@ -289,6 +384,15 @@ function createWindow() {
 
   // 加载本地查询面板（默认页面）
   mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+
+  // 「最小化到托盘后台运行」：最小化缩进托盘；关闭按钮行为由 closeToTray 决定
+  mainWindow.on('minimize', () => {
+    if (minimizeToTray) mainWindow?.hide()
+  })
+  mainWindow.on('close', (e) => {
+    // 「直接退出」或托盘总开关关闭时不拦截，走原退出逻辑
+    if (minimizeToTray && closeToTray && !quitting) { e.preventDefault(); mainWindow?.hide() }
+  })
 
   // 启动后自动检测 OA 登录态；未登录则弹出登录层（由渲染进程控制）
   checkLoginAndNotify()
@@ -563,7 +667,8 @@ async function doCheckLoginAndNotify() {
   debugLog(`[startup] restoredOk=${restoredOk}, isOALoggedin = ${ok}`)
   if (ok) {
     // 有可用 cookie：直接进入工具页面，并确保主窗口显示在桌面前台
-    if (mainWindow && !mainWindow.isDestroyed()) {
+    // （开机自启 --hidden 静默启动时不弹窗，只同步登录态给隐藏中的渲染层）
+    if (mainWindow && !mainWindow.isDestroyed() && !startHidden) {
       mainWindow.show()
       mainWindow.focus()
     }
@@ -584,9 +689,16 @@ function requestLoginView() {
 app.whenReady().then(() => {
   app.setAppUserModelId(APP_ID)
   app.setName('MC物料查询')
+  // 先读偏好再建窗口：--hidden 静默启动与托盘开关都要用
+  loadAppPrefs()
   createWindow()
   registerAIIPC()
   initAutoUpdater(mainWindow!)
+
+  // 托盘常驻：总开关开启时启动即创建（关闭时不创建托盘，❌ 直接退出）
+  if (minimizeToTray) createTray()
+  // 任何路径退出（含托盘菜单退出 / app.quit()）都置位 quitting，让 close 拦截放行，并销毁托盘
+  app.on('before-quit', () => { quitting = true; destroyTray() })
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -1707,14 +1819,38 @@ ipcMain.handle(IPC.INSTALL_UPDATE, () => {
 // showMessageBox 由主进程弹出、正确挂在 mainWindow 上，且不阻塞渲染进程。
 // 按钮 / 标题随界面语言：渲染层启动与切换语言时经 setUiLang 同步过来；
 // 未同步前按系统语言兜底（中文系统给中文按钮，其余给英文）。
-let uiLang: '' | 'zh' | 'en' = ''
 ipcMain.on('dialog:setLang', (_e, lang: string) => {
   uiLang = lang === 'en' ? 'en' : 'zh'
+  // 托盘菜单文案跟随界面语言
+  try { tray?.setContextMenu(trayMenu()) } catch { /* 忽略 */ }
 })
-function dialogLang(): { title: string; ok: string; cancel: string } {
-  const lang = uiLang
+
+// 托盘 / 偏好设置：读取与设置（渲染层「设置」面板）
+ipcMain.handle('app:getPrefs', () => ({ minimizeToTray, closeToTray, autoLaunch }))
+ipcMain.handle('app:setSetting', (_e, key: string, v: boolean) => {
+  const val = !!v
+  if (key === 'minimizeToTray') {
+    minimizeToTray = val
+    // 总开关关闭：连托盘一并撤掉；若窗口正藏在托盘要恢复显示，避免找不到界面
+    if (val) createTray()
+    else { destroyTray(); showMainWindow() }
+  } else if (key === 'closeToTray') {
+    closeToTray = val
+  } else if (key === 'autoLaunch') {
+    autoLaunch = val
+    applyAutoLaunch()
+  } else {
+    return { ok: false, error: 'unknown key' }
+  }
+  saveAppPrefs()
+  return { ok: true }
+})
+// lang 优先级：调用方显式传入（渲染层随弹窗一起带过来的界面语言，最可靠，
+// 避免 setLang 异步同步前主进程 uiLang 还是空/旧值的竞态）→ 已同步的 uiLang → 系统语言。
+function dialogLang(lang?: string): { title: string; ok: string; cancel: string } {
+  const l = (lang === 'en' ? 'en' : lang === 'zh' ? 'zh' : uiLang)
     || (app.getLocale().toLowerCase().startsWith('zh') ? 'zh' : 'en')
-  return lang === 'en'
+  return l === 'en'
     ? { title: 'MC Material Query', ok: 'OK', cancel: 'Cancel' }
     : { title: 'MC物料查询', ok: '确定', cancel: '取消' }
 }
@@ -1722,9 +1858,10 @@ ipcMain.handle('dialog:message', async (_e, opts: {
   message?: string
   title?: string
   type?: 'none' | 'info' | 'error' | 'warning' | 'question'
+  lang?: string
 }) => {
   if (!mainWindow || mainWindow.isDestroyed()) return
-  const L = dialogLang()
+  const L = dialogLang(opts?.lang)
   await dialog.showMessageBox(mainWindow, {
     type: opts?.type || 'info',
     title: opts?.title || L.title,
@@ -1735,9 +1872,9 @@ ipcMain.handle('dialog:message', async (_e, opts: {
   })
 })
 
-ipcMain.handle('dialog:confirm', async (_e, opts: { message?: string; title?: string }) => {
+ipcMain.handle('dialog:confirm', async (_e, opts: { message?: string; title?: string; lang?: string }) => {
   if (!mainWindow || mainWindow.isDestroyed()) return false
-  const L = dialogLang()
+  const L = dialogLang(opts?.lang)
   const res = await dialog.showMessageBox(mainWindow, {
     type: 'question',
     title: opts?.title || L.title,

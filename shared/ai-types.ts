@@ -16,8 +16,35 @@ export interface AIProviderConfig {
   name: string
   baseUrl: string
   defaultModel: string
+  // 接口协议。内置预设与自定义供应商都带，chatService / providerApi 据此选择调用方式。
+  // 当前仅 openai-compatible 已实现，anthropic 先占字段、后续再实现，避免本次过度膨胀。
+  protocol: AIProtocol
+  // 自定义供应商标记：true 表示用户新增（可删除）；内置预设为 false / 缺省。
+  isCustom?: boolean
   hasApiKey: boolean
   enabled: boolean
+  // 自定义供应商才有的推荐模型（内置供应商建议模型来自 preset，不在此字段）
+  suggestedModels?: string[]
+}
+
+/** 调用方选择的协议标签展示用 */
+export const AI_PROTOCOL_LABELS: Record<AIProtocol, string> = {
+  'openai-compatible': 'OpenAI 兼容',
+  anthropic: 'Anthropic'
+}
+
+/** 新增自定义供应商入参 */
+export interface AddCustomProviderInput {
+  name: string
+  protocol: AIProtocol
+  baseUrl: string
+  defaultModel: string
+  apiKey?: string
+}
+
+/** 重置返回值：返回重置后的配置，便于渲染层直接回写 */
+export interface ResetProviderResult {
+  config: AIProviderConfig
 }
 
 export interface AIModelInfo {
@@ -121,6 +148,10 @@ export interface SavedPrompt {
 
 export const AI_IPC = {
   GET_PROVIDERS: 'ai:get-providers',
+  // 新增 / 删除 / 重置自定义供应商：自定义供应商存于 ai-providers.json 的 __custom 数组
+  ADD_CUSTOM_PROVIDER: 'ai:add-custom-provider',
+  DELETE_CUSTOM_PROVIDER: 'ai:delete-custom-provider',
+  RESET_PROVIDER: 'ai:reset-provider',
   SAVE_PROVIDER: 'ai:save-provider',
   LIST_MODELS: 'ai:list-models',
   TEST_PROVIDER: 'ai:test-provider',

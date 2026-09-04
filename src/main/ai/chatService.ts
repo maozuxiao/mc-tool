@@ -161,7 +161,7 @@ async function streamOpenAICompatible(input: {
   controller: StreamController
 }): Promise<void> {
   const { payload, conversationId, messages, assistantMessageId, controller } = input
-  const { preset, config, apiKey } = getProvider(payload.providerId)
+  const { config, apiKey } = getProvider(payload.providerId)
   if (!apiKey && payload.providerId !== 'ollama') throw new Error('请先配置 API Key')
 
   // 模式决定提示语与可用工具。旧渲染层只传 useMcSkill，由 resolveMode 兼容推导。
@@ -384,7 +384,7 @@ export async function sendMessage(payload: AISendPayload): Promise<void> {
 
   try {
     const messages = existing.messages
-    if (provider.preset.protocol === 'openai-compatible') {
+    if (provider.config.protocol === 'openai-compatible') {
       await streamOpenAICompatible({
         payload, conversationId,
         messages: [...messages, { role: 'user', content: payload.content }],

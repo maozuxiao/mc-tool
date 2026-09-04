@@ -4,7 +4,7 @@
 
 - 仓库：https://github.com/maozuxiao/mc-tool
 - 技术栈：Electron 33 + electron-vite + React 18 + TypeScript + Zustand，UI 组件库 [`animal-island-ui`](https://www.npmjs.com/package/animal-island-ui)
-- 当前版本：`1.0.31`（`package.json` 的 `version` 为准）
+- 当前版本：`1.0.32`（`package.json` 的 `version` 为准）
 
 ---
 
@@ -37,6 +37,7 @@
 | 📤 **CSV 导出** | 任意结果表一键导出 CSV（含 BOM，便于 Excel 打开）。 |
 | 🤖 **AI 助手** | 内置对话页，接 OpenAI 兼容 / Anthropic 协议的大模型；可调用本地 **MC Skill** 直接查物料、库存、BOM、规格文件，结果由模型总结成 Markdown 表格。 |
 | 🆕 **自动更新** | 启动 3 秒后后台检查 GitHub Releases，顶部更新条显示下载进度，下载完成后以 NSIS 向导模式非静默安装。 |
+| ⚙️ **设置与托盘** | 右上「设置」面板可切换语言、开关「最小化到托盘后台运行」、设置关闭按钮行为（最小化到托盘 / 直接退出）、开机自启；开启后应用常驻系统托盘，左键单击恢复、右键菜单快速切换 MC / AI 视图或检查更新。 |
 | 🌐 **其他** | 中英双语切换；`Ctrl + 滚轮` 缩放、`Ctrl + 0` 复位；输入框历史记录；列宽可拖拽并记忆。 |
 
 ---
@@ -319,9 +320,9 @@ npm run pack:all   # 全平台
 ```
 dist/
 ├─ latest.yml                            # 自动更新元数据
-├─ MC物料查询 Setup 1.0.31.exe            # NSIS 安装包
-├─ MC物料查询 Setup 1.0.31.exe.blockmap  # 增量更新块映射
-└─ MC物料查询 1.0.31.exe                  # 便携版
+├─ MC物料查询 Setup 1.0.32.exe            # NSIS 安装包
+├─ MC物料查询 Setup 1.0.32.exe.blockmap  # 增量更新块映射
+└─ MC物料查询 1.0.32.exe                  # 便携版
 ```
 
 > macOS 交叉编译在 Windows 上不可靠，DMG 请在 macOS 上打包。

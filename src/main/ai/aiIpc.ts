@@ -3,7 +3,7 @@ import { homedir } from 'os'
 import { resolve } from 'path'
 import { AI_IPC } from '@shared/ai-types'
 import { listModels, testProvider } from './providerApi'
-import { listProviders, saveProvider, getSuggestedModels, getPreferences, savePreferences } from './providerStore'
+import { listProviders, saveProvider, getSuggestedModels, getPreferences, savePreferences, addCustomProvider, deleteCustomProvider, resetProvider } from './providerStore'
 import { dirBlockReason, makeAlias } from './rootGuard'
 import {
   createConversation, deleteConversation, getConversation,
@@ -28,6 +28,31 @@ export function registerAIIPC(): void {
     // 保存配置的同时记住这次选择，下次打开 app 直接回到这套配置
     savePreferences({ lastProviderId: input.id, lastModelId: input.defaultModel || saved.defaultModel })
     return saved
+  })
+
+  // 新增自定义供应商（名称 / 协议 / Base URL / 模型 / API Key），支持添加多个
+  ipcMain.handle(AI_IPC.ADD_CUSTOM_PROVIDER, (_e, input: any) => {
+    const config = addCustomProvider({
+      name: input?.name,
+      protocol: input?.protocol,
+      baseUrl: input?.baseUrl,
+      defaultModel: input?.defaultModel,
+      apiKey: input?.apiKey
+    })
+    // 新增后自动选中它
+    savePreferences({ lastProviderId: config.id, lastModelId: config.defaultModel })
+    return config
+  })
+
+  // 删除自定义供应商（内置预设不可删）
+  ipcMain.handle(AI_IPC.DELETE_CUSTOM_PROVIDER, (_e, id: string) => {
+    deleteCustomProvider(id)
+    return { ok: true }
+  })
+
+  // 重置 API 配置：内置恢复默认 Base URL / 模型并清空 Key；自定义仅清空 Key
+  ipcMain.handle(AI_IPC.RESET_PROVIDER, (_e, id: string) => {
+    return resetProvider(id)
   })
   ipcMain.handle(AI_IPC.LIST_MODELS, async (_e, providerId: string) => {
     try {

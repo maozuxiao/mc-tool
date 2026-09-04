@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { useStore } from '../store'
-import { Tabs, Button, Input, Select, Icon, Tag } from 'animal-island-ui'
+import { Tabs, Button, Input, Select, Icon, Tag, Switch } from 'animal-island-ui'
 import { parseBatchItemNos } from '@shared/query'
 import { FilterBar } from './FilterBar'
 import { MaterialTable } from './MaterialTable'
@@ -137,11 +137,6 @@ export function QueryPanel({ disabled }: { disabled: boolean }) {
     { key: 'file', label: t('tabFile') },
   ]
 
-  const langOptions = [
-    { key: 'zh', label: '中文' },
-    { key: 'en', label: 'EN' },
-  ]
-
   // V1.0.6：查料号独立查询（仅按料号 ITEM_NUMBER），不与描述条件组合
   const submitItem = useCallback(() => {
     if (itemNo.trim()) { pushHist('item', itemNo); searchByItemNo() }
@@ -159,6 +154,27 @@ export function QueryPanel({ disabled }: { disabled: boolean }) {
 
   // 对普通（非 draggable 父级）输入框，阻止 mousedown 冒泡，避免任何潜在拖拽干扰
   const stopDragOnInput = (e: React.MouseEvent<HTMLInputElement | HTMLTextAreaElement>) => e.stopPropagation()
+
+  // 「设置」面板状态（真实值持久化在主进程 app-prefs.json，这里仅镜像显示）
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [trayMin, setTrayMin] = useState(true)
+  const [closeTray, setCloseTray] = useState(true)
+  const [autoL, setAutoL] = useState(false)
+  useEffect(() => {
+    try {
+      window.mcApi.getAppPrefs().then(p => {
+        setTrayMin(!!p.minimizeToTray)
+        setCloseTray(!!p.closeToTray)
+        setAutoL(!!p.autoLaunch)
+      }).catch(() => {})
+    } catch { /* 忽略 */ }
+  }, [])
+  const updateSetting = async (key: 'minimizeToTray' | 'closeToTray' | 'autoLaunch', v: boolean) => {
+    if (key === 'minimizeToTray') setTrayMin(v)
+    else if (key === 'closeToTray') setCloseTray(v)
+    else setAutoL(v)
+    try { await window.mcApi.setSetting(key, v) } catch { /* 忽略 */ }
+  }
 
   return (
     <div className={`panel${disabled ? ' panel-locked' : ''}`}>
@@ -185,12 +201,52 @@ export function QueryPanel({ disabled }: { disabled: boolean }) {
             {zoomToast && (
               <span className="zoom-badge" title={t('zoomHint')}>{zoom}%</span>
             )}
-            <Select
-              options={langOptions}
-              value={lang}
-              onChange={(key) => setLang(key as 'zh' | 'en')}
-              aria-label={t('langLabel') || 'language'}
-            />
+            {/* 设置按钮 + 弹出面板：语言 / 最小化到托盘 / 关闭按钮行为 / 开机自启（animal-island 配色） */}
+            <div className="settings-wrap">
+              <button
+                type="button"
+                className={`settings-trigger${settingsOpen ? ' open' : ''}`}
+                aria-label={t('settings')}
+                onClick={() => setSettingsOpen(v => !v)}
+              >{t('settings')}</button>
+              {settingsOpen && (
+                <>
+                  <div className="settings-overlay" onClick={() => setSettingsOpen(false)} />
+                  <div className="settings-panel">
+                    <div className="settings-panel-title">{t('settings')}</div>
+                    <div className="settings-row">
+                      <span className="settings-label">{t('langLabel')}</span>
+                      <div className="settings-seg">
+                        <button type="button" className={lang === 'zh' ? 'active' : ''} onClick={() => setLang('zh')}>中文</button>
+                        <button type="button" className={lang === 'en' ? 'active' : ''} onClick={() => setLang('en')}>English</button>
+                      </div>
+                    </div>
+                    <div className="settings-row">
+                      <span className="settings-label">{t('trayMinimize')}</span>
+                      <Switch size="small" checked={trayMin} aria-label={t('trayMinimize')}
+                        onChange={v => void updateSetting('minimizeToTray', v)} />
+                    </div>
+                    <div className="settings-row">
+                      <span className={`settings-label${trayMin ? '' : ' disabled'}`}>{t('closeBehavior')}</span>
+                      <select
+                        className="settings-select"
+                        value={trayMin && closeTray ? 'tray' : 'quit'}
+                        disabled={!trayMin}
+                        onChange={e => void updateSetting('closeToTray', e.target.value === 'tray')}
+                      >
+                        <option value="tray">{t('closeToTray')}</option>
+                        <option value="quit">{t('closeQuit')}</option>
+                      </select>
+                    </div>
+                    <div className="settings-row">
+                      <span className="settings-label">{t('autoLaunch')}</span>
+                      <Switch size="small" checked={autoL} aria-label={t('autoLaunch')}
+                        onChange={v => void updateSetting('autoLaunch', v)} />
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
             <Select
               value=""
               placeholder={t('help')}
@@ -200,7 +256,7 @@ export function QueryPanel({ disabled }: { disabled: boolean }) {
               ]}
               onChange={async (key) => {
                 if (key === 'about') {
-                  void window.mcApi.showMessage({ message: t('aboutInfo', { v: appVersion }) })
+                  void window.mcApi.showMessage({ message: t('aboutInfo', { v: appVersion }), lang })
                 }
                 if (key === 'check') {
                   // 手动检查：弹窗返回结果；有更新则提供「立即下载」入口
@@ -211,29 +267,31 @@ export function QueryPanel({ disabled }: { disabled: boolean }) {
                     // 两种情况都不再触发 startDownload（主进程也有重入保护兜底）
                     const st = useStore.getState().updateInfo
                     if (st.downloaded) {
-                      void window.mcApi.showMessage({ message: t('updateDownloaded') })
+                      void window.mcApi.showMessage({ message: t('updateDownloaded'), lang })
                       return
                     }
                     if (st.downloading) {
-                      void window.mcApi.showMessage({ message: t('updateDownloading', { p: st.progress ?? 0 }) })
+                      void window.mcApi.showMessage({ message: t('updateDownloading', { p: st.progress ?? 0 }), lang })
                       return
                     }
                     const ok = await window.mcApi.showConfirm({
-                      message: t('updateConfirmDownload', { v: res.version || '' })
+                      message: t('updateConfirmDownload', { v: res.version || '' }),
+                      lang
                     })
                     if (ok) {
                       // 用户确认 → 开始下载（顶部 UpdateBar 显示进度）
                       startDownload()
                     }
                   } else if (res.ok && res.latest) {
-                    void window.mcApi.showMessage({ message: t('updateLatest') })
+                    void window.mcApi.showMessage({ message: t('updateLatest'), lang })
                   } else if (!res.ok) {
                     // 服务器未上传 latest.yml 等场景显示友好提示，不暴露原始 404 堆栈
                     const msg = String(res.error || 'unknown')
                     const isServiceMissing = /404|Cannot find channel|latest\.yml|update info/i.test(msg)
                     void window.mcApi.showMessage({
                       type: isServiceMissing ? 'info' : 'error',
-                      message: isServiceMissing ? t('updateServiceUnavailable') : t('updateError', { m: msg })
+                      message: isServiceMissing ? t('updateServiceUnavailable') : t('updateError', { m: msg }),
+                      lang
                     })
                   }
                 }

@@ -2,6 +2,10 @@ import { contextBridge, ipcRenderer } from 'electron'
 import { AI_IPC } from '@shared/ai-types'
 import { IPC } from '@shared/types'
 
+// 当前界面语言，随 setUiLang 更新，供原生弹窗（dialog:message/confirm）自动带上，
+// 确保按钮与标题跟随界面语言，无需每个调用点手动传 lang。
+let currentLang: 'zh' | 'en' = 'zh'
+
 const mcApi = {
   openOALogin: () => ipcRenderer.invoke(IPC.OA_NAVIGATE),
   reloadLogin: () => ipcRenderer.invoke(IPC.OA_RELOAD),
@@ -35,6 +39,8 @@ const mcApi = {
   onUpdateNotAvailable: (cb: (p: any) => void) => ipcRenderer.on('update-not-available', (_e, p) => cb(p)),
   onUpdateError: (cb: (p: any) => void) => ipcRenderer.on('update-error', (_e, p) => cb(p)),
   installUpdate: () => ipcRenderer.invoke(IPC.INSTALL_UPDATE),
+  // 托盘右键菜单「检查更新」：通知渲染层复用已有的 checkUpdate() 流程（含完整 UI 反馈）
+  onTrayCheckUpdate: (cb: () => void) => ipcRenderer.on('tray:check-update', () => cb()),
 
   saveCsv: (content: string, defaultName: string) =>
     ipcRenderer.invoke('dialog:saveCsv', content, defaultName),
@@ -46,12 +52,23 @@ const mcApi = {
     message: string
     title?: string
     type?: 'none' | 'info' | 'error' | 'warning' | 'question'
-  }): Promise<void> => ipcRenderer.invoke('dialog:message', opts),
-  showConfirm: (opts: { message: string; title?: string }): Promise<boolean> =>
-    ipcRenderer.invoke('dialog:confirm', opts),
+    // 显式指定弹窗语言（优先于 currentLang）：调用方直接把界面语言带上，杜绝同步竞态
+    lang?: 'zh' | 'en'
+  }): Promise<void> => ipcRenderer.invoke('dialog:message', { ...opts, lang: opts.lang ?? currentLang }),
+  showConfirm: (opts: { message: string; title?: string; lang?: 'zh' | 'en' }): Promise<boolean> =>
+    ipcRenderer.invoke('dialog:confirm', { ...opts, lang: opts.lang ?? currentLang }),
   // 同步当前界面语言给主进程：dialog.showMessageBox 的按钮（确定/OK、取消/Cancel）
   // 与默认标题随语言切换（原生弹窗不会自己跟随应用内语言设置）
-  setUiLang: (lang: 'zh' | 'en'): void => { ipcRenderer.send('dialog:setLang', lang) },
+  setUiLang: (lang: 'zh' | 'en'): void => { currentLang = lang === 'en' ? 'en' : 'zh'; ipcRenderer.send('dialog:setLang', lang) },
+
+  // 托盘 / 偏好设置（设置面板：最小化到托盘、关闭按钮行为、开机自启；持久化在主进程 app-prefs.json）
+  getAppPrefs: (): Promise<{ minimizeToTray: boolean; closeToTray: boolean; autoLaunch: boolean }> =>
+    ipcRenderer.invoke('app:getPrefs'),
+  setSetting: (key: 'minimizeToTray' | 'closeToTray' | 'autoLaunch', v: boolean): Promise<{ ok: boolean }> =>
+    ipcRenderer.invoke('app:setSetting', key, v),
+  // 托盘右键菜单「物料查询 / AI 助手」→ 渲染层切换视图
+  onTraySwitchView: (cb: (v: 'query' | 'ai') => void) =>
+    ipcRenderer.on('tray:switch-view', (_e, v) => cb(v)),
 
   appVersion: (): string => ipcRenderer.sendSync(IPC.APP_VERSION),
 
@@ -63,6 +80,9 @@ const mcApi = {
   ai: {
     getProviders: () => ipcRenderer.invoke(AI_IPC.GET_PROVIDERS),
     saveProvider: (input: any) => ipcRenderer.invoke(AI_IPC.SAVE_PROVIDER, input),
+    addCustomProvider: (input: any) => ipcRenderer.invoke(AI_IPC.ADD_CUSTOM_PROVIDER, input),
+    deleteCustomProvider: (id: string) => ipcRenderer.invoke(AI_IPC.DELETE_CUSTOM_PROVIDER, id),
+    resetProvider: (id: string) => ipcRenderer.invoke(AI_IPC.RESET_PROVIDER, id),
     listModels: (providerId: string) => ipcRenderer.invoke(AI_IPC.LIST_MODELS, providerId),
     testProvider: (input: { providerId: string; modelId?: string }) => ipcRenderer.invoke(AI_IPC.TEST_PROVIDER, input),
     listConversations: () => ipcRenderer.invoke(AI_IPC.LIST_CONVERSATIONS),

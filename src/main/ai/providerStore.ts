@@ -1,7 +1,7 @@
 import { app, safeStorage } from 'electron'
 import { existsSync, readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
-import type { AIProviderConfig, AIProviderPreset } from '@shared/ai-types'
+import type { AIProviderConfig, AIProviderPreset, AddCustomProviderInput, AIProtocol } from '@shared/ai-types'
 
 interface StoredProvider extends AIProviderConfig {
   encryptedApiKey?: string
@@ -179,14 +179,14 @@ function decryptKey(value?: string): string | undefined {
   return undefined
 }
 
-function readSettings(): Record<string, StoredProvider> {
+function readSettings(): Record<string, any> {
   try {
     if (!existsSync(SETTINGS_PATH())) return {}
     return JSON.parse(readFileSync(SETTINGS_PATH(), 'utf8'))
   } catch { return {} }
 }
 
-function writeSettings(settings: Record<string, StoredProvider>): void {
+function writeSettings(settings: Record<string, any>): void {
   writeFileSync(SETTINGS_PATH(), JSON.stringify(settings, null, 2), 'utf8')
 }
 
@@ -194,12 +194,31 @@ function publicProvider(stored: StoredProvider): AIProviderConfig {
   const { encryptedApiKey, ...pub } = stored
   const preset = PROVIDER_PRESETS.find(p => p.id === pub.id)
   // name 一律回落到预设名：兼容早期 settings 文件里没有 name 的情况，再不济用 id。
-  return { ...pub, name: preset?.name || pub.name || pub.id, hasApiKey: !!encryptedApiKey }
+  return {
+    ...pub,
+    name: pub.name || preset?.name || pub.id,
+    // protocol 优先取存储值，回落到预设；自定义供应商一律带自己的 protocol
+    protocol: pub.protocol || preset?.protocol || 'openai-compatible',
+    isCustom: !!pub.isCustom,
+    hasApiKey: !!encryptedApiKey
+  }
+}
+
+// 把 settings 文件拆成「内置供应商（按 id 索引）」与「自定义供应商（数组）」两部分
+function readAll(): { settings: Record<string, StoredProvider>; custom: StoredProvider[] } {
+  const settings = readSettings()
+  const custom = Array.isArray(settings['__custom']) ? (settings['__custom'] as StoredProvider[]) : []
+  return { settings, custom }
+}
+function writeAll(settings: Record<string, any>, custom: StoredProvider[]): void {
+  if (custom.length) settings['__custom'] = custom
+  else delete settings['__custom']
+  writeSettings(settings)
 }
 
 export function listProviders(): AIProviderConfig[] {
-  const settings = readSettings()
-  return PROVIDER_PRESETS.map(preset => {
+  const { settings, custom } = readAll()
+  const builtins = PROVIDER_PRESETS.map(preset => {
     const saved = settings[preset.id]
     if (saved) return publicProvider(saved)
     return {
@@ -207,26 +226,34 @@ export function listProviders(): AIProviderConfig[] {
       name: preset.name,
       baseUrl: preset.baseUrl,
       defaultModel: preset.defaultModel,
+      protocol: preset.protocol,
       hasApiKey: preset.id === 'ollama',
       enabled: true
     }
   })
+  const customs = custom.map(publicProvider)
+  return [...builtins, ...customs]
 }
 
-export function getProvider(id: string): { preset: AIProviderPreset; config: AIProviderConfig; apiKey?: string } {
+export function getProvider(id: string): { preset?: AIProviderPreset; config: AIProviderConfig; apiKey?: string } {
+  const { settings, custom } = readAll()
   const preset = PROVIDER_PRESETS.find(p => p.id === id)
-  if (!preset) throw new Error(`未知的 AI Provider: ${id}`)
-  const settings = readSettings()
-  const saved = settings[id]
-  const config = saved ? publicProvider(saved) : {
-    id: preset.id,
-    name: preset.name,
-    baseUrl: preset.baseUrl,
-    defaultModel: preset.defaultModel,
-    hasApiKey: false,
-    enabled: true
+  if (preset) {
+    const saved = settings[id]
+    const config = saved ? publicProvider(saved) : {
+      id: preset.id,
+      name: preset.name,
+      baseUrl: preset.baseUrl,
+      defaultModel: preset.defaultModel,
+      protocol: preset.protocol,
+      hasApiKey: false,
+      enabled: true
+    }
+    return { preset, config, apiKey: saved ? decryptKey(saved.encryptedApiKey) : undefined }
   }
-  return { preset, config, apiKey: saved ? decryptKey(saved.encryptedApiKey) : undefined }
+  const stored = custom.find(c => c.id === id)
+  if (!stored) throw new Error(`未知的 AI Provider: ${id}`)
+  return { config: publicProvider(stored), apiKey: decryptKey(stored.encryptedApiKey) }
 }
 
 export function saveProvider(input: {
@@ -235,10 +262,35 @@ export function saveProvider(input: {
   defaultModel?: string
   apiKey?: string
   enabled?: boolean
+  // 自定义供应商保存时可能改协议（openai-compatible / anthropic）
+  protocol?: string
 }): AIProviderConfig {
+  const settings = readSettings()
+  // 自定义供应商（id 以 custom- 开头）走 __custom 数组，与内置预设解耦
+  if (input.id.startsWith('custom-')) {
+    const custom = Array.isArray(settings['__custom']) ? (settings['__custom'] as StoredProvider[]) : []
+    const idx = custom.findIndex(c => c.id === input.id)
+    const current = idx >= 0 ? custom[idx] : undefined
+    const encryptedApiKey = input.apiKey === undefined ? current?.encryptedApiKey : encryptKey(input.apiKey)
+    const updated: StoredProvider = {
+      id: input.id,
+      name: current?.name || input.id,
+      protocol: (input.protocol as AIProtocol) || current?.protocol || 'openai-compatible',
+      isCustom: true,
+      baseUrl: (input.baseUrl || current?.baseUrl || '').replace(/\/+$/, ''),
+      defaultModel: input.defaultModel || current?.defaultModel || '',
+      hasApiKey: !!encryptedApiKey,
+      enabled: input.enabled ?? current?.enabled ?? true,
+      encryptedApiKey
+    }
+    if (idx >= 0) custom[idx] = updated
+    else custom.push(updated)
+    settings['__custom'] = custom
+    writeSettings(settings)
+    return publicProvider(updated)
+  }
   const preset = PROVIDER_PRESETS.find(p => p.id === input.id)
   if (!preset) throw new Error(`未知的 AI Provider: ${input.id}`)
-  const settings = readSettings()
   const current = settings[preset.id]
   const encryptedApiKey = input.apiKey === undefined
     ? current?.encryptedApiKey
@@ -246,6 +298,8 @@ export function saveProvider(input: {
   const saved: StoredProvider = {
     id: preset.id,
     name: preset.name,
+    protocol: preset.protocol,
+    isCustom: false,
     baseUrl: (input.baseUrl || current?.baseUrl || preset.baseUrl).replace(/\/+$/, ''),
     defaultModel: input.defaultModel || current?.defaultModel || preset.defaultModel,
     hasApiKey: !!encryptedApiKey,
@@ -257,6 +311,79 @@ export function saveProvider(input: {
   return publicProvider(saved)
 }
 
+// 新增自定义供应商：生成唯一 id（custom-<时间戳>-<随机>），与内置预设互不冲突
+export function addCustomProvider(input: AddCustomProviderInput): AIProviderConfig {
+  const name = (input.name || '').trim()
+  if (!name) throw new Error('请填写供应商名称')
+  const baseUrl = (input.baseUrl || '').trim()
+  if (!baseUrl) throw new Error('请填写 Base URL')
+  const id = `custom-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+  const encryptedApiKey = input.apiKey ? encryptKey(input.apiKey) : undefined
+  const stored: StoredProvider = {
+    id,
+    name,
+    protocol: input.protocol || 'openai-compatible',
+    isCustom: true,
+    baseUrl: baseUrl.replace(/\/+$/, ''),
+    defaultModel: (input.defaultModel || '').trim(),
+    hasApiKey: !!encryptedApiKey,
+    enabled: true,
+    encryptedApiKey
+  }
+  const settings = readSettings()
+  const custom = Array.isArray(settings['__custom']) ? (settings['__custom'] as StoredProvider[]) : []
+  custom.push(stored)
+  settings['__custom'] = custom
+  writeSettings(settings)
+  return publicProvider(stored)
+}
+
+// 删除自定义供应商；若删除的正是当前偏好，清空 lastProviderId 让界面回退到内置供应商
+export function deleteCustomProvider(id: string): void {
+  const settings = readSettings()
+  const custom = Array.isArray(settings['__custom']) ? (settings['__custom'] as StoredProvider[]) : []
+  const next = custom.filter(c => c.id !== id)
+  if (next.length === custom.length) return
+  const prefs = getPreferences()
+  if (prefs.lastProviderId === id) savePreferences({ lastProviderId: undefined })
+  settings['__custom'] = next
+  writeSettings(settings)
+}
+
+// 重置 API 配置：内置供应商恢复预设 Base URL / 默认模型并清空 API Key；
+// 自定义供应商仅清空 API Key（名称 / 地址 / 模型由用户自定义，无「默认」可言）。
+export function resetProvider(id: string): AIProviderConfig {
+  const settings = readSettings()
+  const preset = PROVIDER_PRESETS.find(p => p.id === id)
+  if (preset) {
+    const saved: StoredProvider = {
+      id: preset.id,
+      name: preset.name,
+      protocol: preset.protocol,
+      isCustom: false,
+      baseUrl: preset.baseUrl,
+      defaultModel: preset.defaultModel,
+      hasApiKey: false,
+      enabled: true,
+      encryptedApiKey: undefined
+    }
+    settings[preset.id] = saved
+    writeSettings(settings)
+    return publicProvider(saved)
+  }
+  const custom = Array.isArray(settings['__custom']) ? (settings['__custom'] as StoredProvider[]) : []
+  const idx = custom.findIndex(c => c.id === id)
+  if (idx < 0) throw new Error(`未知的 AI Provider: ${id}`)
+  const updated: StoredProvider = { ...custom[idx], hasApiKey: false, encryptedApiKey: undefined }
+  custom[idx] = updated
+  settings['__custom'] = custom
+  writeSettings(settings)
+  return publicProvider(updated)
+}
+
 export function getSuggestedModels(providerId: string): string[] {
-  return getProvider(providerId).preset.suggestedModels
+  const preset = PROVIDER_PRESETS.find(p => p.id === providerId)
+  if (preset) return preset.suggestedModels
+  const stored = readAll().custom.find(c => c.id === providerId)
+  return stored?.suggestedModels || []
 }

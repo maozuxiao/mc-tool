@@ -24,6 +24,17 @@ export function UpdateBar() {
     )
   }
 
+  // 已是最新版本：手动检查（关于面板 / 托盘菜单）后给出明确反馈
+  if (update.latest) {
+    return (
+      <div className="update-bar">
+        <Icon name="icon-design" size={16} />
+        <span className="update-bar__text">{t('updateLatest')}</span>
+        <Button size="small" onClick={dismiss}>{t('updateDismiss')}</Button>
+      </div>
+    )
+  }
+
   if (!update.hasUpdate) return null
 
   const pct = Math.min(100, Math.max(0, update.progress ?? 0))

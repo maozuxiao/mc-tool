@@ -77,6 +77,10 @@ export function App() {
       setUpdateInfo({ hasUpdate: false, checking: false }))
     window.mcApi.onUpdateError((p: any) =>
       setUpdateInfo({ checking: false, error: p.message }))
+    // 托盘右键菜单「物料查询 / AI 助手」→ 直接切视图（视图状态仍归本组件管）
+    window.mcApi.onTraySwitchView((v) => setView(v))
+    // 托盘右键菜单「检查更新」→ 复用渲染层 checkUpdate()（含完整 UI 反馈）
+    window.mcApi.onTrayCheckUpdate(() => { useStore.getState().checkUpdate() })
   }, [])
 
   return (
