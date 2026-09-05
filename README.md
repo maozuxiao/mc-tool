@@ -4,7 +4,7 @@
 
 - 仓库：https://github.com/maozuxiao/mc-tool
 - 技术栈：Electron 33 + electron-vite + React 18 + TypeScript + Zustand，UI 组件库 [`animal-island-ui`](https://www.npmjs.com/package/animal-island-ui)
-- 当前版本：`1.0.33`（`package.json` 的 `version` 为准）
+- 当前版本：`1.0.34`（`package.json` 的 `version` 为准）
 
 ---
 
@@ -320,9 +320,9 @@ npm run pack:all   # 全平台
 ```
 dist/
 ├─ latest.yml                            # 自动更新元数据
-├─ MC物料查询 Setup 1.0.33.exe            # NSIS 安装包
-├─ MC物料查询 Setup 1.0.33.exe.blockmap  # 增量更新块映射
-└─ MC物料查询 1.0.33.exe                  # 便携版
+├─ MC物料查询 Setup 1.0.34.exe            # NSIS 安装包
+├─ MC物料查询 Setup 1.0.34.exe.blockmap  # 增量更新块映射
+└─ MC物料查询 1.0.34.exe                  # 便携版
 ```
 
 > macOS 交叉编译在 Windows 上不可靠，DMG 请在 macOS 上打包。

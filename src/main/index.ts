@@ -71,6 +71,9 @@ function showMainWindow(): void {
   if (mainWindow.isMinimized()) mainWindow.restore()
   mainWindow.show()
   mainWindow.focus()
+  // 1.0.34：窗口被调出时检测一次 OA 会话（后台驻留一晚后可能已失效）。
+  // 不 await，避免阻塞窗口显示；自愈失败时内部会拉起登录。
+  void onWindowShownCheck()
 }
 // 托盘菜单「物料查询 / AI 助手」：显示窗口 + 通知渲染层切换视图（视图状态在渲染层 store）
 function switchView(view: 'query' | 'ai'): void {
@@ -542,6 +545,103 @@ async function tryAutoSsoRefresh(sess: Electron.Session): Promise<boolean> {
   return after.ok
 }
 
+// ── OA 会话定时检测与静默自愈 ──────────────────────────────────
+// 背景：1.0.32 起应用可最小化到托盘长期后台驻留，但登录态检测原本只在启动时跑一次
+// （checkLoginAndNotify），导致后台跑一晚、OA 会话过期后 App 完全无感知，必须重启
+// 才能重新登录。这里补上「后台心跳 + 恢复窗口时探测」：失效先静默 SSO 自愈（免扫码），
+// 失败才拉起登录，全程无需重启。
+// 判定铁律沿用项目历史：只信 probeOaSession().ok；network 视为无法判定，绝不误踢真登录。
+const SESSION_CHECK_INTERVAL_MS = 10 * 60 * 1000  // 心跳间隔
+const SESSION_CHECK_THROTTLE_MS = 60 * 1000       // 恢复窗口探测的节流窗口
+let sessionCheckTimer: NodeJS.Timeout | null = null
+let sessionCheckInFlight: Promise<boolean> | null = null
+let lastSessionCheckAt = 0
+let sessionValid = false
+let sessionExpired = false
+
+/**
+ * 一次「探测 → 失效则静默 SSO 自愈」，返回最终会话是否有效。
+ * 受并发去重与 60 秒节流双重保护；本函数只更新状态与日志，
+ * 是否拉起登录由调用方按触发来源决定（后台心跳绝不打扰）。
+ */
+async function checkAndHealSession(): Promise<boolean> {
+  // 并发去重：避免心跳与恢复窗口探测并发、或连点托盘放大请求
+  if (sessionCheckInFlight) return sessionCheckInFlight
+  // 节流：距上次探测不足 60 秒则沿用上次结论；从未探测过（lastSessionCheckAt=0）时必定探测。
+  // 连点托盘恢复窗口不会反复发请求，而隔夜后回来（远超 60 秒）必定真实探测。
+  if (lastSessionCheckAt > 0 && Date.now() - lastSessionCheckAt < SESSION_CHECK_THROTTLE_MS) {
+    return sessionValid
+  }
+  sessionCheckInFlight = (async () => {
+    try {
+      const sess = session.fromPartition(PARTITION)
+      const probed = await probeOaSession(sess)
+      if (probed.ok) {
+        // 正常探测成功不写日志：10 分钟一次会刷屏，只在状态变化时记录
+        sessionValid = true
+        sessionExpired = false
+        return true
+      }
+      // 网络级异常：无法判定会话是否失效，保持原状态，绝不误判为失效
+      if (probed.reason === 'network') {
+        debugLog(`[SESSION] probe network error, keep current state (valid=${sessionValid})`)
+        return sessionValid
+      }
+      // 未登录 / 扫码中：既不自愈也不拉起登录，避免与隐藏登录窗口争抢（1.0.16 教训）
+      if (probed.reason === 'nocookie') {
+        debugLog('[SESSION] no OA cookie, treat as not logged in (skip heal)')
+        sessionValid = false
+        return false
+      }
+      // reauth / invalid：会话确实失效，先尝试静默 SSO 自愈
+      debugLog(`[SESSION] session invalid (${probed.reason}), try silent SSO heal`)
+      const healed = await tryAutoSsoRefresh(sess)
+      if (healed) {
+        debugLog('[SESSION] silent SSO heal succeeded, no QR needed')
+        sessionValid = true
+        sessionExpired = false
+        return true
+      }
+      debugLog('[SESSION] silent SSO heal failed, session expired')
+      sessionValid = false
+      sessionExpired = true
+      return false
+    } catch (e: any) {
+      debugLog(`[SESSION] check error: ${e?.message || e}`)
+      return sessionValid
+    } finally {
+      lastSessionCheckAt = Date.now()
+      sessionCheckInFlight = null
+    }
+  })()
+  return sessionCheckInFlight
+}
+
+/** 后台心跳：每 10 分钟探测一次；失败仅标记状态，绝不主动弹窗打扰用户 */
+function startSessionHeartbeat(): void {
+  stopSessionHeartbeat()
+  sessionCheckTimer = setInterval(() => {
+    if (sessionCheckInFlight) return
+    void checkAndHealSession()
+  }, SESSION_CHECK_INTERVAL_MS)
+  debugLog(`[SESSION] heartbeat started (every ${SESSION_CHECK_INTERVAL_MS / 60000} min)`)
+}
+function stopSessionHeartbeat(): void {
+  if (sessionCheckTimer) {
+    clearInterval(sessionCheckTimer)
+    sessionCheckTimer = null
+  }
+}
+
+/** 窗口被调出（托盘单击 / 菜单 / 任务栏图标）时：强制检测一次，自愈仍失败才拉起登录 */
+async function onWindowShownCheck(): Promise<void> {
+  const ok = await checkAndHealSession()
+  if (!ok && sessionExpired) {
+    debugLog('[SESSION] window shown but session expired -> request login view')
+    requestLoginView()
+  }
+}
+
 async function isOALoggedin(): Promise<boolean> {
   try {
     const sess = session.fromPartition(PARTITION)
@@ -673,8 +773,13 @@ async function doCheckLoginAndNotify() {
       mainWindow.focus()
     }
     mainWindow.webContents.send(IPC.OA_CHECK_LOGGED, { loggedIn: true })
+    // 已登录：启动会话心跳，后台驻留期间定期探测并在失效时静默自愈
+    sessionValid = true
+    startSessionHeartbeat()
   } else {
     // 无可用 cookie：通知渲染进程在主窗口内显示登录视图（webview），不弹独立窗口
+    sessionValid = false
+    stopSessionHeartbeat()
     mainWindow.webContents.send(IPC.OA_LOGIN_STATE, { state: 'logging' })
   }
 }
@@ -682,6 +787,10 @@ async function doCheckLoginAndNotify() {
 // 触发渲染进程在主窗口内显示 OA 登录视图（用于“重新登录”/首次无 cookie）
 function requestLoginView() {
   if (mainWindow && !mainWindow.isDestroyed()) {
+    // 关键（1.0.34 修复）：必须先把渲染层的 loggedIn 置为 false，否则登录层不会显示。
+    // 此前这里只发 OA_LOGIN_STATE，渲染层仍是「已登录」状态，导致主进程即便检测到
+    // 会话失效，界面也毫无反应——用户只能重启 App。
+    mainWindow.webContents.send(IPC.OA_CHECK_LOGGED, { loggedIn: false, reason: 'reauth' })
     mainWindow.webContents.send(IPC.OA_LOGIN_STATE, { state: 'logging' })
   }
 }
@@ -698,10 +807,12 @@ app.whenReady().then(() => {
   // 托盘常驻：总开关开启时启动即创建（关闭时不创建托盘，❌ 直接退出）
   if (minimizeToTray) createTray()
   // 任何路径退出（含托盘菜单退出 / app.quit()）都置位 quitting，让 close 拦截放行，并销毁托盘
-  app.on('before-quit', () => { quitting = true; destroyTray() })
+  app.on('before-quit', () => { quitting = true; stopSessionHeartbeat(); destroyTray() })
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    // 任务栏图标点击恢复：走 showMainWindow 以便顺带检测一次 OA 会话
+    else showMainWindow()
   })
 })
 
@@ -1513,8 +1624,13 @@ ipcMain.handle(IPC.OA_QR_LOGIN_POLL, async (_e, payload: {
           }
           if (finalOk && mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send(IPC.OA_CHECK_LOGGED, { loggedIn: true })
+            // 扫码登录成功落地：启动会话心跳
+            sessionValid = true
+            startSessionHeartbeat()
           } else if (mainWindow && !mainWindow.isDestroyed()) {
-            // SSO 未真正落地：如实通知前端回到扫码界面重试（关闭"正在进入工具"loading），
+            // SSO 未真正落地：如实通知前端回到扫码界面重试（关闭"正在进入工具"loading）
+                  sessionValid = false
+            stopSessionHeartbeat()
             // 不再把假登录骗进工具后首次查询才被 901 踢出。带原因：network→网络异常提示。
             debugLog(`[QR-POLL] SSO did not truly land (reason=${landReason}), notify renderer to retry QR login`)
             mainWindow.webContents.send(IPC.OA_CHECK_LOGGED, { loggedIn: false, reason: landReason })

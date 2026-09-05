@@ -24,6 +24,11 @@ interface State {
   loginError: string
   // 强制重新拉取二维码的序号：network 失败等场景自增，LoginOverlay 监听后自动重新拉码
   qrRefetchSeq: number
+  // 1.0.34：OA 会话已失效（查询被 901 拒绝且自动自愈与重试均失败）。
+  // 驱动顶部「登录失效」提示条——历史缺陷是 store.error 无任何组件消费，
+  // 查询失败只写进 error、界面上一个字都不显示，用户以为点了没反应。
+  // 登录成功时清除（见 App.tsx 的 onLoginChecked / onLoginReady）。
+  sessionExpired: boolean
   // 基础输入
   itemNo: string
   fields: Field[]
@@ -71,6 +76,7 @@ interface State {
   setLoginState: (v: 'checking' | 'logging' | 'failed' | 'ok') => void
   setLoginError: (v: string) => void
   setQrRefetchSeq: (v: number) => void
+  setSessionExpired: (v: boolean) => void
 
   setItemNo: (v: string) => void
   addField: () => void
@@ -135,6 +141,8 @@ async function fetchJSON(url: string, _retry = true): Promise<any> {
       } catch {}
       return window.mcApi.fetchOA(url).catch((err2: any) => {
         if (err2?.message === 'NEED_RELOGIN') {
+          // 1.0.34：自愈（refreshOaSession）与重试都失败，标记失效以显示顶部提示条
+          try { useStore.getState().setSessionExpired(true) } catch {}
           try { useStore.getState().reLogin() } catch {}
           throw new Error('会话已失效，请重新登录')
         }
@@ -142,6 +150,7 @@ async function fetchJSON(url: string, _retry = true): Promise<any> {
       })
     }
     if (err?.message === 'NEED_RELOGIN') {
+      try { useStore.getState().setSessionExpired(true) } catch {}
       try { useStore.getState().reLogin() } catch {}
       throw new Error('会话已失效，请重新登录')
     }
@@ -163,6 +172,7 @@ export const useStore = create<State>((set, get) => ({
   loginState: 'checking',
   loginError: '',
   qrRefetchSeq: 0,
+  sessionExpired: false,
   itemNo: '',
   fields: [{ id: 'f1', val: '' }, { id: 'f2', val: '' }, { id: 'f3', val: '' }],
   batchText: '',
@@ -190,6 +200,7 @@ export const useStore = create<State>((set, get) => ({
   setLoginState: (v) => set({ loginState: v }),
   setLoginError: (v) => set({ loginError: v }),
   setQrRefetchSeq: (v) => set({ qrRefetchSeq: v }),
+  setSessionExpired: (v) => set({ sessionExpired: v }),
 
   setItemNo: (v) => set({ itemNo: v }),
   addField: () => set(s => ({ fields: [...s.fields, { id: 'f' + Date.now(), val: '' }] })),

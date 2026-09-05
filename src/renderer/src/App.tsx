@@ -4,6 +4,7 @@ import { LoginOverlay } from './components/LoginOverlay'
 import { QueryPanel } from './components/QueryPanel'
 import { ChatPanel } from './components/ai/ChatPanel'
 import { UpdateBar } from './components/UpdateBar'
+import { SessionExpiredBar } from './components/SessionExpiredBar'
 
 type MainView = 'query' | 'ai'
 
@@ -18,6 +19,7 @@ export function App() {
   const setLanding = useStore(s => s.setLanding)
   const setLoginError = useStore(s => s.setLoginError)
   const setQrRefetchSeq = useStore(s => s.setQrRefetchSeq)
+  const setSessionExpired = useStore(s => s.setSessionExpired)
   const setUpdateInfo = useStore(s => s.setUpdateInfo)
   // landing 是一层全屏遮罩，只要它不消失，整个界面都无法输入。
   // 主进程已保证每条路径都会给出结束事件，这里再加一道保险：
@@ -42,6 +44,8 @@ export function App() {
       if (s.loggedIn) {
         setLoginState('ok')
         setLoginError('')
+        // 登录成功：清除失效提示条
+        setSessionExpired(false)
       } else {
         const reason = s.reason
         setLoginError(
@@ -56,14 +60,14 @@ export function App() {
       setLanding(false)
       setLoggedIn(s.loggedIn)
       setChecking(false)
-      if (s.loggedIn) setLoginState('ok')
+      if (s.loggedIn) { setLoginState('ok'); setSessionExpired(false) }
     })
     window.mcApi.onLoginState((s: { state: string }) => {
       const state = s.state as 'checking' | 'logging' | 'failed' | 'ok'
       setLoginState(state)
       if (state === 'checking') setChecking(true)
       else setChecking(false)
-      if (state === 'ok') { setLanding(false); setLoggedIn(true) }
+      if (state === 'ok') { setLanding(false); setLoggedIn(true); setSessionExpired(false) }
     })
     window.mcApi.onLoginLanding(() => setLanding(true))
     window.mcApi.reloadLogin()
@@ -86,6 +90,7 @@ export function App() {
   return (
     <div className="app-root">
       <UpdateBar />
+      <SessionExpiredBar />
       {!loggedIn && !landing && <LoginOverlay loginState={loginState} />}
       <div className={`view-pane${view === 'query' ? '' : ' is-hidden'}`}>
         <QueryPanel disabled={!loggedIn} />
