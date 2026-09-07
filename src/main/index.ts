@@ -32,7 +32,7 @@ function getIconPath() {
 
 // ── 系统托盘常驻 + 应用偏好 ────────────────────────────────
 // 三项设置（持久化到 userData/app-prefs.json）：
-//   minimizeToTray — 最小化按钮 `_` 时缩进托盘后台（默认开）
+//   minimizeToTray — 启用系统托盘后台常驻（默认开）；关闭时是否隐藏到托盘由 closeToTray 决定
 //   closeToTray    — 关闭按钮 ❌ 时隐藏到托盘（默认开；仅在 minimizeToTray 开启时生效）
 //   autoLaunch     — 开机自启，静默启动到托盘不弹窗（默认关）
 // 托盘左键单击 = 显示主窗口；右键菜单：显示主窗口 / 物料查询 / AI 助手 / 检查更新 / 退出。
@@ -69,7 +69,8 @@ function saveAppPrefs(): void {
 function showMainWindow(): void {
   if (!mainWindow || mainWindow.isDestroyed()) { createWindow(); return }
   if (mainWindow.isMinimized()) mainWindow.restore()
-  mainWindow.show()
+  // 仅当窗口不可见时才 show：已可见时重复调用 show 会让窗口闪一下（1.0.35 修复）
+  if (!mainWindow.isVisible()) mainWindow.show()
   mainWindow.focus()
   // 1.0.34：窗口被调出时检测一次 OA 会话（后台驻留一晚后可能已失效）。
   // 不 await，避免阻塞窗口显示；自愈失败时内部会拉起登录。
@@ -388,10 +389,9 @@ function createWindow() {
   // 加载本地查询面板（默认页面）
   mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
 
-  // 「最小化到托盘后台运行」：最小化缩进托盘；关闭按钮行为由 closeToTray 决定
-  mainWindow.on('minimize', () => {
-    if (minimizeToTray) mainWindow?.hide()
-  })
+  // 1.0.35 修复：最小化按钮 `_` 走系统默认行为——缩到任务栏并在任务栏保留图标，
+  // 不再 hide()。此前 hide() 会把窗口从任务栏移除，表现为「最小化后任务栏图标消失、
+  // 直接进了托盘」。隐藏到托盘统一由关闭按钮行为（closeToTray）控制。
   mainWindow.on('close', (e) => {
     // 「直接退出」或托盘总开关关闭时不拦截，走原退出逻辑
     if (minimizeToTray && closeToTray && !quitting) { e.preventDefault(); mainWindow?.hide() }
@@ -800,8 +800,9 @@ function requestLoginView() {
 // 托盘出现重复图标、两份登录态与更新提示互相打架、多个进程争抢同一份 userData 持久化
 // 文件（会话备份、AI 配置、偏好设置都在里面）。已有实例收到 second-instance 时把窗口唤回。
 // 注意：必须在 app ready 之前请求锁。
-if (!app.requestSingleInstanceLock()) {
-  // 拿不到锁说明已有实例在运行，本进程直接退出（ready 前调用 quit 不会再走初始化）
+const gotSingleInstanceLock = app.requestSingleInstanceLock()
+if (!gotSingleInstanceLock) {
+  // 拿不到锁说明已有实例在运行，本进程直接退出
   app.quit()
 } else {
   app.on('second-instance', (_event, argv) => {
@@ -818,6 +819,9 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 app.whenReady().then(() => {
+  // 双保险：第二个实例（没拿到锁）即便 ready 仍被触发，也绝不创建窗口。
+  // 否则会「先建窗口再退出」，表现为双击图标时窗口一闪而过（1.0.35 修复重复启动闪烁）。
+  if (!gotSingleInstanceLock) return
   app.setAppUserModelId(APP_ID)
   app.setName('MC物料查询')
   // 先读偏好再建窗口：--hidden 静默启动与托盘开关都要用
