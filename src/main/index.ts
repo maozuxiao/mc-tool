@@ -795,6 +795,28 @@ function requestLoginView() {
   }
 }
 
+// ── 单实例锁（1.0.35）：同一时间只允许运行一个实例 ────────────
+// 应用已在运行时再次双击 exe / 桌面快捷方式，不再启动第二个进程——避免多开造成
+// 托盘出现重复图标、两份登录态与更新提示互相打架、多个进程争抢同一份 userData 持久化
+// 文件（会话备份、AI 配置、偏好设置都在里面）。已有实例收到 second-instance 时把窗口唤回。
+// 注意：必须在 app ready 之前请求锁。
+if (!app.requestSingleInstanceLock()) {
+  // 拿不到锁说明已有实例在运行，本进程直接退出（ready 前调用 quit 不会再走初始化）
+  app.quit()
+} else {
+  app.on('second-instance', (_event, argv) => {
+    // 第二个实例若以 --hidden 启动（开机自启重复触发），保持静默不弹窗
+    if (argv.some(a => a === '--hidden' || a === '/--hidden')) return
+    // 尚未完成初始化（主窗口还没建好）时忽略：否则 showMainWindow 会走 createWindow
+    // 分支，与 app.whenReady 里的 createWindow 撞车，最终开出两个窗口。
+    // 这种「启动瞬间又双击一次」的情况，等初始化完成后窗口本来就会显示。
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    // 唤回已有实例：窗口最小化或藏在托盘后台时都会恢复并聚焦；
+    // showMainWindow 内部还会顺带检测一次 OA 会话（1.0.34 的 onWindowShownCheck）
+    showMainWindow()
+  })
+}
+
 app.whenReady().then(() => {
   app.setAppUserModelId(APP_ID)
   app.setName('MC物料查询')
