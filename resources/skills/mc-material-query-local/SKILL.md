@@ -4,7 +4,7 @@ description: 查询锐明 OA MC 物料系统的本地优化版技能（物料搜
 metadata:
   type: skill
   agent_created: true
-version: 2.0.0
+version: 2.1.0
 name_zh: OA料号库存查询（本地版）
 description_zh: 查询锐明 OA MC 物料系统（物料搜索/料号查询/BOM/规格文件/物料对比），本地维护优化版
 ---
@@ -127,13 +127,16 @@ schtasks /Create /TN "OA-MC-KeepAlive" /SC MINUTE /MO 20 /TR "node C:\Users\stre
 
 ## IMX307 替代料号（本地静态数据 + 自动提示）
 
-数据来源：`E:\毛祖潇的知识库\产品资料\产品线\摄像机\AHD\IMX307替代料号明细_260529.xlsx`，已梳理为本地 JSON：
-`$SKILL\data\imx307_replacement.json`（438 条映射：IMX307 方案料号 → F355 等替代料号）。
+数据来源：`E:\毛祖潇的知识库\产品资料\产品线\摄像机\AHD\IMX307替代料号明细_260910.xlsx`，已梳理为本地 JSON：
+`$SKILL\data\imx307_replacement.json`（501 条映射：IMX307 方案料号 → 替代料号）。
+
+映射表含**双供应商**：`翔飞`（F355 方案，471 条）+ `罡扇`（2053 方案，30 条），每条目用 `supplier` 字段区分，并保留原方案描述 `original_desc`。
+源文件更新后重新生成：`python scripts/build_imx307.py`（自动取 AHD 目录下最新的 `IMX307替代料号明细_*.xlsx`）。
 
 **自动提示规则（两个查询入口均已实现）**：
 - `mc_query.js`（MC 服务器查询）与 `camera_list_query.py`（本地清单查询）的 `item`/`search`/`batch` 结果中，
   若某行物料描述含 **IMX307**，自动附加 `imx307_replacement` 字段：
-  - 命中映射表 → 数组含替代料号（`replacement`、`replacement_desc`、`lifecycle`、`model`）
+  - 命中映射表 → 数组含替代料号（`replacement`、`replacement_desc`、`lifecycle`、`model`、`supplier`）
   - 未命中映射表 → 空数组 `[]`（表示已检查但无替代记录，需提示用户确认）
 - agent 收到含 IMX307 的结果时，**必须**向用户提示替代料号并告知客户（如"该料号为 IMX307 方案，建议改用替代料号 XXX（F355方案）"）。
 - 也可用 `imx307 <料号>` 子命令单独查询替代映射。
