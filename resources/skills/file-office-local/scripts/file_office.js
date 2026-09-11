@@ -1357,7 +1357,7 @@ main().catch((e) => {
     code: e && e.code ? e.code : undefined
   }
   if (e instanceof SandboxError) {
-    payload.code = 'PATH_OUTSIDE_ROOT'
+    payload.code = e.code || 'PATH_OUTSIDE_ROOT'
     printJson(payload)
     process.exitCode = 2
     return

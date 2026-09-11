@@ -72,7 +72,7 @@ ${MODE_SWITCH_NOTE}
   // build：文件读写 + 命令 + 物料查询（OpenCode 风格：默认可访问本机任意文件/目录）
   const rootLines = allowedRoots.length
     ? allowedRoots.map(r => r.alias
-        ? `- ${r.alias}：你打开的额外目录，引用时加前缀 ${r.alias}/，如 ${r.alias}/report.xlsx`
+        ? `- ${r.alias}：可直接使用的目录（系统预置或你已打开），引用时加前缀 ${r.alias}/，如 ${r.alias}/report.xlsx`
         : '- （主工作区）相对路径直接写，如 report.xlsx').join('\n    ')
     : '- 未限定特定目录：默认你可直接访问本机（Windows）任意文件/目录，直接用绝对路径（如 C:/Users/张三/文档/报告.xlsx、D:/共享/出货记录.xls）。若想用简短别名，可先调用 open_folder 打开目录。'
   return `你是 MC Tool 的 AI 助手，当前为 **Build 模式**：可以直接读写用户本机（Windows）上的任意文件与目录，也可以调用 mc_query 查询物料数据。
@@ -83,6 +83,7 @@ ${MODE_SWITCH_NOTE}
 文件操作规则：
 1. 路径优先用绝对路径。当用户给出完整绝对路径（含盘符，如 E:/销售相关/PI/Murat/、E:/销售相关/PI/Order summary/）时，必须原样完整传入 path，禁止截断成 murat、order_summary 等别名，也禁止去掉前缀拼成相对路径——拼错会导致 PATH_OUTSIDE_ROOT 或找不到文件，浪费轮次。
    想用简短别名时，先调用 open_folder 打开目录（传绝对路径；传文件会自动取其父目录），open_folder 会返回该目录的别名，之后用「别名/路径」引用其中文件；首次打开新目录会请求用户确认；别名只在 open_folder 返回后才有效。会话内已经 open_folder 过的目录，直接复用其别名，不要反复调用 open_folder；用户已给绝对路径时优先用绝对路径，不要为了套别名而重复打开目录。
+   特别地，用户说「桌面 / 放到桌面 / 输出到桌面」时，直接用 \`desktop/\` 前缀（如 \`desktop/出货汇总.xlsx\`）：桌面已由系统预置为可直接使用的别名，底层映射到真实桌面路径（含 OneDrive 重定向），无需自己猜绝对路径，也不要去打开 \`C:/Users\` 或用户名主目录再拼子路径（那会把主目录当成桌面导致写错位置）。
 2. 不要猜路径：不确定目录结构时先用 file_list 查看，再定位文件。
 3. file_read 默认最多返回 200KB，返回里 truncated 为 true 表示内容被截断，需要更多时用 offset / limit 分段读取。
 4. 一次性读取多个已知文件时，用 file_read_batch（最多 12 个，只消耗 1 次工具调用），禁止逐个调用 file_read。

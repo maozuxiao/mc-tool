@@ -7,10 +7,10 @@ const path = require('path')
 const os = require('os')
 
 class SandboxError extends Error {
-  constructor(message) {
+  constructor(message, code) {
     super(message)
     this.name = 'SandboxError'
-    this.code = 'PATH_OUTSIDE_ROOT'
+    this.code = code || 'PATH_OUTSIDE_ROOT'
   }
 }
 
@@ -84,8 +84,8 @@ function resolveSymlink(abs) {
  * @returns {string} 安全的真实绝对路径
  */
 function resolveSafe(root, target, opts = {}) {
-  if (!target || typeof target !== 'string') throw new SandboxError('路径不能为空')
-  if (/[\u0000-\u001f]/.test(target)) throw new SandboxError('路径包含非法字符')
+  if (!target || typeof target !== 'string') throw new SandboxError('路径不能为空', 'INVALID_PATH')
+  if (/[\u0000-\u001f]/.test(target)) throw new SandboxError('路径包含非法字符', 'INVALID_PATH')
 
   const targetStr = String(target)
 
@@ -101,27 +101,35 @@ function resolveSafe(root, target, opts = {}) {
   // 落在工作区内：解析软链接后再做一次越界校验即可放行
   if (isInside(rootAbs, abs)) {
     const real = resolveSymlink(abs)
-    if (!isInside(rootAbs, real)) throw new SandboxError(`路径越界：${targetStr} 解析后指向工作区之外`)
+    if (!isInside(rootAbs, real)) throw new SandboxError(
+      `路径越界：${targetStr} 解析后指向工作区之外。如需写入桌面，请用 desktop/ 前缀（如 desktop/表格.xlsx）。`,
+      'PATH_OUTSIDE_ROOT'
+    )
     return finalize(real, targetStr, opts)
   }
 
   // 工作区外：仅「显式绝对路径」放行（Build 模式承诺可访问本机任意文件），且不得是受保护系统目录
   const isExplicitAbs = path.isAbsolute(targetStr) || /^[a-zA-Z]:[\\/]/.test(targetStr) || targetStr.startsWith('/')
   if (isExplicitAbs) {
-    if (isProtectedDir(abs)) throw new SandboxError(`该目录受保护，不允许访问（系统目录）：${targetStr}`)
+    if (isProtectedDir(abs)) throw new SandboxError(`该目录受保护，不允许访问（系统目录）：${targetStr}`, 'DIR_BLOCKED')
     const real = resolveSymlink(abs)
-    if (isProtectedDir(real)) throw new SandboxError(`该目录受保护，不允许访问（系统目录）：${targetStr}`)
+    if (isProtectedDir(real)) throw new SandboxError(`该目录受保护，不允许访问（系统目录）：${targetStr}`, 'DIR_BLOCKED')
     return finalize(real, targetStr, opts)
   }
 
   // 其余（如 ../ 逃逸、相对路径解析到工作区外）一律拒绝
-  throw new SandboxError(`路径越界：${targetStr} 不在工作区 ${rootAbs} 内`)
+  throw new SandboxError(
+    `路径越界：${targetStr} 不在已授权工作区 ${rootAbs} 内。` +
+    `如需写入桌面，请用 desktop/ 前缀（如 desktop/表格.xlsx），不要自己猜绝对路径；` +
+    `其他目录请用 open_folder 打开后用「别名/路径」引用，或直接使用绝对路径。`,
+    'PATH_OUTSIDE_ROOT'
+  )
 }
 
 // 必须存在校验，统一收尾
 function finalize(abs, targetStr, opts) {
   if (opts.mustExist && !fs.existsSync(abs)) {
-    throw new SandboxError(`路径不存在：${targetStr}`)
+    throw new SandboxError(`路径不存在：${targetStr}`, 'PATH_NOT_FOUND')
   }
   return abs
 }

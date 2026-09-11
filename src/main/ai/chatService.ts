@@ -8,7 +8,7 @@ import { getProvider, savePreferences } from './providerStore'
 import { opencodeSessionHeaders } from './providerApi'
 import { mcSkillSystemPrompt } from './mcSkill'
 import { dispatchTool, toolsForMode, type OpenFolderResult } from './toolRegistry'
-import { isInside, dirBlockReason, makeAlias } from './rootGuard'
+import { isInside, dirBlockReason, makeAlias, systemRoots } from './rootGuard'
 import {
   appendMessage, appendToolRun, completeToolRun, createConversation,
   getConversation, updateMessage
@@ -53,6 +53,13 @@ function mergeRoots(existing: AllowedRoot[], payload: AISendPayload): AllowedRoo
   for (const e of payload.extraRoots || []) {
     const p = resolve(e.path)
     if (!covered(p)) roots.push({ alias: e.alias, path: p })
+  }
+  // 预置系统目录（当前仅桌面），固定别名 'desktop'，避免与用户目录别名冲突；
+  // 已存在同名别名/路径则不重复追加，确保 AI 写桌面默认可用且不弹确认框
+  for (const s of systemRoots()) {
+    if (!roots.some(r => r.alias === s.alias || covered(s.path))) {
+      roots.push(s)
+    }
   }
   return roots
 }

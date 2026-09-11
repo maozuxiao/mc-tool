@@ -1,6 +1,6 @@
 import { app } from 'electron'
 import { homedir } from 'os'
-import { basename, resolve } from 'path'
+import { basename, existsSync, join, resolve } from 'path'
 
 export interface AllowedRoot {
   /** 空字符串表示主工作区（裸相对路径）；其余为额外目录的别名 */
@@ -38,4 +38,19 @@ export function makeAlias(dir: string, roots: AllowedRoot[]): string {
   let i = 2
   while (used.has(`${base}-${i}`)) i++
   return `${base}-${i}`
+}
+
+// 预置系统特殊目录：当前仅「桌面」。用 app.getPath('desktop') 动态取真实桌面路径，
+// 自动处理 Windows 桌面被 OneDrive 重定向（C:/Users/xxx/OneDrive/Desktop）的情况，
+// 不写死路径。桌面是 HOME 子目录，dirBlockReason 不拦截，可安全预置为 Build 模式默认可写别名。
+// 异常时回退到 homedir()/Desktop，再不行则返回空数组（不预置，不影响其他逻辑）。
+export function systemRoots(): AllowedRoot[] {
+  try {
+    const desktop = app.getPath('desktop')
+    if (desktop) return [{ alias: 'desktop', path: desktop }]
+  } catch {
+    // app.getPath 在极少数环境会抛错，走兜底
+  }
+  const fallback = join(homedir(), 'Desktop')
+  return existsSync(fallback) ? [{ alias: 'desktop', path: fallback }] : []
 }
