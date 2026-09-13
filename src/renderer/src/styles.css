@@ -385,12 +385,17 @@ body {
   border-bottom: 3px solid var(--mc-accent-soft);
 }
 .brand { display: flex; align-items: center; gap: 14px; }
-.brand-icon-btn { padding: 0; border: 0; background: transparent; display: inline-flex; cursor: pointer; }
+/* 图标 + 标题 + 倒计时整块可点（早先只有 56px 的图标可点，点标题「没反应」）：
+   用 <button> 承载，排布与 .brand 一致，故直接复刻 flex/gap，去掉按钮默认外观。 */
+.brand-btn {
+  display: flex; align-items: center; gap: 14px; padding: 0; border: 0;
+  background: transparent; font-family: inherit; text-align: left; cursor: pointer;
+}
 /* 品牌图标改用原生 <img>：库 1.12 的 <Icon src> 会退化成 span + background-image，
    尺寸不匹配时图形被裁切并平铺（顶栏图标显示异常的根因）。
    object-fit: contain 保证整幅图形等比缩放，font-size 随之失去意义，已删除。 */
-.brand-icon { display: block; width: 56px; height: 56px; object-fit: contain; cursor: pointer; transition: transform .15s ease; }
-.brand-icon:hover { transform: scale(1.05); }
+.brand-icon { display: block; width: 56px; height: 56px; object-fit: contain; transition: transform .15s ease; }
+.brand-btn:hover .brand-icon { transform: scale(1.05); }
 /* 标题 + 倒计时两行：22px 标题 + 3px 间距 + 约 27px 倒计时 ≈ 52px，不会撑高 56px 的 logo */
 .brand-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .brand-title { font-size: 22px; font-weight: 700; letter-spacing: .5px; line-height: 1; color: var(--mc-accent); }
@@ -628,7 +633,6 @@ body {
 }
 /* 关闭按钮行为下拉：控件已换成库 <Select>，其 wrapper 自带 min-width:140px，
    这里只保证它在行内不被压扁 */
-.settings-select-wrap { display: flex; flex-shrink: 0; }
 /* 主题行表头：左侧标签 + 右侧一句操作说明 */
 .settings-row-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .settings-hint { font-size: 11px; line-height: 1.4; color: var(--mc-ink-soft); text-align: right; }
@@ -1049,9 +1053,8 @@ table.mq.bom thead th:nth-child(7) { width: 58px; }
 table.mq.bom thead th:nth-child(8) { width: 70px; }
 table.mq.bom thead th:nth-child(9) { width: 70px; }
 table.mq.bom thead th:nth-child(10) { width: 56px; }
-/* 类型/去重控件的高度不再靠 [class*="trigger-"] 命中库内部类名 + !important 实现：
-   库 <Select> 的触发器默认就是 40px，与去重所用 <Button> 的 middle 档同高，两者天然齐平。
-   原有的三条 !important 覆盖已删除。 */
+/* 类型控件已由自绘 .mc-select 承载（触发器与 .lifecycle-trigger 同为 40px / 12px / 2px 规格），
+   与去重所用 <Button> 的 middle 档天然齐平 —— 早先那三条 !important 覆盖库内部类名的写法已删除。 */
 .filter-lifecycle-group { min-width: 120px; }
 .lifecycle-dropdown { position: relative; }
 /* 触发器与相邻的库 <Select> 触发器同规格（40px 高、12px 圆角、2px 描边） */
@@ -1104,6 +1107,60 @@ table.mq.bom thead th:nth-child(10) { width: 56px; }
   color: var(--mc-accent); cursor: pointer;
 }
 .lifecycle-empty { padding: 12px 8px; color: var(--mc-ink-soft); font-size: var(--mc-font-sm); text-align: center; }
+
+/* ── 自绘单选下拉 .mc-select（见 components/McSelect.tsx）──
+   替代库 <Select>：库的面板是 #ffeea0 底 / 28px 圆角 / 条目居中 / 黄色药丸高亮 /
+   橙色三角光标，并且从触发器右侧弹出（Select.js 内联写了 left:100%），与整站的纸感面板
+   不是一套语言，而库组件不接受 className、只认内部哈希类名，故自绘一份。
+   面板规格与 .ai-model-panel 逐条一致（surface 底、1px 描边、14px 圆角、6px 内边距、
+   条目 6px 8px + 主题色 14% 悬停、选中为主色渐变）；触发器沿用 .lifecycle-trigger 的
+   40px / 12px / 2px 规格，两者并排时天然齐平。 */
+.mc-select { position: relative; display: inline-block; min-width: 0; }
+.mc-select__trigger {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  height: 40px; padding: 0 14px; min-width: 130px;
+  border: 2px solid var(--mc-line-strong); border-radius: 12px;
+  background: var(--mc-surface); color: var(--mc-ink);
+  font-family: inherit; font-size: var(--mc-font-base); font-weight: 600;
+  cursor: pointer; user-select: none; box-sizing: border-box;
+  transition: border-color .15s ease;
+}
+.mc-select__trigger:hover { border-color: var(--mc-accent-soft); }
+.mc-select__trigger.open { border-color: var(--mc-accent); }
+.mc-select__trigger.disabled { opacity: .55; cursor: not-allowed; }
+.mc-select__value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mc-select__value.placeholder { color: var(--mc-ink-soft); font-weight: 500; }
+.mc-select__arrow { display: inline-flex; color: var(--mc-ink-soft); transform: rotate(90deg); transition: transform .15s ease, color .15s ease; }
+.mc-select__trigger.open .mc-select__arrow { transform: rotate(-90deg); color: var(--mc-accent); }
+/* 紧凑变体：AI 工具栏与设置面板里与 .ai-model-input（34px / 10px 圆角 / 1px 描边）齐平 */
+.mc-select__trigger--sm {
+  height: 34px; min-width: 0; padding: 0 10px;
+  border-width: 1px; border-radius: 10px;
+  font-size: var(--mc-font-sm);
+}
+.mc-select__panel {
+  /* 定位（fixed 坐标）由 JS 内联写入：面板要跳出弹窗/设置面板祖先的 overflow 裁剪，
+     所以不能靠 CSS 的 top/left —— 这里只留 z-index 与视觉规格，与 .ai-model-panel 一致。 */
+  position: absolute; z-index: 60;
+  max-width: 360px; max-height: 300px; overflow-y: auto;
+  padding: 6px;
+  background: var(--mc-surface); border: 1px solid var(--mc-line); border-radius: 14px;
+  box-shadow: var(--mc-shadow);
+}
+.mc-select__panel--right { left: auto; right: 0; }
+.mc-select__option {
+  padding: 6px 8px; border-radius: 8px; cursor: pointer;
+  font-size: var(--mc-font-sm); color: var(--mc-ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.mc-select__option.hover { background: color-mix(in srgb, var(--mc-accent) 14%, transparent); }
+.mc-select__option.active { background: linear-gradient(135deg, var(--mc-accent), var(--mc-accent-deep)); color: #fff; }
+/* 布局变体：撑满容器 / 固定宽（AI 工具栏的供应商下拉）/ 设置行内不压缩 */
+.mc-select--block { display: block; width: 100%; }
+.mc-select--block .mc-select__trigger { width: 100%; }
+.mc-select--provider { width: 170px; }
+.mc-select--provider .mc-select__trigger { width: 100%; }
+.mc-select--setting { flex-shrink: 0; }
 
 .filter-label { font-weight: 700; color: var(--mc-ink); font-size: var(--mc-font-base); }
 

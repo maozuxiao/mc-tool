@@ -470,7 +470,54 @@ function createWindow() {
   // （IAM 那套 usk/REQID 同样以 cookie 形式存在，且是 oa↔iam 302 链里带的）。
   // 新开一个共用同一 partition 的窗口，cookie 天然生效 —— 这才是真正免登录的方式。
   let oaWindow: BrowserWindow | null = null
+  // 需要补 Cookie 的 OA 侧 webContents 集合：主 OA 窗口 + 它 target="_blank"/window.open 弹出的
+  // 子窗口。注入器只认这个集合，应用主窗口（AI 页、查询页）一律不受影响。
+  const oaWebContentsIds = new Set<number>()
   let oaCookieInjectorInstalled = false
+
+  // 把一个窗口纳入「OA 免登录窗口」：登记 webContentsId（补 Cookie 用）+ 接管它弹出的新窗口。
+  // 关键修复（2026-09-13）：OA 门户里的入口（「新建流程」「会议预约」「我的工具」里的外链等）大多是
+  // target="_blank" / window.open。不给 setWindowOpenHandler 时 Electron 会默认 new 一个子窗口，而它
+  // **不经过**下面那段 Cookie 注入（注入当时只认主 OA 窗口的 webContents.id）——子窗口于是又回到
+  // 「明文连接不发送 Secure cookie」的死循环，表现就是弹出一个全白窗口、标题还退回应用名
+  // （正是截图里那个空窗口）。这里让子窗口正常创建并同样登记，且递归安装，子窗口里再弹一层也不会漏。
+  const registerOaWindow = (win: BrowserWindow) => {
+    // 先存下 webContentsId：窗口 closed 之后不能再访问 win.webContents（会抛 Object has been destroyed）
+    const wcId = win.webContents.id
+    oaWebContentsIds.add(wcId)
+    win.on('closed', () => { oaWebContentsIds.delete(wcId) })
+
+    win.webContents.setWindowOpenHandler(({ url }) => {
+      debugLog('[oaWindow] window.open -> ' + url)
+      // 非 http(s)（mailto:、tencent:// 等）交给系统处理，不在应用里开空窗口
+      if (!/^https?:\/\//i.test(url)) {
+        void shell.openExternal(url)
+        return { action: 'deny' }
+      }
+      return {
+        action: 'allow',
+        overrideBrowserWindowOptions: {
+          // 子窗口不继承父窗口的 autoHideMenuBar，不设会露出 File/Edit/View… 原生菜单栏
+          autoHideMenuBar: true,
+          parent: win,
+          backgroundColor: '#f7f3df',
+          webPreferences: {
+            partition: PARTITION,
+            nodeIntegration: false,
+            contextIsolation: true
+          }
+        }
+      }
+    })
+
+    win.webContents.on('did-create-window', (child) => {
+      debugLog('[oaWindow] child window created, webContentsId=' + child.webContents.id)
+      registerOaWindow(child)
+      if (child.isMinimized()) child.restore()
+      child.focus()
+    })
+  }
+
   ipcMain.handle('mc-open-oa-window', async () => {
     // 已开着就聚焦，避免反复点击叠出一堆窗口
     if (oaWindow && !oaWindow.isDestroyed()) {
@@ -492,8 +539,12 @@ function createWindow() {
         contextIsolation: true
       }
     })
-    // 标题固定为「OA工作台」：OA 门户页自带 <title>，默认会把构造时传的 title 覆盖掉
+    // 登记为 OA 免登录窗口：补 Cookie + 接管它弹出的子窗口（见 registerOaWindow）
+    registerOaWindow(oaWindow)
+    // 标题固定为「OA工作台」：OA 门户页自带 <title>，默认会把构造时传的 title 覆盖掉。
+    // 子窗口不钉标题 —— 它们要显示自己页面的标题（否则任务栏里会是一串同名窗口，没法分辨）。
     oaWindow.on('page-title-updated', (e) => e.preventDefault())
+    // 主窗口关闭时清掉引用（子窗口的登记/注销由 registerOaWindow 负责）
     oaWindow.on('closed', () => { oaWindow = null })
 
     // 关键修复：OA 窗口走的是明文 http，而 OA 会话 cookie（route / SESSION / LtpaToken）全都带 Secure。
@@ -502,14 +553,17 @@ function createWindow() {
     // 又因「明文连接不得写入 Secure cookie」被 Chromium 拒收，oa ↔ iam 互相 302 形成死循环，
     // 窗口只剩 backgroundColor（视觉上就是全白/空白）。
     // 主进程自己的接口调用是手工拼 Cookie 头发送的，不受该限制 —— 这正是「查询正常、应用内打开空白」的原因。
-    // 这里只对 OA 窗口自身的请求补齐 Cookie 头，绕开 Secure 限制；其它 webContents 一律放行。
+    // 这里对 OA 侧窗口（主窗口 + 子窗口，见 oaWebContentsIds）的请求补齐 Cookie 头，绕开 Secure 限制；
+    // 应用主窗口与其它 webContents 一律放行。
+    // 匹配范围从 oa.streamax.com 放宽到 *.streamax.com：窗口内的入口会跳到 IAM、MC 等兄弟站点，
+    // 它们同样需要这份会话，只注入 OA 会让跳转后的页面继续落在登录页上。
     if (!oaCookieInjectorInstalled) {
       oaCookieInjectorInstalled = true
       const sess = session.fromPartition(PARTITION)
-      sess.webRequest.onBeforeSendHeaders({ urls: ['*://oa.streamax.com/*'] }, async (details, callback) => {
-        const wc = oaWindow && !oaWindow.isDestroyed() ? oaWindow.webContents : null
+      sess.webRequest.onBeforeSendHeaders({ urls: ['*://*.streamax.com/*', '*://streamax.com/*'] }, async (details, callback) => {
         // 必须始终回调，否则该请求会一直挂起
-        if (!wc || details.webContentsId !== wc.id) return callback({})
+        // （webContentsId 在类型上是 number | undefined：某些后台请求没有归属 webContents）
+        if (details.webContentsId === undefined || !oaWebContentsIds.has(details.webContentsId)) return callback({})
         try {
           const cookies = await sess.cookies.get({})
           const cookieStr = cookies.map(c => `${c.name}=${c.value}`).join('; ')

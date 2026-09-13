@@ -1,6 +1,7 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { useStore } from '../store'
-import { Tabs, Button, Input, Select, Icon, Tag, Switch, Background, Time, BackTop, Tooltip, Collapse } from 'animal-island-ui'
+import { Tabs, Button, Input, Icon, Tag, Switch, Background, Time, BackTop, Tooltip, Collapse } from 'animal-island-ui'
+import { McSelect } from './McSelect'
 import { parseBatchItemNos } from '@shared/query'
 import { FilterBar } from './FilterBar'
 import { MaterialTable } from './MaterialTable'
@@ -398,7 +399,7 @@ export function QueryPanel({ disabled }: { disabled: boolean }) {
           <Tooltip variant="default" placement="bottom-start" title={t('brandOpenOa')}>
             <button
               type="button"
-              className="brand-icon-btn"
+              className="brand-btn"
               onClick={e => {
                 // 默认打开应用内窗口：它复用登录 partition 的 OA 会话，所以是真免登录；
                 // Ctrl/⌘+点击保留旧行为，交给系统默认浏览器（需要重新登录）。
@@ -407,14 +408,15 @@ export function QueryPanel({ disabled }: { disabled: boolean }) {
               }}
             >
               <img className="brand-icon" src={NOOK_ICON} alt="" />
+              {/* 标题下方挂「距离下班还有 hh:mm:ss」；周末与中国法定节假日不出倒计时，
+                  改显示一句祝福（判断逻辑与放假表见 WorkCountdown.tsx / @shared/holidays）。
+                  这两行现在也在按钮内，于是点标题/倒计时同样打开 OA。 */}
+              <span className="brand-text">
+                <span className="brand-title">{t('appTitle')}</span>
+                <WorkCountdown />
+              </span>
             </button>
           </Tooltip>
-          {/* 标题下方挂「距离下班还有 hh:mm:ss」；周末与中国法定节假日不出倒计时，
-              改显示一句祝福（判断逻辑与放假表见 WorkCountdown.tsx / @shared/holidays） */}
-          <div className="brand-text">
-            <span className="brand-title">{t('appTitle')}</span>
-            <WorkCountdown />
-          </div>
         </div>
         <div className="header-actions">
           {/* 时钟改用库 <Time>（文档 #/time 同款）：HH:MM 带闪烁冒号 + 星期/日期胶囊，
@@ -496,19 +498,20 @@ export function QueryPanel({ disabled }: { disabled: boolean }) {
                     </div>
                     <div className="settings-row">
                       <span className={`settings-label${trayMin ? '' : ' disabled'}`}>{t('closeBehavior')}</span>
-                      {/* 原生 select 换成库 <Select>：自动获得键盘导航、点击外部关闭、上下翻转避让 */}
-                      <div className="settings-select-wrap">
-                        <Select
-                          aria-label={t('closeBehavior')}
-                          value={trayMin && closeTray ? 'tray' : 'quit'}
-                          disabled={!trayMin}
-                          options={[
-                            { key: 'tray', label: t('closeToTray') },
-                            { key: 'quit', label: t('closeQuit') }
-                          ]}
-                          onChange={key => void updateSetting('closeToTray', key === 'tray')}
-                        />
-                      </div>
+                      {/* 自绘 .mc-select（原为库 <Select>）：面板与 AI 页的供应商/模型下拉同一套风格，
+                          紧凑变体与设置面板里其它控件同高 */}
+                      <McSelect
+                        ariaLabel={t('closeBehavior')}
+                        className="mc-select--setting"
+                        triggerClassName="mc-select__trigger--sm"
+                        value={trayMin && closeTray ? 'tray' : 'quit'}
+                        disabled={!trayMin}
+                        options={[
+                          { key: 'tray', label: t('closeToTray') },
+                          { key: 'quit', label: t('closeQuit') }
+                        ]}
+                        onChange={key => void updateSetting('closeToTray', key === 'tray')}
+                      />
                     </div>
                     <div className="settings-row">
                       <span className="settings-label">{t('autoLaunch')}</span>

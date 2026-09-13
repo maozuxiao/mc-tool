@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
-import { Input, Select, Button, Icon } from 'animal-island-ui'
+import { Input, Button, Icon } from 'animal-island-ui'
 import { translateLifecycle } from '@shared/i18n'
+import { McSelect } from './McSelect'
 
 function LifecycleDropdown({
   disabled,
@@ -177,11 +178,13 @@ export function FilterBar({ disabled, target = 'mat' }: { disabled: boolean; tar
 
       <div className="filter-group filter-type-group">
         <label className="filter-group-label">{t('typeLabel')}</label>
-        <Select
+        {/* 自绘 .mc-select（原为库 <Select>）：面板与模型下拉同一套纸感风格，
+            触发器与右侧 .lifecycle-trigger 同规格，两个控件并排齐平 */}
+        <McSelect
           options={typeOptions}
           value={typeFilter}
           onChange={setTypeFilter}
-          aria-label={t('typeLabel')}
+          ariaLabel={t('typeLabel')}
         />
       </div>
 

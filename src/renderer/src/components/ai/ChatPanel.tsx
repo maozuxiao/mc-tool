@@ -7,7 +7,8 @@ import type { AIAgentMode, AIConversation, AIMessage, AIProviderConfig, AIToolRu
 import { AI_PROTOCOL_LABELS } from '@shared/ai-types'
 import { OA_ORIGIN } from '@shared/constants'
 import { useStore } from '../../store'
-import { Button, CodeBlock, Collapse, Icon, Select, Tooltip } from 'animal-island-ui'
+import { Button, CodeBlock, Collapse, Icon, Tooltip } from 'animal-island-ui'
+import { McSelect } from '../McSelect'
 
 interface ProviderBundle {
   providers: AIProviderConfig[]
@@ -655,20 +656,21 @@ export function ChatPanel({ disabled }: Props) {
             title={t('aiSideExpand')}
             onClick={() => setDrawerOpen(true)}
           ><Icon name="Chat" size={16} /></button>
-          {/* 原生 select 换成库 <Select>：浮层、键盘导航与边缘避让都与全站控件同源 */}
-          <span className="ai-select-wrap ai-select-wrap--provider">
-            <Select
-              aria-label={t('aiProvider')}
-              value={providerId}
-              options={providerOptions}
-              placeholder={t('aiProvider')}
-              onChange={key => {
-                // 末项是「添加自定义供应商」入口：不改当前选中，直接打开新增弹窗
-                if (key === '__add_custom__') { openAddProvider(); return }
-                setProviderId(key)
-              }}
-            />
-          </span>
+          {/* 自绘 .mc-select（原为库 <Select>）：面板与右侧模型下拉同一套纸感风格，
+              触发器用 34px 紧凑变体，与相邻模型输入框同高 */}
+          <McSelect
+            ariaLabel={t('aiProvider')}
+            className="mc-select--provider"
+            triggerClassName="mc-select__trigger--sm"
+            value={providerId}
+            options={providerOptions}
+            placeholder={t('aiProvider')}
+            onChange={key => {
+              // 末项是「添加自定义供应商」入口：不改当前选中，直接打开新增弹窗
+              if (key === '__add_custom__') { openAddProvider(); return }
+              setProviderId(key)
+            }}
+          />
           <div className="ai-model-combo">
             <input
               className="ai-model-input"
@@ -728,14 +730,14 @@ export function ChatPanel({ disabled }: Props) {
             <div className="ai-field">
               <span>{t('aiProtocol')}</span>
               {selectedProvider?.isCustom ? (
-                <span className="ai-select-wrap ai-select-wrap--full">
-                  <Select
-                    aria-label={t('aiProtocol')}
-                    value={providerProtocol}
-                    options={PROTOCOL_OPTIONS}
-                    onChange={key => setProviderProtocol(key as AIProtocol)}
-                  />
-                </span>
+                <McSelect
+                  ariaLabel={t('aiProtocol')}
+                  className="mc-select--block"
+                  triggerClassName="mc-select__trigger--sm"
+                  value={providerProtocol}
+                  options={PROTOCOL_OPTIONS}
+                  onChange={key => setProviderProtocol(key as AIProtocol)}
+                />
               ) : (
                 <input value={AI_PROTOCOL_LABELS[selectedProvider?.protocol || 'openai-compatible']} disabled />
               )}
@@ -860,14 +862,14 @@ export function ChatPanel({ disabled }: Props) {
                   value={newName}
                   onChange={e => setNewName(e.target.value)}
                 />
-                <span className="ai-select-wrap ai-select-wrap--full">
-                  <Select
-                    aria-label={t('aiProtocol')}
-                    value={newProtocol}
-                    options={PROTOCOL_OPTIONS}
-                    onChange={key => setNewProtocol(key as AIProtocol)}
-                  />
-                </span>
+                <McSelect
+                  ariaLabel={t('aiProtocol')}
+                  className="mc-select--block"
+                  triggerClassName="mc-select__trigger--sm"
+                  value={newProtocol}
+                  options={PROTOCOL_OPTIONS}
+                  onChange={key => setNewProtocol(key as AIProtocol)}
+                />
                 <input
                   placeholder={t('aiBaseUrl')}
                   value={newBaseUrl}
