@@ -78,8 +78,10 @@ const mcApi = {
   appVersion: (): string => ipcRenderer.sendSync(IPC.APP_VERSION),
 
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke('mc-open-external', url),
-  // 应用内打开 OA 首页（新窗口共用登录 partition，因此免登录）
-  openOaWindow: (): Promise<boolean> => ipcRenderer.invoke('mc-open-oa-window'),
+  // 应用内打开内网地址（新窗口共用登录 partition，因此免登录）。
+  // 不传 url = OA 工作台首页；传 url = 在应用内窗口打开该 streamax 内网地址（外部地址会退回系统浏览器）。
+  // 系统浏览器不共享本应用登录态，所以内网链接一律走这里，绝不能交给 openExternal。
+  openOaWindow: (url?: string): Promise<boolean> => ipcRenderer.invoke('mc-open-oa-window', url),
   getZoom: (): Promise<number> => ipcRenderer.invoke('mc-get-zoom'),
   setZoom: (factor: number): Promise<void> => ipcRenderer.invoke('mc-set-zoom', factor),
   resetZoom: (): Promise<void> => ipcRenderer.invoke('mc-reset-zoom'),

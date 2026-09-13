@@ -16,11 +16,6 @@ import { NOOK_ICON } from './nookIcon'
 // 走 import 而不是引用外链/库内路径，打包时由构建器决定产物名，避免资源失效。
 import leafIcon from '../assets/icon-leaf.png'
 
-import { OA_LOGIN_URL } from '@shared/constants'
-
-// 「打开 OA」的目标地址：与主进程应用内窗口(OA_LOGIN_URL)保持一致，都指向工作台首页
-const OA_HOME_URL = OA_LOGIN_URL
-
 /**
  * Tab 文案 + 选中态右侧的小叶子装饰。
  *
@@ -400,11 +395,13 @@ export function QueryPanel({ disabled }: { disabled: boolean }) {
             <button
               type="button"
               className="brand-btn"
-              onClick={e => {
-                // 默认打开应用内窗口：它复用登录 partition 的 OA 会话，所以是真免登录；
-                // Ctrl/⌘+点击保留旧行为，交给系统默认浏览器（需要重新登录）。
-                if (e.ctrlKey || e.metaKey) void window.mcApi?.openExternal?.(OA_HOME_URL)
-                else void window.mcApi?.openOaWindow?.()
+              onClick={() => {
+                // 一律打开应用内窗口：它复用登录 partition 的 OA 会话，所以是真免登录。
+                // 1.0.40 去掉「Ctrl/⌘+点击 → 系统浏览器」这条分支：
+                // 系统浏览器的 cookie 库与本应用的 partition 完全隔离，点过去必然被 302 到
+                // IAM 登录页要求重新扫码（实测落点 https://iam.streamax.com/ac/#/index?lck=...&entityId=oa），
+                // 是个只会让人困惑的入口。需要系统浏览器时，从窗口地址栏自行复制即可。
+                void window.mcApi?.openOaWindow?.()
               }}
             >
               <img className="brand-icon" src={NOOK_ICON} alt="" />

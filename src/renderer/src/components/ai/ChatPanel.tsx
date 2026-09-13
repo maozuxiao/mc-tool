@@ -994,6 +994,15 @@ function MarkdownLink({ href, children }: { href?: string; children?: React.Reac
       return
     }
 
+    // 内网地址（OA / IAM / MC 等）必须在应用内窗口打开：系统浏览器的 cookie 库与本应用的
+    // partition 完全隔离，点过去只会被 302 到 IAM 登录页要求重新扫码。外部站点才交给系统浏览器。
+    try {
+      const h = new URL(url).hostname.toLowerCase()
+      if (/(^|\.)streamax\.com$/.test(h)) {
+        void window.mcApi.openOaWindow?.(url)
+        return
+      }
+    } catch { /* 非法 URL：走下面的系统浏览器兜底 */ }
     // 普通外部链接用系统默认浏览器打开，避免在当前窗口导航导致白屏
     window.mcApi.openExternal?.(url)
   }

@@ -411,13 +411,14 @@ function createWindow() {
   })
 
   // 拦截窗口内导航：AI 消息里的 Markdown 链接点击后若未处理，会尝试在当前窗口加载 URL，
-  // OA 下载/登录页可能让渲染进程白屏。外部链接交给系统浏览器，OA 链接直接阻止。
+  // OA 下载/登录页可能让渲染进程白屏。
+  // 1.0.40 调整：内网地址不再「直接吞掉」（原来什么都不做，点上去像没反应），
+  // 而是用应用内窗口打开 —— 共享登录 partition 才免登录；外部网址仍交给系统浏览器。
+  // openInternalUrl 定义在同一函数作用域的下方，回调是延迟执行的，故此处引用安全。
   mainWindow.webContents.on('will-navigate', (event, url) => {
     if (url.startsWith('http')) {
       event.preventDefault()
-      if (!/oa\.streamax\.com|iam\.streamax\.com/i.test(url)) {
-        shell.openExternal(url)
-      }
+      void openInternalUrl(url)
     }
   })
 
@@ -474,6 +475,8 @@ function createWindow() {
   // 子窗口。注入器只认这个集合，应用主窗口（AI 页、查询页）一律不受影响。
   const oaWebContentsIds = new Set<number>()
   let oaCookieInjectorInstalled = false
+  // 注入诊断：按 host 只打一次日志，便于事后核对「某个域到底补了什么 cookie」
+  const oaInjectLoggedHosts = new Set<string>()
 
   // 把一个窗口纳入「OA 免登录窗口」：登记 webContentsId（补 Cookie 用）+ 接管它弹出的新窗口。
   // 关键修复（2026-09-13）：OA 门户里的入口（「新建流程」「会议预约」「我的工具」里的外链等）大多是
@@ -518,7 +521,107 @@ function createWindow() {
     })
   }
 
-  ipcMain.handle('mc-open-oa-window', async () => {
+  // ── Cookie 补齐注入器 ────────────────────────────────────────────────
+  // 关键修复：OA 窗口走的是明文 http，而 OA 会话 cookie（route / SESSION / LtpaToken）全都带 Secure。
+  // Chromium 不会在明文连接上发送 Secure cookie，于是窗口内永远处于「无会话」状态：
+  // OA 把请求 302 到 IAM 做免密握手，IAM 回跳 OA 时 OA 想用 Set-Cookie 种下会话，
+  // 又因「明文连接不得写入 Secure cookie」被 Chromium 拒收，oa ↔ iam 互相 302 形成死循环，
+  // 窗口只剩 backgroundColor（视觉上就是全白/空白）。
+  // 主进程自己的接口调用是手工拼 Cookie 头发送的，不受该限制 —— 这正是「查询正常、应用内打开空白」的原因。
+  // 这里对 OA 侧窗口（主窗口 + 子窗口，见 oaWebContentsIds）的请求补齐 Cookie 头，绕开 Secure 限制；
+  // 应用主窗口与其它 webContents 一律放行。
+  // 匹配范围从 oa.streamax.com 放宽到 *.streamax.com：窗口内的入口会跳到 IAM、MC 等兄弟站点，
+  // 它们同样需要这份会话，只注入 OA 会让跳转后的页面继续落在登录页上。
+  // 提取成函数：应用内窗口现在有两条入口（OA 工作台 / 内网地址直开），两条都必须装上它。
+  const ensureOaCookieInjector = (sess: Electron.Session) => {
+    if (oaCookieInjectorInstalled) return
+    oaCookieInjectorInstalled = true
+    sess.webRequest.onBeforeSendHeaders({ urls: ['*://*.streamax.com/*', '*://streamax.com/*'] }, async (details, callback) => {
+      // 必须始终回调，否则该请求会一直挂起
+      // （webContentsId 在类型上是 number | undefined：某些后台请求没有归属 webContents）
+      if (details.webContentsId === undefined || !oaWebContentsIds.has(details.webContentsId)) return callback({})
+      try {
+        const cookies = await sess.cookies.get({})
+        const cookieStr = cookies.map(c => `${c.name}=${c.value}`).join('; ')
+        if (!cookieStr) return callback({})
+        const requestHeaders = { ...details.requestHeaders }
+        requestHeaders.Cookie = requestHeaders.Cookie ? `${requestHeaders.Cookie}; ${cookieStr}` : cookieStr
+        // 诊断：按 host 只记一次，事后可核对「这个域到底补了什么 cookie」
+        try {
+          const host = new URL(details.url).host
+          if (!oaInjectLoggedHosts.has(host)) {
+            oaInjectLoggedHosts.add(host)
+            debugLog(`[oaCookie] inject http ${host} +${cookies.length} cookies`)
+          }
+        } catch { /* URL 解析失败不影响注入 */ }
+        callback({ requestHeaders })
+      } catch {
+        callback({})
+      }
+    })
+  }
+
+  // ── 内网地址 → 应用内窗口 ─────────────────────────────────────────────
+  // 为什么必须走应用内：OA/IAM 的登录态是 partition(persist:mc-query) 里的 cookie，
+  // **系统浏览器的 cookie 库与本进程完全隔离**，且 OA/IAM 都没有「用 URL 传票据」的入口
+  // （IAM SPA 的 lck 是一次性 SSO 上下文，不是凭证）。所以在系统浏览器里打开
+  // http://oa.streamax.com:8080/ 必定被 302 到 iam 登录页要求扫码 —— 实测落点正是
+  // https://iam.streamax.com/ac/#/index?lck=...&entityId=oa&theme=...。
+  // 这是机制限制（操作系统级隔离），不是能靠代码绕过的实现问题；
+  // 唯一能让内网地址免登录的方式就是用共用同一 partition 的窗口打开。
+  //
+  // 因此：内网（*.streamax.com）一律走应用内窗口；外部站点才交给系统浏览器。
+  const internalUrlWindows = new Map<string, BrowserWindow>()
+  const openInternalUrl = async (url: string): Promise<boolean> => {
+    let host = ''
+    try { host = new URL(url).hostname.toLowerCase() } catch { return false }
+    if (!/(^|\.)streamax\.com$/.test(host)) {
+      void shell.openExternal(url)
+      return false
+    }
+    // 同一个地址反复点：只聚焦，不叠窗
+    const existed = internalUrlWindows.get(url)
+    if (existed && !existed.isDestroyed()) {
+      if (existed.isMinimized()) existed.restore()
+      existed.show()
+      existed.focus()
+      return true
+    }
+    const sess = session.fromPartition(PARTITION)
+    ensureOaCookieInjector(sess)
+    // 打开前先碰一次 IAM：把它的 idle 计时推后，避免窗口里点入口跳 IAM 时正好赶上过期
+    // （不能 await：IAM 冷态可能要 20~30s，会让窗口迟迟不出现）
+    void keepIamSessionAlive(sess)
+    const win = new BrowserWindow({
+      width: 1180,
+      height: 800,
+      minWidth: 800,
+      minHeight: 560,
+      autoHideMenuBar: true,
+      backgroundColor: '#f7f3df',
+      webPreferences: {
+        partition: PARTITION,
+        nodeIntegration: false,
+        contextIsolation: true
+      }
+    })
+    // 与 OA 工作台同一套登记：补 Cookie + 接管它弹出的子窗口
+    registerOaWindow(win)
+    internalUrlWindows.set(url, win)
+    win.on('closed', () => { internalUrlWindows.delete(url) })
+    debugLog('[openInternal] open in-app window: ' + url)
+    try {
+      await win.loadURL(url)
+    } catch (e: any) {
+      debugLog('[openInternal] load error: ' + e?.message)
+    }
+    return true
+  }
+
+  ipcMain.handle('mc-open-oa-window', async (_e, url?: string) => {
+    // 传了内网地址：走通用内网开窗（AI 回复里的 OA 链接、外部入口等）
+    if (typeof url === 'string' && url.trim()) return openInternalUrl(url.trim())
+    // 未传地址：打开 OA 工作台（单例）
     // 已开着就聚焦，避免反复点击叠出一堆窗口
     if (oaWindow && !oaWindow.isDestroyed()) {
       if (oaWindow.isMinimized()) oaWindow.restore()
@@ -547,35 +650,13 @@ function createWindow() {
     // 主窗口关闭时清掉引用（子窗口的登记/注销由 registerOaWindow 负责）
     oaWindow.on('closed', () => { oaWindow = null })
 
-    // 关键修复：OA 窗口走的是明文 http，而 OA 会话 cookie（route / SESSION / LtpaToken）全都带 Secure。
-    // Chromium 不会在明文连接上发送 Secure cookie，于是窗口内永远处于「无会话」状态：
-    // OA 把请求 302 到 IAM 做免密握手，IAM 回跳 OA 时 OA 想用 Set-Cookie 种下会话，
-    // 又因「明文连接不得写入 Secure cookie」被 Chromium 拒收，oa ↔ iam 互相 302 形成死循环，
-    // 窗口只剩 backgroundColor（视觉上就是全白/空白）。
-    // 主进程自己的接口调用是手工拼 Cookie 头发送的，不受该限制 —— 这正是「查询正常、应用内打开空白」的原因。
-    // 这里对 OA 侧窗口（主窗口 + 子窗口，见 oaWebContentsIds）的请求补齐 Cookie 头，绕开 Secure 限制；
-    // 应用主窗口与其它 webContents 一律放行。
-    // 匹配范围从 oa.streamax.com 放宽到 *.streamax.com：窗口内的入口会跳到 IAM、MC 等兄弟站点，
-    // 它们同样需要这份会话，只注入 OA 会让跳转后的页面继续落在登录页上。
-    if (!oaCookieInjectorInstalled) {
-      oaCookieInjectorInstalled = true
-      const sess = session.fromPartition(PARTITION)
-      sess.webRequest.onBeforeSendHeaders({ urls: ['*://*.streamax.com/*', '*://streamax.com/*'] }, async (details, callback) => {
-        // 必须始终回调，否则该请求会一直挂起
-        // （webContentsId 在类型上是 number | undefined：某些后台请求没有归属 webContents）
-        if (details.webContentsId === undefined || !oaWebContentsIds.has(details.webContentsId)) return callback({})
-        try {
-          const cookies = await sess.cookies.get({})
-          const cookieStr = cookies.map(c => `${c.name}=${c.value}`).join('; ')
-          if (!cookieStr) return callback({})
-          const requestHeaders = { ...details.requestHeaders }
-          requestHeaders.Cookie = requestHeaders.Cookie ? `${requestHeaders.Cookie}; ${cookieStr}` : cookieStr
-          callback({ requestHeaders })
-        } catch {
-          callback({})
-        }
-      })
-    }
+    // Cookie 补齐注入器（只装一次）：OA 窗口走明文 http，会话 cookie 全是 Secure，
+    // Chromium 不会在明文连接上发送/写入它们，必须由注入器补上（详见 ensureOaCookieInjector）。
+    ensureOaCookieInjector(session.fromPartition(PARTITION))
+
+    // 打开工作台前先碰一次 IAM：把它的 idle 计时推后，保证窗口内点入口跳 IAM 时是已登录态
+    // （不能 await：IAM 冷态可能要 20~30s，会让窗口迟迟不出现；后台并行即可）
+    void keepIamSessionAlive(session.fromPartition(PARTITION))
 
     try {
       await oaWindow.loadURL(OA_LOGIN_URL)
@@ -758,6 +839,10 @@ function startSessionHeartbeat(): void {
   sessionCheckTimer = setInterval(() => {
     if (sessionCheckInFlight) return
     void checkAndHealSession()
+    // IAM 会话独立于 OA，必须单独保活（见 keepIamSessionAlive）：
+    // 否则 OA 靠 LtpaToken 一直免登录，IAM 却在后台悄悄 idle 过期，
+    // 表现就是「应用整体正常，但工作台里点入口跳 IAM 要重新扫码」。
+    if (sessionValid) void keepIamSessionAlive(session.fromPartition(PARTITION))
   }, SESSION_CHECK_INTERVAL_MS)
   debugLog(`[SESSION] heartbeat started (every ${SESSION_CHECK_INTERVAL_MS / 60000} min)`)
 }
@@ -1363,6 +1448,8 @@ async function landOaViaHttp(sess: Electron.Session, loginToken: string): Promis
 }
 
 // 从 partition 读取 streamax 相关 cookie 并拼成 Cookie 字符串
+// 注意：这里**故意**是全量（不限域），因为 OA 的工具会话 cookie 本身就落在
+// iam.streamax.com 域（SESSION / usk / REQID），oa.streamax.com 的请求必须带上它们。
 async function getStreamaxCookieString(sess: Electron.Session): Promise<string> {
   try {
     const all = await sess.cookies.get({})
@@ -1371,6 +1458,76 @@ async function getStreamaxCookieString(sess: Electron.Session): Promise<string> 
   } catch {
     return ''
   }
+}
+
+// ── IAM 会话保活（关键修复 2026-09-13） ─────────────────────────────────
+// 现象：OA 工作台本身免登录正常，但在窗口里点入口跳到 IAM
+// （https://iam.streamax.com/ac/#/index?lck=...&entityId=oa）时要求重新扫码。
+//
+// 根因：IAM 的会话（SESSION / usk / REQID @ iam.streamax.com）有**独立的 idle 超时**，
+// 而应用只在「OA 探测失败」时才走 SSO 链去碰 IAM。OA 会话靠 LtpaToken(@.streamax.com)
+// 被心跳长期续命、几乎不会失败，于是 IAM 会话在后台一路 idle 到过期。
+// 实测证据（2026-09-13 本机日志 + cookie jar 复核）：
+//   - 登录 3 小时后 GET /idp/authCenter/authenticate 不再 302 带 code 回 OA（返回 200），
+//     且响应顺手清掉了 REQID（expires=1970）→ IAM 侧会话已失效；
+//   - 同一份 cookie 里 OA 业务接口 probe 仍是 200 → 两边确实是两套会话。
+// 而 IAM 一旦失效就无法静默恢复（必须扫码），所以唯一办法是**别让它闲置过期**。
+//
+// 做法：定期 GET IAM 的 OAuth 授权端点，**不跟随重定向**（因此不会真的产生
+// oa 落地副作用，只是让 IAM 刷新该 session 的 idle 计时）。
+// 响应判据：Location 回到 oa.streamax.com 且带 code = IAM 侧仍登录；
+// 否则说明已过期（此时只能让用户重登一次，之后保活即可长期免登录）。
+const IAM_SSO_ENTRY_URL =
+  'https://iam.streamax.com/idp/authCenter/authenticate?response_type=code&client_id=oa' +
+  `&redirect_uri=${encodeURIComponent(OA_LOGIN_URL)}&state=IAM_OA_SSO`
+
+let iamKeepAliveInFlight: Promise<boolean> | null = null
+
+/** 保活 + 探活 IAM 会话；返回 IAM 侧是否仍处于登录态 */
+function keepIamSessionAlive(sess: Electron.Session): Promise<boolean> {
+  if (iamKeepAliveInFlight) return iamKeepAliveInFlight
+  iamKeepAliveInFlight = (async () => {
+    try {
+      const cookieStr = await getStreamaxCookieString(sess)
+      if (!cookieStr) return false
+      const u = new URL(IAM_SSO_ENTRY_URL)
+      const res = await new Promise<{ status: number; location: string; setCookie?: string[] }>((resolve, reject) => {
+        const req = https.get({
+          hostname: u.hostname,
+          port: u.port || 443,
+          path: u.pathname + u.search,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+            'Cookie': cookieStr
+          }
+        }, (r) => {
+          // 不跟随重定向：读到头就断开，绝不真的走到 OA 落地
+          r.resume()
+          resolve({
+            status: r.statusCode || 0,
+            location: String(r.headers.location || ''),
+            setCookie: r.headers['set-cookie'] as string[] | undefined
+          })
+        })
+        req.on('error', reject)
+        // IAM 冷态可能要 20~30s：这里只是后台保活，超时就放弃，绝不影响 UI
+        req.setTimeout(8000, () => { req.destroy(); reject(new Error('timeout')) })
+      })
+      // IAM 顺手刷新的票据（如新的 REQID）写回分区，避免下次又用旧值
+      if (res.setCookie?.length) await setCookiesFromHeader(sess, res.setCookie)
+      const alive = /^https?:\/\/oa\.streamax\.com/i.test(res.location) && /[?&]code=/.test(res.location)
+      debugLog(`[iamKeepalive] status=${res.status} location=${res.location.split('?')[0]} iamSessionAlive=${alive}`)
+      return alive
+    } catch (e: any) {
+      debugLog('[iamKeepalive] error: ' + (e?.message || e))
+      return false
+    } finally {
+      iamKeepAliveInFlight = null
+    }
+  })()
+  return iamKeepAliveInFlight
 }
 
 // 清除 IAM 的“半登录态” cookie（route / SESSION / usk / REQID 等），
