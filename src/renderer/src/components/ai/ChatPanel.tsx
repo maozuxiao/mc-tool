@@ -7,6 +7,7 @@ import type { AIAgentMode, AIConversation, AIMessage, AIProviderConfig, AIToolRu
 import { AI_PROTOCOL_LABELS } from '@shared/ai-types'
 import { OA_ORIGIN } from '@shared/constants'
 import { useStore } from '../../store'
+import { Button, CodeBlock, Collapse, Icon, Select, Tooltip } from 'animal-island-ui'
 
 interface ProviderBundle {
   providers: AIProviderConfig[]
@@ -21,6 +22,12 @@ interface ProviderBundle {
 }
 
 const MD_EDITOR_URL = 'https://maozuxiao.github.io/Streamax/Tools/KattyBB_MD_Editor/'
+
+/** 库 <Select> 的协议选项（与 AIProtocol 一一对应，标签走共享常量） */
+const PROTOCOL_OPTIONS = (['openai-compatible', 'anthropic'] as AIProtocol[]).map(p => ({
+  key: p,
+  label: AI_PROTOCOL_LABELS[p]
+}))
 
 // 与 CSS 的断点保持一致：窄窗口下会话栏改为「抽屉」浮层，宽窗口下沿用 44px 竖条收起
 const NARROW_QUERY = '(max-width: 760px)'
@@ -578,6 +585,14 @@ export function ChatPanel({ disabled }: Props) {
     return kw ? modelOptions.filter(m => m.toLowerCase().includes(kw)) : modelOptions
   }, [modelOptions, modelId])
 
+  // 库 <Select> 不支持 <optgroup>：保持「内置在前、自定义在后」的顺序，
+  // 末尾固定追加「添加自定义供应商」入口，语义与原生下拉一致。
+  const providerOptions = useMemo(() => [
+    ...providers.providers.filter(p => !p.isCustom).map(p => ({ key: p.id, label: p.name })),
+    ...providers.providers.filter(p => p.isCustom).map(p => ({ key: p.id, label: p.name })),
+    { key: '__add_custom__', label: `+ ${t('aiAddCustom')}` }
+  ], [providers.providers, t])
+
   return (
     <div className={`ai-page${sideCollapsed ? ' side-collapsed' : ''}${isNarrow && drawerOpen ? ' side-open' : ''}`}>
       {isNarrow && drawerOpen && (
@@ -585,13 +600,17 @@ export function ChatPanel({ disabled }: Props) {
       )}
       <aside className="ai-sidebar">
         <div className="ai-sidebar-head">
-          {/* 宽窗口：« 收起为竖条 / » 展开；窄窗口：× 关闭抽屉 */}
+          {/* 库无 chevron 图标：用 Play 三角旋转表达「收起/展开」，窄窗口用 Close 关闭抽屉 */}
           <button
             type="button"
             className="ai-side-toggle"
             title={isNarrow ? t('aiSideCollapse') : (sideCollapsed ? t('aiSideExpand') : t('aiSideCollapse'))}
             onClick={isNarrow ? closeDrawer : toggleSidebar}
-          >{isNarrow ? '×' : (sideCollapsed ? '»' : '«')}</button>
+          >
+            {isNarrow
+              ? <Icon name="Close" size={13} />
+              : <Icon name="Play" size={12} className={sideCollapsed ? '' : 'ai-rot-180'} />}
+          </button>
           {(!sideCollapsed || isNarrow) && <span>{t('viewAi')}</span>}
           {/* 新对话统一用 26px 图标按钮：文字按钮在英文（AI Assistant + New chat）下会把标题挤到截断 */}
           <button
@@ -599,25 +618,31 @@ export function ChatPanel({ disabled }: Props) {
             className="ai-side-new"
             title={t('aiNewChat')}
             onClick={() => { setActiveConversation(null); setMessages([]); if (isNarrow) setDrawerOpen(false) }}
-          >+</button>
+          ><Icon name="Plus" size={16} /></button>
         </div>
         <div className="ai-history">
           {conversations.map(c => (
             <div key={c.id} className={`ai-history-item${c.id === conversationId ? ' active' : ''}`}>
               {/* 窄窗口下点会话后自动收起抽屉，避免浮层挡住对话区 */}
               <button className="ai-history-title" onClick={() => { void openConversation(c.id); setDrawerOpen(false) }}>{c.title}</button>
-              <button className="ai-history-delete" onClick={() => removeConversation(c.id)}>×</button>
+              <button className="ai-history-delete" title={t('delete')} onClick={() => removeConversation(c.id)}>
+                <Icon name="Close" size={13} />
+              </button>
             </div>
           ))}
         </div>
         <div className="ai-sidebar-foot">
-          <button
-            className="mq-btn ai-md-editor-btn"
-            title={t('aiMdEditorTip')}
-            onClick={() => window.mcApi.openExternal(MD_EDITOR_URL)}
-          >
-            {t('aiMdEditor')}
-          </button>
+          {/* 提示改用库 <Tooltip variant="default">（文档 #/tooltip 的 default 风格）：
+              原生 title 的浏览器气泡延迟长、方头方脑，与全站视觉无关。
+              Tooltip 会把触发器包进一层 inline-flex wrapper，宽度改由 .ai-md-editor-tip 撑满。 */}
+          <Tooltip className="ai-md-editor-tip" variant="default" placement="top" title={t('aiMdEditorTip')}>
+            <Button
+              className="ai-md-editor-btn"
+              onClick={() => window.mcApi.openExternal(MD_EDITOR_URL)}
+            >
+              {t('aiMdEditor')}
+            </Button>
+          </Tooltip>
         </div>
       </aside>
 
@@ -629,31 +654,27 @@ export function ChatPanel({ disabled }: Props) {
             className="ai-side-menu-btn"
             title={t('aiSideExpand')}
             onClick={() => setDrawerOpen(true)}
-          >☰</button>
-          <select
-            className="ai-select"
-            value={providerId}
-            onChange={e => {
-              // 下拉末项是「添加自定义供应商」入口：不改当前选中，直接打开新增弹窗
-              if (e.target.value === '__add_custom__') { openAddProvider(); return }
-              setProviderId(e.target.value)
-            }}
-          >
-            <optgroup label={t('aiBuiltinProvider')}>
-              {providers.providers.filter(p => !p.isCustom).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </optgroup>
-            {providers.providers.some(p => p.isCustom) && (
-              <optgroup label={t('aiCustomProvider')}>
-                {providers.providers.filter(p => p.isCustom).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </optgroup>
-            )}
-            <option value="__add_custom__">+ {t('aiAddCustom')}</option>
-          </select>
+          ><Icon name="Chat" size={16} /></button>
+          {/* 原生 select 换成库 <Select>：浮层、键盘导航与边缘避让都与全站控件同源 */}
+          <span className="ai-select-wrap ai-select-wrap--provider">
+            <Select
+              aria-label={t('aiProvider')}
+              value={providerId}
+              options={providerOptions}
+              placeholder={t('aiProvider')}
+              onChange={key => {
+                // 末项是「添加自定义供应商」入口：不改当前选中，直接打开新增弹窗
+                if (key === '__add_custom__') { openAddProvider(); return }
+                setProviderId(key)
+              }}
+            />
+          </span>
           <div className="ai-model-combo">
             <input
               className="ai-model-input"
               value={modelId}
               placeholder={t('aiModel')}
+              aria-label={t('aiModel')}
               onChange={e => { setModelId(e.target.value); setModelOpen(true) }}
               onFocus={() => setModelOpen(true)}
               onBlur={() => window.setTimeout(() => setModelOpen(false), 150)}
@@ -672,7 +693,7 @@ export function ChatPanel({ disabled }: Props) {
               </div>
             )}
           </div>
-          <button className="mq-btn" onClick={loadModels}>{t('aiFetchModels')}</button>
+          <Button onClick={loadModels}>{t('aiFetchModels')}</Button>
           <div className="ai-mode-switch" role="group" aria-label={t('aiMode')}>
             {(['ask', 'mc', 'build'] as AIAgentMode[]).map(m => (
               <button
@@ -686,9 +707,9 @@ export function ChatPanel({ disabled }: Props) {
               </button>
             ))}
           </div>
-          <button className="mq-btn accent" onClick={() => setShowSettings(v => !v)}>
+          <Button type="primary" onClick={() => setShowSettings(v => !v)}>
             {showSettings ? t('aiCollapseSettings') : t('aiSettings')}
-          </button>
+          </Button>
         </div>
 
         {showSettings && (
@@ -704,32 +725,31 @@ export function ChatPanel({ disabled }: Props) {
               <span>{t('aiApiKey')}</span>
               <input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder={selectedProvider?.hasApiKey ? t('aiKeyConfigured') : t('aiKeyPlaceholder')} />
             </label>
-            <label className="ai-field">
+            <div className="ai-field">
               <span>{t('aiProtocol')}</span>
               {selectedProvider?.isCustom ? (
-                <select
-                  className="ai-select"
-                  value={providerProtocol}
-                  onChange={e => setProviderProtocol(e.target.value as AIProtocol)}
-                >
-                  {(['openai-compatible', 'anthropic'] as AIProtocol[]).map(p => (
-                    <option key={p} value={p}>{AI_PROTOCOL_LABELS[p]}</option>
-                  ))}
-                </select>
+                <span className="ai-select-wrap ai-select-wrap--full">
+                  <Select
+                    aria-label={t('aiProtocol')}
+                    value={providerProtocol}
+                    options={PROTOCOL_OPTIONS}
+                    onChange={key => setProviderProtocol(key as AIProtocol)}
+                  />
+                </span>
               ) : (
                 <input value={AI_PROTOCOL_LABELS[selectedProvider?.protocol || 'openai-compatible']} disabled />
               )}
-            </label>
+            </div>
             <div className="ai-settings-actions">
-              <button className="mq-btn" onClick={async () => {
+              <Button onClick={async () => {
                 const res = await window.mcApi.ai.testProvider({ providerId, modelId })
                 setNotice(res.ok ? res.message : res.error)
-              }}>{t('aiTest')}</button>
-              <button className="mq-btn" onClick={resetCurrentProvider} title={selectedProvider?.isCustom ? undefined : t('aiProviderBaseRequired')}>{t('aiResetDefault')}</button>
+              }}>{t('aiTest')}</Button>
+              <Button onClick={resetCurrentProvider} title={selectedProvider?.isCustom ? undefined : t('aiProviderBaseRequired')}>{t('aiResetDefault')}</Button>
               {selectedProvider?.isCustom && (
-                <button className="mq-btn danger" onClick={deleteCurrentProvider}>{t('aiDeleteProvider')}</button>
+                <Button danger onClick={deleteCurrentProvider}>{t('aiDeleteProvider')}</Button>
               )}
-              <button className="mq-btn accent" onClick={saveProvider}>{t('aiSave')}</button>
+              <Button type="primary" onClick={saveProvider}>{t('aiSave')}</Button>
             </div>
           </div>
         )}
@@ -765,7 +785,7 @@ export function ChatPanel({ disabled }: Props) {
                     className="ai-queue-remove"
                     title={t('aiQueueRemove')}
                     onClick={() => setQueue(prev => prev.filter((_, j) => j !== i))}
-                  >×</button>
+                  ><Icon name="Close" size={11} /></button>
                 </span>
               ))}
             </div>
@@ -777,7 +797,7 @@ export function ChatPanel({ disabled }: Props) {
               className={`ai-prompt-toggle${promptPanelOpen ? ' open' : ''}`}
               title={t('aiPromptQuick')}
               onClick={() => setPromptPanelOpen(v => !v)}
-            >+</button>
+            ><Icon name="Plus" size={16} /></button>
             {promptPanelOpen && (
               <div ref={promptPanelRef} className="ai-prompt-panel">
                 <div className="ai-prompt-list">
@@ -793,17 +813,17 @@ export function ChatPanel({ disabled }: Props) {
                           onClick={() => applyPrompt(p)}
                         >{p.title || p.text.slice(0, 20)}</button>
                         <div className="ai-prompt-item-actions">
-                          <button type="button" className="ai-prompt-item-action" onClick={() => startEdit(p)}>编辑</button>
-                          <button type="button" className="ai-prompt-item-action danger" onClick={() => removePrompt(p.id)}>删除</button>
+                          <button type="button" className="ai-prompt-item-action" onClick={() => startEdit(p)}>{t('edit')}</button>
+                          <button type="button" className="ai-prompt-item-action danger" onClick={() => removePrompt(p.id)}>{t('delete')}</button>
                         </div>
                       </div>
                     ))
                   )}
                 </div>
                 <div className="ai-prompt-panel-foot">
-                  <button type="button" className="mq-btn ghost" onClick={openManager}>{t('aiPromptManager')}</button>
+                  <Button ghost onClick={openManager}>{t('aiPromptManager')}</Button>
                   {input.trim() && (
-                    <button type="button" className="mq-btn ghost" onClick={saveCurrentAsPrompt}>{t('aiPromptSaveCurrent')}</button>
+                    <Button ghost onClick={saveCurrentAsPrompt}>{t('aiPromptSaveCurrent')}</Button>
                   )}
                 </div>
               </div>
@@ -821,10 +841,10 @@ export function ChatPanel({ disabled }: Props) {
           <div className="ai-composer-actions">
             <span className="ai-title">{title}</span>
             {streaming
-              ? <button className="mq-btn" onClick={stopGenerating} disabled={stopping}>
+              ? <Button onClick={stopGenerating} disabled={stopping}>
                   {stopping ? t('aiStopping') : t('aiStop')}
-                </button>
-              : <button className="mq-btn accent" onClick={submit} disabled={disabled || !input.trim()}>{t('aiSend')}</button>}
+                </Button>
+              : <Button type="primary" onClick={submit} disabled={disabled || !input.trim()}>{t('aiSend')}</Button>}
           </div>
         </div>
       </section>
@@ -840,15 +860,14 @@ export function ChatPanel({ disabled }: Props) {
                   value={newName}
                   onChange={e => setNewName(e.target.value)}
                 />
-                <select
-                  className="ai-select"
-                  value={newProtocol}
-                  onChange={e => setNewProtocol(e.target.value as AIProtocol)}
-                >
-                  {(['openai-compatible', 'anthropic'] as AIProtocol[]).map(p => (
-                    <option key={p} value={p}>{AI_PROTOCOL_LABELS[p]}</option>
-                  ))}
-                </select>
+                <span className="ai-select-wrap ai-select-wrap--full">
+                  <Select
+                    aria-label={t('aiProtocol')}
+                    value={newProtocol}
+                    options={PROTOCOL_OPTIONS}
+                    onChange={key => setNewProtocol(key as AIProtocol)}
+                  />
+                </span>
                 <input
                   placeholder={t('aiBaseUrl')}
                   value={newBaseUrl}
@@ -866,13 +885,12 @@ export function ChatPanel({ disabled }: Props) {
                   onChange={e => setNewApiKey(e.target.value)}
                 />
                 <div className="ai-prompt-form-actions">
-                  <button
-                    type="button"
-                    className="mq-btn accent"
+                  <Button
+                    type="primary"
                     onClick={submitAddProvider}
                     disabled={!newName.trim() || !newBaseUrl.trim()}
-                  >{t('aiAddCustom')}</button>
-                  <button type="button" className="mq-btn ghost" onClick={closeAddProvider}>{t('aiPromptClose')}</button>
+                  >{t('aiAddCustom')}</Button>
+                  <Button ghost onClick={closeAddProvider}>{t('aiPromptClose')}</Button>
                 </div>
               </div>
             </div>
@@ -899,11 +917,11 @@ export function ChatPanel({ disabled }: Props) {
                   rows={6}
                 />
                 <div className="ai-prompt-form-actions">
-                  <button type="button" className="mq-btn accent" onClick={savePromptFromForm} disabled={!formText.trim()}>
+                  <Button type="primary" onClick={savePromptFromForm} disabled={!formText.trim()}>
                     {editingPrompt ? t('aiPromptSave') : t('aiPromptAdd')}
-                  </button>
-                  <button type="button" className="mq-btn ghost" onClick={() => { setEditingPrompt(null); setFormTitle(''); setFormText('') }}>{t('aiPromptReset')}</button>
-                  <button type="button" className="mq-btn ghost" onClick={closeManager}>{t('aiPromptClose')}</button>
+                  </Button>
+                  <Button ghost onClick={() => { setEditingPrompt(null); setFormTitle(''); setFormText('') }}>{t('aiPromptReset')}</Button>
+                  <Button ghost onClick={closeManager}>{t('aiPromptClose')}</Button>
                 </div>
               </div>
               {savedPrompts.length > 0 && (
@@ -915,8 +933,8 @@ export function ChatPanel({ disabled }: Props) {
                         <div className="ai-prompt-manager-text" title={p.text}>{p.text}</div>
                       </div>
                       <div className="ai-prompt-manager-actions">
-                        <button type="button" className="mq-btn ghost" onClick={() => startEdit(p)}>编辑</button>
-                        <button type="button" className="mq-btn ghost danger" onClick={() => removePrompt(p.id)}>删除</button>
+                        <Button ghost onClick={() => startEdit(p)}>{t('edit')}</Button>
+                        <Button ghost danger onClick={() => removePrompt(p.id)}>{t('delete')}</Button>
                       </div>
                     </div>
                   ))}
@@ -1058,7 +1076,8 @@ function MessageItem({ message, thinking }: { message: AIMessage; thinking?: boo
         <div className="ai-message-actions">
           <span className="ai-msg-time">{fmtDate(message.createdAt)}</span>
           <button className="ai-copy-btn" onClick={handleCopy} disabled={!message.content}>
-            {copied ? `✓ ${t('aiCopied')}` : `⧉ ${t('aiCopy')}`}
+            <Icon name={copied ? 'Check' : 'File'} size={13} />
+            <span>{copied ? t('aiCopied') : t('aiCopy')}</span>
           </button>
         </div>
       </div>
@@ -1066,15 +1085,70 @@ function MessageItem({ message, thinking }: { message: AIMessage; thinking?: boo
   )
 }
 
+/** 展开区 JSON 超过这个字符数就不再高亮。
+ *  库 <CodeBlock> 是「按 token 切词再逐个拼 <span>」的实现，一份十万字符的工具返回
+ *  会拼出上万个节点、把整个对话区拖卡。超过上限就退回纯文本 <pre>：
+ *  高亮只是可读性优化，不值得为一次大响应牺牲面板的响应速度。
+ *  （阈值按「正常工具返回都在几千字符内」留足余量，实际几乎不会触发。） */
+const CODE_HIGHLIGHT_MAX = 20000
+
+/** 把库 <CodeBlock> 压进聊天气泡的尺寸。
+ *
+ *  库默认是 20px 24px 内边距 / 14px 字号 / 20px 圆角，那是按文档页的留白定的，
+ *  塞进气泡会明显偏大。这里沿用原先 .ai-tool-run__pre 的度量（10px 内边距、
+ *  11.5px 字号、280px 限高、8px 圆角），只保留库自己的深色代码底与复制按钮。
+ *  深色底 / 边框 / 等宽字体 / overflow 都来自库，不必在这里重复声明。
+ *
+ *  paddingRight 必须显式给：库只在「没传 padding / paddingRight」时才会自动补 96px
+ *  右内边距来给复制按钮让位（见其实现里的 padding===undefined 判断），
+ *  我们传了 padding，自动补位就失效了，不给就会被按钮压住第一行代码。 */
+const CODE_BLOCK_STYLE: React.CSSProperties = {
+  margin: 0,
+  padding: '10px',
+  paddingRight: 88,
+  fontSize: 11.5,
+  maxHeight: 280,
+  borderRadius: 8
+}
+
+/**
+ * 工具调用折叠卡。
+ *
+ * 原先自绘「button + 条件渲染 <pre>」，现改用库 <Collapse>（文档 #/collapse）：
+ * 展开/收起、+/− 徽标与高度过渡都由库负责，用法与物料查询页的「批量查询料号」一致。
+ * 库的 answer 始终在 DOM 里（靠 grid-template-rows 收起），所以详情不再随展开挂载/卸载。
+ * 问答卡本身是按 FAQ 区尺度设计的（见 ai-chat.css 的 .ai-tool-run-collapse 说明），
+ * 这里只通过结构选择器把它压到聊天气泡内的尺寸，不命中库的哈希类名。
+ *
+ * 展开区是 input / output 两份 JSON。原先直接用裸 <pre> 输出，长描述里全是转义的
+ * 双引号和 | 分隔符，几乎读不出结构。库里唯一做代码着色的是 <CodeBlock>
+ * （rehype-highlight 只作用于 markdown 正文里的围栏代码，这里不是 markdown），
+ * 它的分词器覆盖「字符串 / 数字 / true·false·null / 括号冒号」——正好是 JSON 的全部词法，
+ * 所以直接拿来用，不需要额外的高亮库。
+ */
 function ToolRunCard({ run }: { run: AIToolRun }) {
-  const [open, setOpen] = useState(false)
+  // useMemo：这份 JSON 可能不小，避免父组件每次重渲染都重新序列化一遍
+  const code = useMemo(() => {
+    const head = JSON.stringify(run.input, null, 2)
+    return run.output ? `${head}\n${JSON.stringify(run.output, null, 2)}` : head
+  }, [run.input, run.output])
+
   return (
-    <div className={`ai-tool-run ${run.status}`}>
-      <button onClick={() => setOpen(v => !v)}>
-        <span>{run.status === 'running' ? '⏳' : run.status === 'error' ? '⚠️' : '✅'} {run.summary || run.toolName}</span>
-        <span>{run.durationMs ? `${(run.durationMs / 1000).toFixed(1)}s` : ''}</span>
-      </button>
-      {open && <pre>{JSON.stringify(run.input, null, 2)}{'\n'}{run.output ? JSON.stringify(run.output, null, 2) : ''}</pre>}
-    </div>
+    <Collapse
+      className={`mc-collapse ai-tool-run-collapse ${run.status}`}
+      question={
+        <span className="ai-tool-run__q">
+          {/* 运行中=Clock / 失败=Close / 完成=Check（库无 warning 图标，失败用叉号表达） */}
+          <Icon name={run.status === 'running' ? 'Clock' : run.status === 'error' ? 'Close' : 'Check'} size={13} />
+          <span className="ai-tool-run__name">{run.summary || run.toolName}</span>
+          <span className="ai-tool-run__time">{run.durationMs ? `${(run.durationMs / 1000).toFixed(1)}s` : ''}</span>
+        </span>
+      }
+      answer={
+        code.length > CODE_HIGHLIGHT_MAX
+          ? <pre className="ai-tool-run__pre">{code}</pre>
+          : <CodeBlock code={code} style={CODE_BLOCK_STYLE} />
+      }
+    />
   )
 }

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
-import { Input, Select, Button } from 'animal-island-ui'
+import { Input, Select, Button, Icon } from 'animal-island-ui'
+import { translateLifecycle } from '@shared/i18n'
 
 function LifecycleDropdown({
   disabled,
@@ -18,6 +19,7 @@ function LifecycleDropdown({
   label: string
 }) {
   const t = useStore(s => s.t)
+  const lang = useStore(s => s.lang)
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -46,27 +48,37 @@ function LifecycleDropdown({
         }}
       >
         <span>{triggerLabel}</span>
-        <span className="lifecycle-arrow">▼</span>
+        {/* 库 Play 图标是实心三角，靠 CSS 旋转 90° 得到 ▼（展开时转回 ▶），
+            不再用「▼」字符 —— 字符箭头在不同字体下粗细/基线都不一致。 */}
+        <span className="lifecycle-arrow"><Icon name="Play" size={10} /></span>
       </div>
       {open && (
         <div className="lifecycle-panel">
           {options.length === 0 && (
             <div className="lifecycle-empty">{t('previewEmpty')}</div>
           )}
-          {options.map((st) => (
-            <label key={st} className="lifecycle-option">
-              <input
-                type="checkbox"
-                checked={selected.includes(st)}
-                onChange={() => toggle(st)}
-              />
-              <span>{st}</span>
-            </label>
-          ))}
+          {options.map((st) => {
+            const on = selected.includes(st)
+            return (
+              <button
+                key={st}
+                type="button"
+                className={`lifecycle-option${on ? ' on' : ''}`}
+                aria-pressed={on}
+                onClick={() => toggle(st)}
+              >
+                <span className={`lifecycle-option__check${on ? '' : ' off'}`}>
+                  <Icon name="Check" size={14} />
+                </span>
+                {/* 选项文案按语言翻译；勾选态、过滤、导出仍用原始值 st */}
+                <span>{translateLifecycle(lang, st)}</span>
+              </button>
+            )
+          })}
           {selected.length > 0 && (
-            <div className="lifecycle-clear" onClick={clear}>
+            <button type="button" className="lifecycle-clear" onClick={clear}>
               {t('msClear')}
-            </div>
+            </button>
           )}
         </div>
       )}
@@ -117,6 +129,7 @@ export function FilterBar({ disabled, target = 'mat' }: { disabled: boolean; tar
           <label className="filter-group-label">{t('filterLabel')}</label>
           <div className="filter-kw-row">
             <Input
+              className="mq-input"
               placeholder={t('kwPh')}
               value={bomKw}
               onChange={e => setBomKw(e.target.value)}
@@ -124,6 +137,7 @@ export function FilterBar({ disabled, target = 'mat' }: { disabled: boolean; tar
               disabled={disabled}
             />
             <Input
+              className="mq-input"
               placeholder={t('kwNotPh')}
               value={bomKwNot}
               onChange={e => setBomKwNot(e.target.value)}
@@ -143,6 +157,7 @@ export function FilterBar({ disabled, target = 'mat' }: { disabled: boolean; tar
         <label className="filter-group-label">{t('filterLabel')}</label>
         <div className="filter-kw-row">
           <Input
+            className="mq-input"
             placeholder={t('kwPh')}
             value={kw}
             onChange={e => setKw(e.target.value)}
@@ -150,6 +165,7 @@ export function FilterBar({ disabled, target = 'mat' }: { disabled: boolean; tar
             disabled={disabled}
           />
           <Input
+            className="mq-input"
             placeholder={t('kwNotPh')}
             value={kwNot}
             onChange={e => setKwNot(e.target.value)}

@@ -1,40 +1,76 @@
-/* animal-island-ui 风格自定义光标（Cursor 组件行为复现）
-   用青蛙/动物手指风格的圆头指针，hotspot 在 4 0 */
-.ai-cursor,
-.ai-cursor * {
-  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Ccircle cx='14' cy='14' r='11' fill='%2319c8b9' stroke='%23138a7e' stroke-width='2'/%3E%3Ccircle cx='14' cy='14' r='4' fill='%23fff'/%3E%3Cpath d='M22 14 L30 14' stroke='%23138a7e' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E") 4 0, pointer !important;
+/* ============================================================================
+   光标样式（自 animal-island-ui 1.12.0 内联维护）
+   ----------------------------------------------------------------------------
+   来源：node_modules/animal-island-ui/dist/es/components/Cursor/cursor.css
+
+   为什么把这份规则抄进项目、而不是直接依赖库：
+   1) 该文件是普通 .css（不是 CSS Module），库打包时没有把它收进聚合样式表 ——
+      在 dist/index.css 里搜不到 .animal-cursor--force，而 BackTop / Collapse / Time
+      的样式都在。所以即使渲染库的 <Cursor> 组件，也只是加了个类名，样式是空的。
+   2) 按「第三方资源一律落到本仓库」的约定，光标这类静态资源就地维护，
+      不引用任何 CDN / 外链，库升级时对照上面的路径重新同步即可。
+
+   规则与库原文一致（default 手指箭头 / raindrop 雨滴 / scoped 局部），只做两处补充：
+   - 文本输入框保留 text 光标。forceAll 的原语义会把输入框也压成手指，
+     而本工具是数据录入场景，输入框丢掉 I 型光标后定位与选词都会变别扭。
+   - 禁用态统一 not-allowed，保留可感知的不可用反馈。
+   ========================================================================== */
+
+/* 手指箭头（default） */
+.animal-cursor--force,
+.animal-cursor--force * {
+  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cpath d='M6 4 L6 21 L10.5 16.5 L13.5 23 L16.8 21.5 L13.8 15.2 L20.5 15.2 Z' fill='%23fff7e6' stroke='%23794f27' stroke-width='2.2' stroke-linejoin='round'/%3E%3C/svg%3E") 6 4, default !important;
 }
 
-/* 链接/按钮保持 pointer（覆盖全局手型，避免嵌套冲突） */
-.ai-cursor a,
-.ai-cursor button,
-.ai-cursor .btn,
-.ai-cursor .tab-btn,
-.ai-cursor .chip,
-.ai-cursor .mini-btn,
-.ai-cursor .add-btn,
-.ai-cursor .del,
-.ai-cursor .ms-btn,
-.ai-cursor .ms-clear,
-.ai-cursor .batch-toggle,
-.ai-cursor .file-link,
-.ai-cursor .col-resize-handle {
-  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Ccircle cx='14' cy='14' r='11' fill='%23f0a544' stroke='%23d98e2b' stroke-width='2'/%3E%3Ccircle cx='14' cy='14' r='4' fill='%23fff'/%3E%3Cpath d='M22 14 L30 14' stroke='%23d98e2b' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E") 4 0, pointer !important;
+/* 蓝色雨滴（raindrop） */
+.animal-cursor--force.animal-cursor--raindrop,
+.animal-cursor--force.animal-cursor--raindrop * {
+  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Cpath d='M16 6s-9 12-9 16a9 9 0 0 0 18 0c0-4-9-16-9-16z' fill='%2374ccff' stroke='%232e86ab' stroke-width='1.5'/%3E%3Cellipse cx='12.5' cy='19' rx='2' ry='3.2' fill='%23dff4ff' transform='rotate(-18 12.5 19)'/%3E%3C/svg%3E") 16 6, default !important;
 }
 
-/* 文本输入保持 text 光标 */
-.ai-cursor input,
-.ai-cursor textarea {
-  cursor: text !important;
+/* 局部模式（仅容器自身，交互元素保留系统光标） */
+.animal-cursor.animal-cursor--scoped {
+  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cpath d='M6 4 L6 21 L10.5 16.5 L13.5 23 L16.8 21.5 L13.8 15.2 L20.5 15.2 Z' fill='%23fff7e6' stroke='%23794f27' stroke-width='2.2' stroke-linejoin='round'/%3E%3C/svg%3E") 6 4, default !important;
 }
+.animal-cursor.animal-cursor--scoped.animal-cursor--raindrop {
+  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Cpath d='M16 6s-9 12-9 16a9 9 0 0 0 18 0c0-4-9-16-9-16z' fill='%2374ccff' stroke='%232e86ab' stroke-width='1.5'/%3E%3Cellipse cx='12.5' cy='19' rx='2' ry='3.2' fill='%23dff4ff' transform='rotate(-18 12.5 19)'/%3E%3C/svg%3E") 16 6, default !important;
+}
+.animal-cursor--scoped *,
+.animal-cursor.animal-cursor--scoped * { cursor: auto !important; }
+.animal-cursor--scoped a[href],
+.animal-cursor--scoped button,
+.animal-cursor--scoped [role='button'],
+.animal-cursor--scoped [role='link'],
+.animal-cursor--scoped label[for],
+.animal-cursor--scoped select,
+.animal-cursor--scoped summary,
+.animal-cursor--scoped input[type='button'],
+.animal-cursor--scoped input[type='submit'],
+.animal-cursor--scoped input[type='reset'],
+.animal-cursor--scoped input[type='checkbox'],
+.animal-cursor--scoped input[type='radio'],
+.animal-cursor--scoped [data-cursor='pointer'] { cursor: pointer !important; }
+.animal-cursor--scoped input[type='text'],
+.animal-cursor--scoped input[type='search'],
+.animal-cursor--scoped input[type='email'],
+.animal-cursor--scoped input[type='password'],
+.animal-cursor--scoped input[type='number'],
+.animal-cursor--scoped input[type='tel'],
+.animal-cursor--scoped input[type='url'],
+.animal-cursor--scoped textarea { cursor: text !important; }
+.animal-cursor--scoped [disabled],
+.animal-cursor--scoped [aria-disabled='true'] { cursor: not-allowed !important; }
 
-/* 禁用状态保持 not-allowed */
-.ai-cursor button:disabled,
-.ai-cursor .del:disabled {
-  cursor: not-allowed !important;
-}
+/* ── 接入补充 ── */
 
-/* 列宽拖拽手柄保持 col-resize */
-.ai-cursor .col-resize-handle {
-  cursor: col-resize !important;
-}
+/* <Cursor> 会额外包一层 div，撑满 #root 才能让 .app-root 的 height:100% 有基准 */
+.animal-cursor { height: 100%; }
+
+/* 录入场景保留 I 型光标：覆盖 force 规则里的「一律手指」 */
+.animal-cursor--force input:not([type='checkbox']):not([type='radio']):not([type='button']):not([type='submit']):not([type='reset']),
+.animal-cursor--force textarea,
+.animal-cursor--force [contenteditable='true'] { cursor: text !important; }
+
+/* 禁用态：库 <Button>/<Input> 大都用 disabled 属性，这里同时兜住 aria-disabled */
+.animal-cursor--force [disabled],
+.animal-cursor--force [aria-disabled='true'] { cursor: not-allowed !important; }

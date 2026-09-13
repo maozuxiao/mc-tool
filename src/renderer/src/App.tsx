@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Background } from 'animal-island-ui'
 import { useStore } from './store'
 import { LoginOverlay } from './components/LoginOverlay'
 import { QueryPanel } from './components/QueryPanel'
@@ -10,6 +11,7 @@ type MainView = 'query' | 'ai'
 
 export function App() {
   const t = useStore(s => s.t)
+  const theme = useStore(s => s.theme)
   const loggedIn = useStore(s => s.loggedIn)
   const loginState = useStore(s => s.loginState)
   const landing = useStore(s => s.landing)
@@ -49,9 +51,7 @@ export function App() {
       } else {
         const reason = s.reason
         setLoginError(
-          reason === 'network'
-            ? '网络异常，正在重新获取二维码...'
-            : '登录未完成，正在重新获取二维码...'
+          reason === 'network' ? t('errLoginNetwork') : t('errLoginIncomplete')
         )
         setQrRefetchSeq(useStore.getState().qrRefetchSeq + 1)
       }
@@ -89,6 +89,10 @@ export function App() {
 
   return (
     <div className="app-root">
+      {/* 全局壁纸层：整窗最底层的一块「壁纸」，铺满视口、不占布局、不拦点击。
+          放在这里（而不是各页面内部）才能让登录页、物料查询页、AI 助手页与顶部提示条
+          共用同一张壁纸；切换主题只改这一个属性，不会触发两张表格重渲染。 */}
+      <Background type={theme} className="mc-backdrop" />
       <UpdateBar />
       <SessionExpiredBar />
       {!loggedIn && !landing && <LoginOverlay loginState={loginState} />}
@@ -104,13 +108,13 @@ export function App() {
         <div className="sso-loading-overlay">
           <div className="sso-loading-box">
             <div className="sso-loading-spinner" />
-            <div className="sso-loading-text">正在进入工具…</div>
+            <div className="sso-loading-text">{t('ssoEntering')}</div>
           </div>
         </div>
       )}
       <div className="view-switch">
-        <button className={view === 'query' ? 'active' : ''} onClick={() => setView('query')}>{t('viewQuery')}</button>
-        <button className={view === 'ai' ? 'active' : ''} onClick={() => setView('ai')}>{t('viewAi')}</button>
+        <button type="button" className={view === 'query' ? 'active' : ''} onClick={() => setView('query')}>{t('viewQuery')}</button>
+        <button type="button" className={view === 'ai' ? 'active' : ''} onClick={() => setView('ai')}>{t('viewAi')}</button>
       </div>
     </div>
   )

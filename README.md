@@ -4,7 +4,7 @@
 
 - 仓库：https://github.com/maozuxiao/mc-tool
 - 技术栈：Electron 33 + electron-vite + React 18 + TypeScript + Zustand，UI 组件库 [`animal-island-ui`](https://www.npmjs.com/package/animal-island-ui)
-- 当前版本：`1.0.38`（`package.json` 的 `version` 为准）
+- 当前版本：`1.0.39`（`package.json` 的 `version` 为准）
 
 ---
 
@@ -37,8 +37,11 @@
 | 📤 **CSV 导出** | 任意结果表一键导出 CSV（含 BOM，便于 Excel 打开）。 |
 | 🤖 **AI 助手** | 内置对话页，接 OpenAI 兼容 / Anthropic 协议的大模型；可调用本地 **MC Skill** 直接查物料、库存、BOM、规格文件，结果由模型总结成 Markdown 表格。 |
 | 🆕 **自动更新** | 启动 3 秒后后台检查 GitHub Releases，顶部更新条显示下载进度，下载完成后以 NSIS 向导模式非静默安装。 |
-| ⚙️ **设置与托盘** | 右上「设置」面板可切换语言、开关「最小化到托盘后台运行」、设置关闭按钮行为（最小化到托盘 / 直接退出）、开机自启；开启后应用常驻系统托盘，左键单击恢复、右键菜单快速切换 MC / AI 视图或检查更新。 |
-| 🌐 **其他** | 中英双语切换；`Ctrl + 滚轮` 缩放、`Ctrl + 0` 复位；输入框历史记录；列宽可拖拽并记忆。 |
+| ⚙️ **设置与托盘** | 右上「设置」面板可切换语言、**选择主题**、开关「最小化到托盘后台运行」、设置关闭按钮行为（最小化到托盘 / 直接退出）、开机自启；开启后应用常驻系统托盘，左键单击恢复、右键菜单快速切换 MC / AI 视图或检查更新。 |
+| 🎨 **主题换肤** | 设置面板「主题」提供 18 套浅色主题（壁纸图案 + 配套配色，分奶油系 / 草木系 / 糖果系），缩略图即真实壁纸；选择即时生效并跨启动记忆，登录页、物料查询页、AI 助手页与顶部提示条共用同一套壁纸与配色。 |
+| ⏰ **下班倒计时** | 顶栏显示「距离下班还有 hh:mm:ss」（按 18:00 下班计时）；周末、法定节假日、调休放假以及已过下班点后，改为一句祝福文案。节假日安排由主进程联网同步并缓存，取不到时回退内置表，断网也能正常显示。 |
+| 🖥 **OA 工作台（应用内）** | 点标题栏品牌图标在应用内新窗口打开 OA 首页，复用当前登录会话、免扫码；按住 `Ctrl` / `⌘` 点击则改用系统默认浏览器打开。 |
+| 🌐 **其他** | 中英双语切换（含登录页与表格取值）；`Ctrl + 滚轮` 缩放、`Ctrl + 0` 复位；输入框历史记录；列宽可拖拽并记忆。 |
 
 ---
 
@@ -181,10 +184,12 @@
 | 操作 | 说明 |
 |---|---|
 | 切换语言 | 右上角语言下拉，中 / 英即时切换。 |
+| 切换主题 | 右上「设置」→「主题」：当前图案色块 + 名称，点击展开图案网格（18 套），选中即时生效并记忆。 |
 | 缩放界面 | `Ctrl + 滚轮` 调整（50%~200%），`Ctrl + 0` 复位。 |
 | 调整列宽 | 拖动表头分隔线，列宽记忆在本地。 |
+| 查看下班倒计时 | 顶栏标题下方显示距 18:00 下班的时间；休息日 / 已下班显示祝福文案。 |
 | 检查更新 | 「帮助」菜单 → 「检查更新」，有新版时顶部更新条出现「下载」。 |
-| 打开 OA | 点击标题栏图标跳转 `http://oa.streamax.com:8080/ruiming/mc/`。 |
+| 打开 OA | 点击标题栏品牌图标在应用内新窗口打开 OA 工作台（复用登录态、免扫码）；按住 `Ctrl` / `⌘` 点击改用系统浏览器。 |
 | 退出登录 | 「帮助」菜单 → 「退出登录」，清空本机会话。 |
 | 关于 | 「帮助」菜单 → 「关于」，查看版本号与说明。 |
 
@@ -199,6 +204,7 @@ mc-tool/
 │  │  ├─ index.ts               # 入口：窗口、OA 登录/SSO/二维码、Cookie 持久化与备份恢复、
 │  │  │                         #        HTTP 代理、文件下载、全部 IPC handler、安装更新
 │  │  ├─ updater.ts             # electron-updater 封装：手动下载策略、版本比较、事件转发
+│  │  ├─ holidaySync.ts         # 中国法定节假日：联网逐年同步（多源 + 磁盘缓存），顶栏倒计时用
 │  │  └─ ai/                    # AI 助手主进程侧
 │  │     ├─ aiIpc.ts            # AI 相关 IPC handler 注册
 │  │     ├─ chatService.ts      # 对话编排：流式请求、工具调用循环、事件推送
@@ -215,9 +221,12 @@ mc-tool/
 │        ├─ App.tsx             # 根组件：登录态守卫、更新条、主面板
 │        ├─ store.ts            # Zustand 全局状态 + 查询/筛选/导出动作
 │        ├─ ErrorBoundary.tsx   # 错误边界，异常上报主进程
+│        ├─ theme.ts            # 主题注册表（18 套壁纸 + 配色）与 applyTheme
+│        ├─ env.d.ts            # 静态资源模块声明（png/jpg/svg…）
 │        ├─ styles.css / cursor.css
 │        ├─ hooks/useColResize.ts   # 列宽拖拽 + 本地持久化
 │        ├─ components/
+│        │  ├─ WorkCountdown.tsx    # 顶栏下班倒计时（含节假日同步与休息日文案）
 │        │  ├─ QueryPanel.tsx       # 主面板：Tabs、输入、批量、时钟、历史、帮助
 │        │  ├─ FilterBar.tsx        # 关键词/类型/生命周期筛选
 │        │  ├─ MaterialTable.tsx    # 物料结果表
@@ -228,11 +237,12 @@ mc-tool/
 │        │  ├─ ai/ChatPanel.tsx     # AI 对话页（会话列表、模型选择、Markdown 渲染）
 │        │  ├─ ai/ai-chat.css
 │        │  └─ nookIcon.ts          # NOOK 图标
-│        └─ assets/nook.svg
+│        └─ assets/nook.svg + icon-leaf.png   # NOOK 图标 / 选中 Tab 的小叶子
 ├─ shared/                      # 主进程 / 渲染进程共享（纯逻辑，无副作用）
 │  ├─ constants.ts              # OA 地址、组织号、生命周期→样式映射
 │  ├─ types.ts                  # 数据类型 + IPC 通道名常量
 │  ├─ query.ts                  # URL 构造、结果归一化、批量合并、筛选排序去重、CSV
+│  ├─ holidays.ts               # 法定节假日 / 调休判断（内置表 + 主进程实时数据覆盖层）
 │  ├─ ai-types.ts               # AI IPC 通道名 + 会话/消息/工具调用类型
 │  └─ i18n.ts                   # 中英文文案字典
 ├─ resources/skills/
@@ -320,9 +330,9 @@ npm run pack:all   # 全平台
 ```
 dist/
 ├─ latest.yml                            # 自动更新元数据
-├─ MC物料查询 Setup 1.0.38.exe            # NSIS 安装包
-├─ MC物料查询 Setup 1.0.38.exe.blockmap  # 增量更新块映射
-└─ MC物料查询 1.0.38.exe                  # 便携版
+├─ MC物料查询 Setup 1.0.39.exe            # NSIS 安装包
+├─ MC物料查询 Setup 1.0.39.exe.blockmap  # 增量更新块映射
+└─ MC物料查询 1.0.39.exe                  # 便携版
 ```
 
 > macOS 交叉编译在 Windows 上不可靠，DMG 请在 macOS 上打包。

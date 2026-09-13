@@ -1,5 +1,7 @@
 import { create } from 'zustand'
+import type { BackgroundType } from 'animal-island-ui'
 import { I18N, Lang, translate } from '@shared/i18n'
+import { applyTheme, persistTheme, readStoredTheme } from './theme'
 import {
   buildSearchUrl, buildItemNoUrl, buildBatchUrl, buildBomUrl, buildFileUrl, normalizeRows,
   parseBatchItemNos, mergeBatchResults, applyMaterialFilter, applyBomFilter,
@@ -59,6 +61,10 @@ interface State {
   error: string
   batchMsg: string
   hiddenCols: string[]
+  // 主题：字符串存 localStorage（与 mc-lang / mc-hidden-cols 同构）。
+  // 不走主进程 prefs —— 那条通道是布尔专用（setSetting(key, boolean) + !!v），
+  // 且 getAppPrefs() 是异步的，用它必然导致首屏先渲染默认主题再切肤。
+  theme: BackgroundType
   updateInfo: { hasUpdate: boolean; version?: string; downloaded?: boolean; notes?: string; checking: boolean; latest?: boolean; downloading?: boolean; progress?: number; error?: string }
   appVersion: string
   // 行展开状态持久化到 store：切换 tab 时不丢失展开行与按钮点击事件
@@ -68,6 +74,7 @@ interface State {
   // actions
   t: (key: string, vars?: Record<string, string | number>) => string
   setLang: (l: Lang) => void
+  setTheme: (id: BackgroundType) => void
   setLoggedIn: (v: boolean) => void
   setCheckingLogin: (v: boolean) => void
   setLanding: (v: boolean) => void
@@ -166,6 +173,7 @@ const makeT = (lang: Lang) => (key: string, vars?: Record<string, string | numbe
 
 export const useStore = create<State>((set, get) => ({
   lang: initialLang,
+  theme: readStoredTheme(),
   loggedIn: false,
   checkingLogin: true,
   landing: false,
@@ -193,6 +201,13 @@ export const useStore = create<State>((set, get) => ({
     set({ lang: l, t: makeT(l) })
     // 同步给主进程：原生弹窗（showMessageBox）的按钮与标题跟随界面语言
     try { window.mcApi.setUiLang(l) } catch { /* 忽略 */ }
+  },
+  setTheme: (id) => {
+    // 先落 DOM 再落存储：写属性让换肤即时生效，存储失败也仅影响「下次启动的记忆」，
+    // 不影响本次会话，符合 localStorage 可能被禁用的兜底预期。
+    applyTheme(id)
+    persistTheme(id)
+    set({ theme: id })
   },
   setLoggedIn: (v) => set({ loggedIn: v }),
   setCheckingLogin: (v) => set({ checkingLogin: v }),
@@ -414,7 +429,7 @@ export const useStore = create<State>((set, get) => ({
       const filePath = await window.mcApi.saveCsv(csv, `${s.t('csvMat')}_${new Date().toISOString().slice(0, 10)}.csv`)
       if (!filePath) { set({ error: '' }) }
     } catch (e: any) {
-      set({ error: `CSV导出失败: ${e?.message || e}` })
+      set({ error: s.t('errCsvExport', { m: e?.message || String(e) }) })
     }
   },
   exportBomCSV: async () => {
@@ -427,7 +442,7 @@ export const useStore = create<State>((set, get) => ({
       const filePath = await window.mcApi.saveCsv(csv, `${s.t('csvBom')}_${new Date().toISOString().slice(0, 10)}.csv`)
       if (!filePath) { set({ error: '' }) }
     } catch (e: any) {
-      set({ error: `CSV导出失败: ${e?.message || e}` })
+      set({ error: s.t('errCsvExport', { m: e?.message || String(e) }) })
     }
   },
 

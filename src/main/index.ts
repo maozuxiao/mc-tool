@@ -14,6 +14,7 @@ import { registerAIIPC } from './ai/aiIpc'
 // Cookie/Storage 目录，进程退出后依然保留，无需手动文件备份。
 // 定义收敛在 ai/fileDownload.ts（手动下载与 AI 下载共用同一份）。
 import { downloadOaBuffer, PARTITION } from './ai/fileDownload'
+import { getHolidayPlan } from './holidaySync'
 
 let mainWindow: BrowserWindow | null = null
 const APP_ID = 'com.streamax.mcquery'
@@ -448,6 +449,86 @@ function createWindow() {
   // 允许渲染进程让主进程打开系统默认浏览器
   ipcMain.handle('mc-open-external', (_event, url: string) => {
     if (typeof url === 'string' && url.startsWith('http')) shell.openExternal(url)
+  })
+
+  // 中国法定节假日：顶栏「距离下班还有」用它判断今天上不上班。
+  // 主进程负责联网 + 落盘缓存（见 holidaySync.ts），取不到返回 null，
+  // 渲染层回退 @shared/holidays 的内置兜底表。
+  ipcMain.handle(IPC.HOLIDAY_GET, async (_event, year: number) => {
+    const plan = await getHolidayPlan(Number(year))
+    debugLog(plan
+      ? `[HOLIDAY] year=${year} source=${plan.source} off=${plan.off.length} work=${plan.work.length}`
+      : `[HOLIDAY] year=${year} 拉取失败，渲染层回退内置兜底表`)
+    return plan
+  })
+
+  // 应用内打开 OA 首页，复用登录会话（免登录）。
+  //
+  // 关于「带着 token 在系统浏览器里免登录」：做不到，且不是实现问题而是机制问题 ——
+  // OA 的登录态是 partition(persist:mc-query) 里的 route/SESSION/LtpaToken cookie，
+  // 系统浏览器的 cookie 库与本进程完全隔离，OA 侧也没有可传票据的 URL 入口
+  // （IAM 那套 usk/REQID 同样以 cookie 形式存在，且是 oa↔iam 302 链里带的）。
+  // 新开一个共用同一 partition 的窗口，cookie 天然生效 —— 这才是真正免登录的方式。
+  let oaWindow: BrowserWindow | null = null
+  let oaCookieInjectorInstalled = false
+  ipcMain.handle('mc-open-oa-window', async () => {
+    // 已开着就聚焦，避免反复点击叠出一堆窗口
+    if (oaWindow && !oaWindow.isDestroyed()) {
+      if (oaWindow.isMinimized()) oaWindow.restore()
+      oaWindow.focus()
+      return true
+    }
+    oaWindow = new BrowserWindow({
+      width: 1280,
+      height: 860,
+      minWidth: 900,
+      minHeight: 600,
+      title: 'OA工作台',
+      autoHideMenuBar: true,
+      backgroundColor: '#f7f3df',
+      webPreferences: {
+        partition: PARTITION,
+        nodeIntegration: false,
+        contextIsolation: true
+      }
+    })
+    // 标题固定为「OA工作台」：OA 门户页自带 <title>，默认会把构造时传的 title 覆盖掉
+    oaWindow.on('page-title-updated', (e) => e.preventDefault())
+    oaWindow.on('closed', () => { oaWindow = null })
+
+    // 关键修复：OA 窗口走的是明文 http，而 OA 会话 cookie（route / SESSION / LtpaToken）全都带 Secure。
+    // Chromium 不会在明文连接上发送 Secure cookie，于是窗口内永远处于「无会话」状态：
+    // OA 把请求 302 到 IAM 做免密握手，IAM 回跳 OA 时 OA 想用 Set-Cookie 种下会话，
+    // 又因「明文连接不得写入 Secure cookie」被 Chromium 拒收，oa ↔ iam 互相 302 形成死循环，
+    // 窗口只剩 backgroundColor（视觉上就是全白/空白）。
+    // 主进程自己的接口调用是手工拼 Cookie 头发送的，不受该限制 —— 这正是「查询正常、应用内打开空白」的原因。
+    // 这里只对 OA 窗口自身的请求补齐 Cookie 头，绕开 Secure 限制；其它 webContents 一律放行。
+    if (!oaCookieInjectorInstalled) {
+      oaCookieInjectorInstalled = true
+      const sess = session.fromPartition(PARTITION)
+      sess.webRequest.onBeforeSendHeaders({ urls: ['*://oa.streamax.com/*'] }, async (details, callback) => {
+        const wc = oaWindow && !oaWindow.isDestroyed() ? oaWindow.webContents : null
+        // 必须始终回调，否则该请求会一直挂起
+        if (!wc || details.webContentsId !== wc.id) return callback({})
+        try {
+          const cookies = await sess.cookies.get({})
+          const cookieStr = cookies.map(c => `${c.name}=${c.value}`).join('; ')
+          if (!cookieStr) return callback({})
+          const requestHeaders = { ...details.requestHeaders }
+          requestHeaders.Cookie = requestHeaders.Cookie ? `${requestHeaders.Cookie}; ${cookieStr}` : cookieStr
+          callback({ requestHeaders })
+        } catch {
+          callback({})
+        }
+      })
+    }
+
+    try {
+      await oaWindow.loadURL(OA_LOGIN_URL)
+    } catch (e: any) {
+      debugLog('[openOaWindow] load error: ' + e?.message)
+    }
+    return true
   })
 }
 

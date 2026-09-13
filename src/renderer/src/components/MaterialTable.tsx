@@ -2,7 +2,8 @@ import { useRef, Fragment } from 'react'
 import { useStore } from '../store'
 import { useColResize } from '../hooks/useColResize'
 import { escapeHtml } from '@shared/query'
-import { Button, Tag } from 'animal-island-ui'
+import { Button, Icon, Tag } from 'animal-island-ui'
+import { translateItemType, translateLifecycle } from '@shared/i18n'
 
 // 生命周期值 → 组件库合法 Tag 颜色（对齐用户脚本 SC 映射，使用 animal-island-ui 主题色）
 const STATUS_TAG_COLOR: Record<string, any> = {
@@ -60,9 +61,14 @@ export function MaterialTable() {
     { k: 'ON_HAND_QTY', label: t('thStock'), w: 100, cls: 'td-qty', sort: true },
   ]
 
+  // 库没有排序箭头图标：用 Play 实心三角旋转表达升/降序（▲ / ▼），未排序时淡显
   const sortIcon = (k: string) => {
-    if (matSortKey !== k) return t('sortIco')
-    return matSortAsc ? '↑' : '↓'
+    const dir = matSortKey !== k ? 'none' : matSortAsc ? 'asc' : 'desc'
+    return (
+      <span className={`sort-ico ${dir}`} aria-hidden="true">
+        <Icon name="Play" size={9} />
+      </span>
+    )
   }
 
   const viewBomFor = (itemNo: string) => {
@@ -107,9 +113,7 @@ export function MaterialTable() {
                   onClick={() => c.sort && matSortBy(c.k)}
                 >
                   {c.label}
-                  {c.sort && (
-                    <span className="sort-ico">{sortIcon(c.k)}</span>
-                  )}
+                  {c.sort && sortIcon(c.k)}
                   <span className="col-resizer" />
                 </th>
               ))}
@@ -128,10 +132,12 @@ export function MaterialTable() {
                       if (c.k === '#') return <td key="#" className="td-num">{i + 1}</td>
                       if (c.k === 'ITEM_NUMBER') return <td key={c.k} className="td-item">{escapeHtml(itemNo)}</td>
                       if (c.k === 'ITEM_DESC') return <td key={c.k} className="td-desc" title={escapeHtml(String(r.ITEM_DESC ?? ''))}>{escapeHtml(String(r.ITEM_DESC ?? ''))}</td>
-                      if (c.k === 'ITEM_TYPE') return <td key={c.k} className="td-type">{escapeHtml(String(r.ITEM_TYPE ?? ''))}</td>
+                      // 类型 / 生命周期是接口返回的中文枚举，显示时按语言取值翻译；
+                      // Tag 的配色仍按**原始值**查表，所以换语言不会改变标签颜色。
+                      if (c.k === 'ITEM_TYPE') return <td key={c.k} className="td-type">{escapeHtml(translateItemType(lang, String(r.ITEM_TYPE ?? '')))}</td>
                       if (c.k === 'INV_STATUS_NAME') {
                         const st = String(r.INV_STATUS_NAME ?? '')
-                        return <td key={c.k} className="td-status"><Tag color={STATUS_TAG_COLOR[st] || 'default'}>{st}</Tag></td>
+                        return <td key={c.k} className="td-status"><Tag color={STATUS_TAG_COLOR[st] || 'default'}>{translateLifecycle(lang, st)}</Tag></td>
                       }
                       if (c.k === 'ON_HAND_QTY') {
                         const raw = r.ON_HAND_QTY
@@ -145,20 +151,44 @@ export function MaterialTable() {
                   {expanded && (
                     <tr className="mq-expand">
                       <td colSpan={cols.length}>
-                        <strong>{t('fullDesc')}</strong>{escapeHtml(String(r.ITEM_DESC ?? ''))}<br />
-                        <strong>{t('itemNo')}</strong>{escapeHtml(itemNo)}&emsp;
-                        <strong>{t('k3')}</strong>{escapeHtml(String(r.K3_CODE ?? '—'))}&emsp;
-                        <strong>{t('devSub')}</strong>{formatQty(r.DEV_SUB_QTY)}&emsp;
-                        <strong>{t('trackSub')}</strong>{formatQty(r.TRACK_SUB_QTY)}&emsp;
-                        <strong>{t('prodOrder')}</strong>{formatQty(r.PROD_ORDER)}&emsp;
-                        <strong>{t('fixOrder')}</strong>{formatQty(r.REWORK_ORDER)}
-                        <div className="mq-expand-actions">
-                          <button className="mq-mini-btn" onClick={(e) => { e.stopPropagation(); viewBomFor(itemNo) }}>
-                            🌳 {t('viewBomThis')}
-                          </button>
-                          <button className="mq-mini-btn" onClick={(e) => { e.stopPropagation(); viewFileFor(itemNo) }}>
-                            📎 {t('viewFileThis')}
-                          </button>
+                        {/* 展开区结构对齐 BomTable（.mq-expand-inner + .mq-expand-line）：
+                            原先这里是「裸文本 + <br> + &emsp;」拼出来的，
+                            .mq-expand-inner 的 12px 16px 内边距和 1.9 行高全都没吃到，
+                            于是文字贴着单元格边、行距偏挤，「完整描述」与下面两个按钮
+                            之间也只隔着一次 <br>，整体比 BOM 页窄一截。
+                            改成块级行之后，两页的内边距 / 行距 / 按钮上边距
+                            （.mq-expand-actions 的 10px）完全一致。
+                            内容分组保持原样，仍是「完整描述」和「料号等字段」两行。 */}
+                        <div className="mq-expand-inner">
+                          <div className="mq-expand-line">
+                            <strong>{t('fullDesc')}</strong>{escapeHtml(String(r.ITEM_DESC ?? ''))}
+                          </div>
+                          <div className="mq-expand-line">
+                            <strong>{t('itemNo')}</strong>{escapeHtml(itemNo)}&emsp;
+                            <strong>{t('k3')}</strong>{escapeHtml(String(r.K3_CODE ?? '—'))}&emsp;
+                            <strong>{t('devSub')}</strong>{formatQty(r.DEV_SUB_QTY)}&emsp;
+                            <strong>{t('trackSub')}</strong>{formatQty(r.TRACK_SUB_QTY)}&emsp;
+                            <strong>{t('prodOrder')}</strong>{formatQty(r.PROD_ORDER)}&emsp;
+                            <strong>{t('rectifyOrder')}</strong>{formatQty(r.REWORK_ORDER)}
+                          </div>
+                          <div className="mq-expand-actions">
+                            <Button
+                              type="primary"
+                              size="small"
+                              icon={<Icon name="Tree" size={14} />}
+                              onClick={(e) => { e.stopPropagation(); viewBomFor(itemNo) }}
+                            >
+                              {t('viewBomThis')}
+                            </Button>
+                            <Button
+                              type="primary"
+                              size="small"
+                              icon={<Icon name="File" size={14} />}
+                              onClick={(e) => { e.stopPropagation(); viewFileFor(itemNo) }}
+                            >
+                              {t('viewFileThis')}
+                            </Button>
+                          </div>
                         </div>
                       </td>
                     </tr>

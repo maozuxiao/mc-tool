@@ -14,10 +14,10 @@ export function UpdateBar() {
   if (update.error) {
     return (
       <div className="update-bar update-bar--error">
-        {/* animal-island-ui 的 IconName 里没有 error/warning 类图标，
-            合法值只有 miles/camera/chat/critterpedia/design/diy/helicopter/map/shopping/variant。
-            原先写的 icon-error 不在其中（图标其实一直没渲染出来），此处取语义最中性的 variant。 */}
-        <Icon name="icon-variant" size={16} />
+        {/* 1.12.0 起 IconName 为 101 个帕斯卡命名的内置图标（Bell/Check/Download/Lock…），
+            旧的小写短横线名（icon-error / icon-variant / icon-design）已非法并会静默不渲染。
+            失败态用 Bell 表达「有提醒」，与右侧的关闭按钮在语义上区分开。 */}
+        <Icon name="Bell" size={16} />
         <span className="update-bar__text">{t('updateError', { m: update.error })}</span>
         <Button size="small" onClick={dismiss}>{t('updateDismiss')}</Button>
       </div>
@@ -28,7 +28,7 @@ export function UpdateBar() {
   if (update.latest) {
     return (
       <div className="update-bar">
-        <Icon name="icon-design" size={16} />
+        <Icon name="Check" size={16} />
         <span className="update-bar__text">{t('updateLatest')}</span>
         <Button size="small" onClick={dismiss}>{t('updateDismiss')}</Button>
       </div>
@@ -44,7 +44,7 @@ export function UpdateBar() {
 
   return (
     <div className="update-bar">
-      <Icon name="icon-design" size={16} />
+      <Icon name="Download" size={16} />
       <span className="update-bar__text">
         {update.downloaded
           ? t('updateDownloaded')
@@ -55,8 +55,9 @@ export function UpdateBar() {
 
       {!update.downloaded && (
         <div className="update-bar__progress">
+          {/* 1.12.0 的 Progress 已移除 infoPosition，百分比固定显示在右侧 */}
           {downloading ? (
-            <Progress percent={pct} size="large" infoPosition="right" showInfo />
+            <Progress percent={pct} size="small" showInfo />
           ) : (
             <Button type="primary" size="small" onClick={startDownload}>{t('updateDownload')}</Button>
           )}

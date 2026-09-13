@@ -1,4 +1,7 @@
 /* ── AI 助手 ── */
+/* 库没有 chevron / 方向箭头图标，统一用 Play 实心三角旋转表达方向 */
+.ai-rot-180 { transform: rotate(180deg); }
+
 .ai-page {
   display: grid;
   grid-template-columns: 218px minmax(0, 1fr);
@@ -14,10 +17,10 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
-  background: var(--animal-cream-2);
-  border: 1px solid var(--animal-line);
-  border-radius: var(--animal-radius);
-  box-shadow: var(--animal-shadow-soft);
+  background: var(--mc-surface-veil);
+  border: 1px solid var(--mc-line);
+  border-radius: var(--mc-radius);
+  box-shadow: var(--mc-shadow-soft);
   overflow: hidden;
 }
 .ai-sidebar-head {
@@ -26,38 +29,46 @@
   justify-content: space-between;
   gap: 8px;
   padding: 14px;
-  border-bottom: 1px solid var(--animal-line);
+  border-bottom: 1px solid var(--mc-line);
   font-weight: 700;
 }
-/* .mq-btn 自带 padding: 9px 15px，直接加 height:30px 会让内容区被压成 12px、
-   文字挤在顶部（总高被撑到 48px）。这里显式改成 flex 居中 + border-box。 */
-.ai-sidebar-head button {
-  height: 30px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 14px;
-  box-sizing: border-box;
-  line-height: 1;
-  white-space: nowrap;
-}
+/* 已删除：.ai-sidebar-head button ——
+   该规则是为旧的自建文字按钮（.mq-btn，自带 9px 15px padding / 30px 高）写的补偿，
+   会把同行两个 26×26 的图标按钮改写成「26 宽 × 30 高 + 左右各 14px 内边距」而挤压图标。
+   现在头部只有 .ai-side-toggle / .ai-side-new 两个图标按钮，各自尺寸自洽，无需全局改写。 */
 .ai-history { flex: 1; overflow-y: auto; padding: 8px; }
 /* 左下角固定放 Markdown 编辑器入口，不随历史列表滚动 */
 .ai-sidebar-foot {
-  border-top: 1px solid var(--animal-line);
+  border-top: 1px solid var(--mc-line);
   padding: 10px;
   display: flex;
 }
+/* Markdown 编辑器入口改用库 <Tooltip variant="default"> 后，按钮外面多了一层
+   inline-flex wrapper（Tooltip 的 className 落在它身上），由它撑满一行，按钮再 fill。 */
+.ai-md-editor-tip { flex: 1; display: flex; }
+/* 提示气泡的宽度。
+   库给气泡类写的是 width:max-content + max-width:240px，而气泡的包含块就是这个
+   34px 高的 wrapper（= 侧栏宽度 - 20px）。提示文案有 33 个字，max-content 远超 240px，
+   于是被 240px 硬裁，折行点落在「消/息」这种随机字符处，气泡还比它指向的按钮宽出一截、
+   左右都探出去。
+   这里把气泡宽度钉成与 wrapper 等宽，也就是与正下方那颗按钮同宽：
+   折行位置随之固定，气泡左右边缘与按钮对齐，观感干净且不会越界。
+   选择器走 Tooltip 稳定的 DOM 结构（wrapper > [触发元素, 气泡]）——触发元素是库
+   <Button>，渲染成 <button>，所以气泡是 wrapper 下唯一的 <div>，
+   用 > div 就能取到它，不必命中库的哈希类名；
+   库若改结构，最多退回库默认宽度，不影响气泡的显隐。 */
+.ai-md-editor-tip > div { width: 100%; max-width: none; }
 .ai-md-editor-btn {
   flex: 1;
   height: 34px;
+  width: 100%;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   padding: 0 12px;
   box-sizing: border-box;
   line-height: 1;
-  font-size: 12.5px;
+  font-size: var(--mc-font-sm);
 }
 /* 会话历史栏收起/展开 */
 .ai-sidebar-head > span {
@@ -72,10 +83,10 @@
   flex: none;
   width: 26px;
   height: 26px;
-  border: 1px solid var(--animal-line);
+  border: 1px solid var(--mc-line);
   border-radius: 8px;
-  background: #fbf7ef;
-  color: var(--animal-text);
+  background: var(--mc-surface);
+  color: var(--mc-ink);
   cursor: pointer;
   font-size: 15px;
   line-height: 1;
@@ -85,7 +96,7 @@
   padding: 0;
   transition: background .12s, color .12s;
 }
-.ai-side-toggle:hover, .ai-side-new:hover { background: var(--animal-green); color: #fff; }
+.ai-side-toggle:hover, .ai-side-new:hover { background: var(--mc-accent); color: #fff; }
 /* 收起：左侧栏变成 44px 竖条，只保留「展开」与「新对话」两个圆角小按钮 */
 .ai-page.side-collapsed { grid-template-columns: 44px minmax(0, 1fr); }
 .ai-page.side-collapsed .ai-sidebar-head {
@@ -105,10 +116,10 @@
   flex: none;
   width: 30px;
   height: 30px;
-  border: 1px solid var(--animal-line);
+  border: 1px solid var(--mc-line);
   border-radius: 8px;
-  background: #fbf7ef;
-  color: var(--animal-text);
+  background: var(--mc-surface);
+  color: var(--mc-ink);
   cursor: pointer;
   font-size: 15px;
   line-height: 1;
@@ -117,7 +128,7 @@
   padding: 0;
   transition: background .12s, color .12s;
 }
-.ai-side-menu-btn:hover { background: var(--animal-green); color: #fff; }
+.ai-side-menu-btn:hover { background: var(--mc-accent); color: #fff; }
 .ai-history-item {
   display: flex;
   align-items: center;
@@ -125,16 +136,16 @@
   border-radius: 12px;
   padding: 4px 6px;
 }
-.ai-history-item:hover { background: #f6f0e5; }
-.ai-history-item.active { background: #e5f8f5; }
+.ai-history-item:hover { background: var(--mc-surface-2); }
+.ai-history-item.active { background: var(--mc-accent-tint); }
 .ai-history-title {
   flex: 1;
   min-width: 0;
   border: 0;
   background: transparent;
   text-align: left;
-  color: var(--animal-text);
-  font-size: 12.5px;
+  color: var(--mc-ink);
+  font-size: var(--mc-font-sm);
   padding: 8px 6px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -144,13 +155,13 @@
 .ai-history-delete {
   border: 0;
   background: transparent;
-  color: var(--animal-text-soft);
+  color: var(--mc-ink-soft);
   width: 24px;
   height: 24px;
   border-radius: 8px;
   cursor: pointer;
 }
-.ai-history-delete:hover { background: #f7e2de; color: var(--animal-red); }
+.ai-history-delete:hover { background: color-mix(in srgb, var(--mc-red) 18%, var(--mc-surface)); color: var(--mc-red); }
 
 .ai-main {
   display: flex;
@@ -164,85 +175,77 @@
   align-items: center;
   gap: 8px;
   padding: 14px 16px;
-  border-bottom: 1px solid var(--animal-line);
+  border-bottom: 1px solid var(--mc-line);
   flex-wrap: wrap;
 }
-.ai-select, .ai-model-input {
+.ai-model-input {
   height: 34px;
-  border: 1px solid var(--animal-line);
+  border: 1px solid var(--mc-line);
   border-radius: 10px;
-  background: #fff;
-  color: var(--animal-text);
+  background: var(--mc-surface);
+  color: var(--mc-ink);
   padding: 0 10px;
   outline: none;
+  width: 220px;
 }
-.ai-select { max-width: 180px; }
-.ai-model-input { width: 220px; }
+/* 库 <Select> 不接受 className，用包裹层约束宽度 / 撑满栅格 */
+.ai-select-wrap { display: inline-flex; min-width: 0; }
+.ai-select-wrap > * { width: 100%; }
+.ai-select-wrap--provider { width: 170px; }
+.ai-select-wrap--full { display: flex; width: 100%; }
 .ai-model-combo { position: relative; display: inline-block; }
 .ai-model-panel {
-  position: absolute; top: calc(100% + 6px); left: 0; z-index: 40; background: #fff;
-  border: 1px solid var(--animal-line); border-radius: 14px; padding: 6px;
-  box-shadow: var(--animal-shadow); width: 260px; max-height: 300px; overflow-y: auto;
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 40; background: var(--mc-surface);
+  border: 1px solid var(--mc-line); border-radius: 14px; padding: 6px;
+  box-shadow: var(--mc-shadow); width: 260px; max-height: 300px; overflow-y: auto;
 }
 .ai-model-option {
-  padding: 6px 8px; font-size: 12.5px; border-radius: 8px; cursor: pointer;
+  padding: 6px 8px; font-size: var(--mc-font-sm); border-radius: 8px; cursor: pointer;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.ai-model-option:hover { background: rgba(25, 200, 185, .14); }
-.ai-model-option.active { background: linear-gradient(135deg, var(--animal-green), var(--animal-green-deep)); color: #fff; }
-.ai-skill-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 12.5px;
-  color: var(--animal-text);
-  white-space: nowrap;
-}
-.ai-skill-toggle input { accent-color: var(--animal-green); }
+.ai-model-option:hover { background: color-mix(in srgb, var(--mc-accent) 14%, transparent); }
+.ai-model-option.active { background: linear-gradient(135deg, var(--mc-accent), var(--mc-accent-deep)); color: #fff; }
+
+/* 已删除：.ai-skill-toggle（MC Skill 开关）—— 该功能已从工具栏移除，全工程无引用 */
 
 /* 模式切换（对话 / 物料 / Build）：胶囊分段控件 */
 .ai-mode-switch {
   display: inline-flex;
   padding: 3px;
-  border-radius: 999px;
-  background: rgba(0, 0, 0, .06);
+  border-radius: var(--mc-radius-pill);
+  background: color-mix(in srgb, var(--mc-ink) 6%, transparent);
 }
 .ai-mode-btn {
   border: none;
   background: transparent;
-  color: var(--animal-text);
-  font-size: 13px;
+  color: var(--mc-ink);
+  font-size: var(--mc-font-base);
   font-weight: 700;
   padding: 6px 14px;
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   cursor: pointer;
   transition: background .12s, color .12s;
   white-space: nowrap;
 }
-.ai-mode-btn:hover { background: rgba(0, 0, 0, .04); }
+.ai-mode-btn:hover { background: color-mix(in srgb, var(--mc-ink) 4%, transparent); }
 .ai-mode-btn.active {
-  background: var(--animal-green);
+  background: var(--mc-accent);
   color: #fff;
-  box-shadow: 0 2px 6px rgba(25, 200, 185, .35);
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--mc-accent) 35%, transparent);
 }
-.ai-workspace { display: inline-flex; align-items: center; gap: 6px; max-width: 300px; }
-.ai-workspace .mq-btn { max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
-.ai-workspace .mq-btn.ghost {
-  background: transparent; color: var(--animal-text);
-  box-shadow: none; border: 1px solid var(--animal-line); padding: 6px 12px;
-}
-.ai-workspace .mq-btn.ghost:hover { background: rgba(0, 0, 0, .05); }
+/* 已删除：.ai-workspace / .ai-workspace .mq-btn* —— 工作区按钮改由设置面板的
+   .ai-field 承载（库 <Button> + 目录选择），该工具栏样式全工程无引用 */
 
 .ai-settings {
   padding: 14px 16px;
-  border-bottom: 1px solid var(--animal-line);
-  background: #fbf7ef;
+  border-bottom: 1px solid var(--mc-line);
+  background: var(--mc-surface);
 }
 .ai-settings-title { font-weight: 700; margin-bottom: 10px; }
-.ai-field { display: grid; grid-template-columns: 70px 1fr; gap: 10px; align-items: center; margin-bottom: 8px; font-size: 12.5px; }
+.ai-field { display: grid; grid-template-columns: 70px 1fr; gap: 10px; align-items: center; margin-bottom: 8px; font-size: var(--mc-font-sm); }
 .ai-field input {
   height: 34px;
-  border: 1px solid var(--animal-line);
+  border: 1px solid var(--mc-line);
   border-radius: 10px;
   padding: 0 10px;
   outline: none;
@@ -261,7 +264,7 @@
 .ai-empty {
   margin: auto;
   text-align: center;
-  color: var(--animal-text-soft);
+  color: var(--mc-ink-soft);
   max-width: 420px;
 }
 .ai-empty-icon {
@@ -271,7 +274,7 @@
   border-radius: 18px;
   display: grid;
   place-items: center;
-  background: linear-gradient(135deg, var(--animal-green), var(--animal-green-deep));
+  background: linear-gradient(135deg, var(--mc-accent), var(--mc-accent-deep));
   color: #fff;
   font-weight: 800;
 }
@@ -286,15 +289,18 @@
   align-self: center;
   font-size: 11px;
   line-height: 1;
-  color: var(--animal-text-soft);
+  color: var(--mc-ink-soft);
   opacity: .6;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
 .ai-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   border: 0;
   background: transparent;
-  color: var(--animal-text-soft);
+  color: var(--mc-ink-soft);
   font-size: 11.5px;
   padding: 2px 6px;
   border-radius: 8px;
@@ -302,7 +308,7 @@
   opacity: .75;
   transition: opacity .12s, background .12s;
 }
-.ai-copy-btn:hover:not(:disabled) { background: #f2ecdf; opacity: 1; }
+.ai-copy-btn:hover:not(:disabled) { background: var(--mc-surface-2); opacity: 1; }
 .ai-copy-btn:disabled { opacity: .35; cursor: not-allowed; }
 .ai-avatar {
   width: 34px;
@@ -314,27 +320,28 @@
   font-size: 12px;
   font-weight: 700;
   color: #fff;
-  background: var(--animal-green);
+  background: var(--mc-accent);
 }
-.ai-message.user .ai-avatar { background: var(--animal-amber); }
+.ai-message.user .ai-avatar { background: var(--mc-amber); }
 .ai-bubble {
   min-width: 0;
   padding: 12px 14px;
   border-radius: 16px;
-  background: #fff;
-  border: 1px solid var(--animal-line);
-  box-shadow: var(--animal-shadow-soft);
+  background: var(--mc-surface);
+  border: 1px solid var(--mc-line);
+  box-shadow: var(--mc-shadow-soft);
   overflow: hidden;
 }
-.ai-message.user .ai-bubble { background: #fff6e5; }
+.ai-message.user .ai-bubble { background: color-mix(in srgb, var(--mc-amber) 18%, var(--mc-surface)); }
 .ai-plain { white-space: pre-wrap; word-break: break-word; }
-.ai-bubble > .markdown-body, .ai-bubble .markdown-body { font-size: 13px; line-height: 1.65; }
-.ai-bubble h1, .ai-bubble h2, .ai-bubble h3 { margin: 12px 0 8px; color: var(--animal-brown); }
+.ai-bubble > .markdown-body, .ai-bubble .markdown-body { font-size: var(--mc-font-base); line-height: 1.65; }
+.ai-bubble h1, .ai-bubble h2, .ai-bubble h3 { margin: 12px 0 8px; color: var(--mc-ink); }
 .ai-bubble p { margin: 6px 0; }
 .ai-bubble table { width: 100%; border-collapse: collapse; font-size: 12px; display: block; overflow-x: auto; }
-.ai-bubble th, .ai-bubble td { border: 1px solid var(--animal-line); padding: 6px 8px; text-align: left; }
-.ai-bubble th { background: #f6f1e7; }
-.ai-bubble code { background: #f3eee4; border-radius: 5px; padding: 1px 5px; }
+.ai-bubble th, .ai-bubble td { border: 1px solid var(--mc-line); padding: 6px 8px; text-align: left; }
+.ai-bubble th { background: var(--mc-surface-2); }
+.ai-bubble code { background: var(--mc-surface-2); border-radius: 5px; padding: 1px 5px; }
+/* 代码块刻意保持深底浅字（语法可读性优先），不参与浅色换肤 */
 .ai-bubble pre {
   background: #332f2b;
   color: #f7f2e8;
@@ -367,7 +374,7 @@
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: var(--animal-green);
+  background: var(--mc-accent);
   display: inline-block;
   animation: ai-thinking-bounce 1.2s infinite ease-in-out;
 }
@@ -378,54 +385,68 @@
   30% { transform: translateY(-4px); opacity: 1; }
 }
 
-.ai-tool-run {
-  border: 1px solid var(--animal-line);
-  border-radius: 12px;
-  margin-bottom: 10px;
-  overflow: hidden;
-  background: #fbf8f1;
+/* ── 工具调用折叠卡（库 <Collapse>，文档 #/collapse）──
+   原为自绘的 .ai-tool-run（border + button + 条件渲染 pre），现整块交给库的问答卡，
+   只做两件事：状态配色 + 把 FAQ 尺度压到聊天气泡内的尺寸。
+   库的问答卡是给 FAQ 区设计的（questionText 16~18px、questionIcon 28px 圆形、
+   外层 spacing 内边距），直接塞进气泡会明显偏大，故用结构选择器收缩；
+   这些选择器只依赖 Collapse 稳定的 DOM 顺序 button > [icon, text, leaf]，
+   真遇到库改结构时最多退回库默认外观，不影响展开/收起功能。 */
+.ai-tool-run-collapse { margin-bottom: 10px; }
+.ai-tool-run-collapse > button { padding: 7px 10px; gap: 8px; }
+.ai-tool-run-collapse > button > span:first-child {
+  width: 20px;
+  height: 20px;
+  font-size: 14px;
+  box-shadow: none;
 }
-.ai-tool-run > button {
-  width: 100%;
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 8px 10px;
-  border: 0;
-  background: transparent;
-  cursor: pointer;
-  color: var(--animal-text);
-  font-size: 12px;
-}
-.ai-tool-run.done { border-color: #b8e9e2; background: #f0fbf9; }
-.ai-tool-run.error { border-color: #f0c2ba; background: #fff3f0; }
-.ai-tool-run pre {
+.ai-tool-run-collapse > button > span:nth-child(2) { font-size: 12px; font-weight: 600; }
+/* 详情区：左右内边距收窄，展开时再补下内边距（收起态不加，避免留下空隙） */
+.ai-tool-run-collapse [role="region"] > div { padding: 0 10px; }
+.ai-tool-run-collapse button[aria-expanded="true"] + [role="region"] > div { padding-bottom: 10px; }
+.ai-tool-run__q { display: inline-flex; align-items: center; gap: 6px; min-width: 0; width: 100%; }
+.ai-tool-run__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-tool-run__time { margin-left: auto; font-size: 11px; font-weight: 500; color: var(--mc-ink-soft); }
+.ai-tool-run-collapse.done { border-color: color-mix(in srgb, var(--mc-accent) 35%, var(--mc-line)); }
+.ai-tool-run-collapse.error { border-color: color-mix(in srgb, var(--mc-red) 35%, var(--mc-line)); }
+/* 工具详情里「超过 CODE_HIGHLIGHT_MAX」时的纯文本兜底（见 ChatPanel 的 ToolRunCard）。
+   配色对齐库 <CodeBlock> 的深色代码底，免得同一个位置时而深底、时而浅底；
+   内边距 / 字号 / 行高 / 圆角则与 ChatPanel 的 CODE_BLOCK_STYLE 逐项对齐，
+   两条渲染路径才会长得一模一样。
+   这几个色值是库内部写死的（其源码里的 #2b2118 / #e8d5bc），
+   若要跟随主题，得同时改 ChatPanel 那边的取值。 */
+.ai-tool-run__pre {
   margin: 0;
   padding: 10px;
   max-height: 280px;
   overflow: auto;
   font-size: 11.5px;
-  background: #fff;
-  color: var(--animal-text);
+  line-height: 1.7;
+  font-weight: 600;
+  border-radius: 8px;
+  background: #2b2118;
+  border: 1px solid #3d3028;
+  color: #e8d5bc;
 }
 
-.ai-composer { border-top: 1px solid var(--animal-line); padding: 12px 16px 16px; background: #fffdf8; }
+.ai-composer { border-top: 1px solid var(--mc-line); padding: 12px 16px 16px; background: var(--mc-surface); }
 .ai-composer textarea {
   width: 100%;
   min-height: 72px;
   max-height: 180px;
   resize: vertical;
-  border: 1px solid var(--animal-line);
+  border: 1px solid var(--mc-line);
   border-radius: 12px;
   padding: 10px 12px;
   font: inherit;
-  color: var(--animal-text);
+  color: var(--mc-ink);
   outline: none;
+  background: var(--mc-surface);
 }
-.ai-composer textarea:focus { border-color: var(--animal-green); box-shadow: 0 0 0 3px rgba(25, 200, 185, .12); }
+.ai-composer textarea:focus { border-color: var(--mc-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--mc-accent) 12%, transparent); }
 .ai-composer-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 8px; }
-.ai-title { font-size: 12px; color: var(--animal-text-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ai-notice { font-size: 12px; color: #b75d4d; margin-bottom: 8px; }
+.ai-title { font-size: 12px; color: var(--mc-ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-notice { font-size: 12px; color: var(--mc-red-deep); margin-bottom: 8px; }
 
 /* 自定义提示词：+ 按钮在输入框左下角，展开可滚动列表面板，支持管理弹窗增删查改 */
 .ai-composer-input-wrap { position: relative; display: block; }
@@ -437,9 +458,9 @@
   width: 26px;
   height: 26px;
   border-radius: 50%;
-  border: 1px solid var(--animal-line);
-  background: #fbf7ef;
-  color: var(--animal-text);
+  border: 1px solid var(--mc-line);
+  background: var(--mc-surface);
+  color: var(--mc-ink);
   cursor: pointer;
   z-index: 2;
   display: grid;
@@ -449,7 +470,7 @@
   padding: 0;
   transition: background .12s, color .12s, transform .12s;
 }
-.ai-prompt-toggle:hover, .ai-prompt-toggle.open { background: var(--animal-green); color: #fff; transform: scale(1.05) rotate(45deg); }
+.ai-prompt-toggle:hover, .ai-prompt-toggle.open { background: var(--mc-accent); color: #fff; transform: scale(1.05) rotate(45deg); }
 .ai-prompt-toggle:not(.open):hover { transform: scale(1.05); }
 .ai-prompt-panel {
   position: absolute;
@@ -458,17 +479,17 @@
   width: 340px;
   max-width: calc(100vw - 32px);
   max-height: 320px;
-  background: #fff;
-  border: 1px solid var(--animal-line);
+  background: var(--mc-surface);
+  border: 1px solid var(--mc-line);
   border-radius: 16px;
-  box-shadow: var(--animal-shadow);
+  box-shadow: var(--mc-shadow);
   display: flex;
   flex-direction: column;
   z-index: 30;
   overflow: hidden;
 }
 .ai-prompt-list { flex: 1; overflow-y: auto; padding: 6px; }
-.ai-prompt-empty { padding: 18px; text-align: center; color: var(--animal-text-soft); font-size: 13px; }
+.ai-prompt-empty { padding: 18px; text-align: center; color: var(--mc-ink-soft); font-size: var(--mc-font-base); }
 .ai-prompt-item {
   display: flex;
   align-items: center;
@@ -476,15 +497,15 @@
   padding: 6px 8px;
   border-radius: 10px;
 }
-.ai-prompt-item:hover { background: #f6f0e5; }
+.ai-prompt-item:hover { background: var(--mc-surface-2); }
 .ai-prompt-item-title {
   flex: 1;
   min-width: 0;
   border: none;
   background: transparent;
   text-align: left;
-  color: var(--animal-text);
-  font-size: 13px;
+  color: var(--mc-ink);
+  font-size: var(--mc-font-base);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -494,97 +515,102 @@
 .ai-prompt-item-action {
   border: none;
   background: transparent;
-  color: var(--animal-text-soft);
+  color: var(--mc-ink-soft);
   font-size: 12px;
   cursor: pointer;
   padding: 2px 6px;
   border-radius: 6px;
 }
-.ai-prompt-item-action:hover { background: rgba(0, 0, 0, .06); }
-.ai-prompt-item-action.danger:hover { background: #f7e2de; color: var(--animal-red); }
+.ai-prompt-item-action:hover { background: color-mix(in srgb, var(--mc-ink) 6%, transparent); }
+.ai-prompt-item-action.danger:hover { background: color-mix(in srgb, var(--mc-red) 18%, var(--mc-surface)); color: var(--mc-red); }
 .ai-prompt-panel-foot {
   display: flex;
   gap: 8px;
   justify-content: space-between;
   padding: 8px 10px;
-  border-top: 1px solid var(--animal-line);
-  background: #fbf8f1;
+  border-top: 1px solid var(--mc-line);
+  background: var(--mc-surface-2);
 }
 
 /* 提示词管理弹窗：增删查改 */
 .ai-prompt-modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, .35);
+  background: color-mix(in srgb, var(--mc-ink) 45%, transparent);
   z-index: 100;
   display: grid;
   place-items: center;
   padding: 20px;
 }
 .ai-prompt-modal {
-  background: #fff;
+  background: var(--mc-surface);
   border-radius: 18px;
   width: 540px;
   max-width: 100%;
   max-height: 82vh;
   display: flex;
   flex-direction: column;
-  box-shadow: var(--animal-shadow);
+  box-shadow: var(--mc-shadow);
   overflow: hidden;
 }
-.ai-prompt-modal-head { padding: 16px 18px; border-bottom: 1px solid var(--animal-line); font-weight: 700; font-size: 15px; }
+.ai-prompt-modal-head { padding: 16px 18px; border-bottom: 1px solid var(--mc-line); font-weight: 700; font-size: var(--mc-font-lg); }
 .ai-prompt-modal-body { flex: 1; overflow-y: auto; padding: 16px 18px; display: flex; flex-direction: column; gap: 16px; }
 .ai-prompt-form { display: flex; flex-direction: column; gap: 10px; }
 .ai-prompt-form-title {
   height: 36px;
-  border: 1px solid var(--animal-line);
+  border: 1px solid var(--mc-line);
   border-radius: 10px;
   padding: 0 10px;
   outline: none;
   font: inherit;
+  background: var(--mc-surface);
+  color: var(--mc-ink);
 }
-.ai-prompt-form-title:focus { border-color: var(--animal-green); box-shadow: 0 0 0 3px rgba(25, 200, 185, .12); }
+.ai-prompt-form-title:focus { border-color: var(--mc-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--mc-accent) 12%, transparent); }
 .ai-prompt-form-text {
   width: 100%;
   min-height: 120px;
-  border: 1px solid var(--animal-line);
+  border: 1px solid var(--mc-line);
   border-radius: 10px;
   padding: 10px;
   font: inherit;
   outline: none;
   resize: vertical;
+  background: var(--mc-surface);
+  color: var(--mc-ink);
 }
-.ai-prompt-form-text:focus { border-color: var(--animal-green); box-shadow: 0 0 0 3px rgba(25, 200, 185, .12); }
+.ai-prompt-form-text:focus { border-color: var(--mc-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--mc-accent) 12%, transparent); }
 .ai-prompt-form-actions { display: flex; gap: 8px; justify-content: flex-end; }
 /* 新增自定义供应商弹窗内的普通输入（名称 / Base URL / 模型 / API Key）与协议下拉 */
 .ai-prompt-form input {
   height: 36px;
-  border: 1px solid var(--animal-line);
+  border: 1px solid var(--mc-line);
   border-radius: 10px;
   padding: 0 10px;
   outline: none;
   font: inherit;
-  background: #fff;
-  color: var(--animal-text);
+  background: var(--mc-surface);
+  color: var(--mc-ink);
 }
-.ai-prompt-form input:focus { border-color: var(--animal-green); box-shadow: 0 0 0 3px rgba(25, 200, 185, .12); }
-.ai-field input:disabled { background: #f1ece1; color: #b6ac9c; cursor: not-allowed; }
+.ai-prompt-form input:focus { border-color: var(--mc-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--mc-accent) 12%, transparent); }
+.ai-field input { background: var(--mc-surface); color: var(--mc-ink); }
+.ai-field input:disabled { background: var(--mc-surface-2); color: var(--mc-ink-soft); cursor: not-allowed; }
 .ai-prompt-manager-list { display: flex; flex-direction: column; gap: 8px; }
 .ai-prompt-manager-item {
   display: flex;
   align-items: flex-start;
   gap: 10px;
   padding: 10px;
-  border: 1px solid var(--animal-line);
+  border: 1px solid var(--mc-line);
   border-radius: 12px;
-  background: #fbf8f1;
+  background: var(--mc-surface-2);
 }
 .ai-prompt-manager-info { flex: 1; min-width: 0; }
-.ai-prompt-manager-title { font-weight: 600; font-size: 13px; margin-bottom: 4px; }
-.ai-prompt-manager-text { font-size: 12px; color: var(--animal-text-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ai-prompt-manager-title { font-weight: 600; font-size: var(--mc-font-base); margin-bottom: 4px; }
+.ai-prompt-manager-text { font-size: 12px; color: var(--mc-ink-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ai-prompt-manager-actions { display: flex; gap: 6px; flex: none; }
-.mq-btn.ghost.danger { color: var(--animal-red); }
-.mq-btn.ghost.danger:hover { background: #f7e2de; }
+/* 已删除：.mq-btn.ghost.danger —— 三套自建按钮样式已整体移除；
+   提示词的删除按钮用库 <Button danger> + .ai-prompt-item-action.danger 表达危险语义。 */
 .ai-prompt-save-row { display: flex; justify-content: flex-end; margin-bottom: 8px; }
 
 /* 回复中排队的问题列表 */
@@ -595,22 +621,22 @@
   gap: 6px;
   margin-bottom: 8px;
   padding: 8px 10px;
-  background: rgba(25, 200, 185, .08);
-  border: 1px dashed var(--animal-green, #19c8b9);
+  background: color-mix(in srgb, var(--mc-accent) 8%, transparent);
+  border: 1px dashed var(--mc-accent);
   border-radius: 10px;
 }
-.ai-queue-label { font-size: 12px; color: var(--animal-text-soft); margin-right: 2px; }
+.ai-queue-label { font-size: 12px; color: var(--mc-ink-soft); margin-right: 2px; }
 .ai-queue-item {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   max-width: 240px;
   padding: 3px 6px 3px 9px;
-  background: #fff;
-  border: 1px solid var(--animal-line);
-  border-radius: 999px;
+  background: var(--mc-surface);
+  border: 1px solid var(--mc-line);
+  border-radius: var(--mc-radius-pill);
   font-size: 12px;
-  color: var(--animal-text);
+  color: var(--mc-ink);
 }
 .ai-queue-item > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ai-queue-remove {
@@ -624,12 +650,12 @@
   border: none;
   border-radius: 50%;
   background: transparent;
-  color: var(--animal-text-soft);
+  color: var(--mc-ink-soft);
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--mc-font-base);
   line-height: 1;
 }
-.ai-queue-remove:hover { background: rgba(0, 0, 0, .06); color: #b75d4d; }
+.ai-queue-remove:hover { background: color-mix(in srgb, var(--mc-ink) 6%, transparent); color: var(--mc-red-deep); }
 
 /* 小窗口优化：会话栏改为左侧抽屉浮层（不占布局高度，避免横向滚动条） */
 @media (max-width: 760px) {
@@ -650,7 +676,7 @@
     max-width: 82%;
     max-height: none;
     border-radius: 14px;
-    box-shadow: 0 12px 32px rgba(0, 0, 0, .18);
+    box-shadow: var(--mc-shadow);
     transform: translateX(calc(-100% - 20px));
     transition: transform .22s cubic-bezier(.4, 0, .2, 1);
   }
@@ -661,12 +687,12 @@
     flex-direction: row;
     align-items: center;
     padding: 12px 12px;
-    border-bottom: 1px solid var(--animal-line);
+    border-bottom: 1px solid var(--mc-line);
   }
   .ai-page .ai-history,
   .ai-page.side-collapsed .ai-history { display: block; flex: 1; overflow-y: auto; padding: 8px; }
   .ai-page .ai-sidebar-foot,
-  .ai-page.side-collapsed .ai-sidebar-foot { display: flex; border-top: 1px solid var(--animal-line); padding: 10px; }
+  .ai-page.side-collapsed .ai-sidebar-foot { display: flex; border-top: 1px solid var(--mc-line); padding: 10px; }
 
   /* 遮罩：点空白处收起抽屉 */
   .ai-side-backdrop {
@@ -674,14 +700,14 @@
     position: absolute;
     inset: 0;
     z-index: 40;
-    background: rgba(0, 0, 0, .28);
+    background: color-mix(in srgb, var(--mc-ink) 36%, transparent);
   }
   /* 窄窗显示 ☰ 唤起按钮 */
   .ai-side-menu-btn { display: inline-flex; }
 
   /* 工具栏紧凑化：减小内边距，输入控件可收缩换行 */
   .ai-toolbar { padding: 10px 12px; gap: 6px; }
-  .ai-select { max-width: 150px; }
+  /* 已删除 .ai-select —— 库 <Select> 不接受 className，宽度由 .ai-select-wrap--* 约束 */
   .ai-model-input { width: 180px; }
   .ai-composer textarea { min-height: 60px; }
 }

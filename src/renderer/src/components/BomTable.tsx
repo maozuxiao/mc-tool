@@ -2,6 +2,7 @@ import { Fragment } from 'react'
 import { useStore } from '../store'
 import { escapeHtml, fixLinks } from '@shared/query'
 import { OA_ORIGIN } from '@shared/constants'
+import { Button, Icon } from 'animal-island-ui'
 
 // 空值兜底显示「—」（对齐用户脚本 v4.1）
 const v = (x: any) => (x === undefined || x === null || x === '') ? '—' : escapeHtml(String(x))
@@ -25,7 +26,8 @@ export function BomTable() {
       <div className="count-line">
         <span>{t('countBom', { f: bomFiltered.length, s: bomData.length })}</span>
         <div className="count-actions">
-          <button className="mq-mini-btn" onClick={exportCSV}>{t('exportCsv')}</button>
+          {/* 与 MaterialTable 的导出按钮同源：统一改用库 <Button>，不再自建 .mq-mini-btn */}
+          <Button type="default" size="small" onClick={exportCSV}>{t('exportCsv')}</Button>
         </div>
       </div>
       <div className="table-wrap">
@@ -81,8 +83,24 @@ export function BomTable() {
                             <strong>{t('pickQty')}</strong>{v(r.SHIP_LOT_QTY)}
                           </div>
                           <div className="mq-expand-actions">
-                            <button className="mq-mini-btn" onClick={(e: any) => { e.stopPropagation(); searchBom(r.COMPONENT_ITEM) }}>🌳 {t('viewBomComp')}</button>
-                            <button className="mq-mini-btn" onClick={(e: any) => { e.stopPropagation(); searchFile(r.COMPONENT_ITEM) }}>📎 {t('viewFileComp')}</button>
+                            {/* 原为 🌳 / 📎 emoji + 原生 button，改为库 <Button> + 库 <Icon>，
+                                与 MaterialTable 行展开区的两个按钮同规格同图标 */}
+                            <Button
+                              type="primary"
+                              size="small"
+                              icon={<Icon name="Tree" size={14} />}
+                              onClick={(e) => { e.stopPropagation(); searchBom(r.COMPONENT_ITEM) }}
+                            >
+                              {t('viewBomComp')}
+                            </Button>
+                            <Button
+                              type="primary"
+                              size="small"
+                              icon={<Icon name="File" size={14} />}
+                              onClick={(e) => { e.stopPropagation(); searchFile(r.COMPONENT_ITEM) }}
+                            >
+                              {t('viewFileComp')}
+                            </Button>
                           </div>
                         </div>
                       </td>

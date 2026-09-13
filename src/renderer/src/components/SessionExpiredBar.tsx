@@ -22,7 +22,7 @@ export function SessionExpiredBar() {
 
   return (
     <div className="update-bar update-bar--error">
-      <Icon name="icon-variant" size={16} />
+      <Icon name="Lock" size={16} />
       <span className="update-bar__text">{t('sessionExpired')}</span>
       <Button type="primary" size="small" onClick={relogin}>{t('reLogin')}</Button>
     </div>

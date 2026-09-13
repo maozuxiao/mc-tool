@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { AI_IPC } from '@shared/ai-types'
 import { IPC } from '@shared/types'
+import type { HolidayPlan } from '@shared/types'
 
 // 当前界面语言，随 setUiLang 更新，供原生弹窗（dialog:message/confirm）自动带上，
 // 确保按钮与标题跟随界面语言，无需每个调用点手动传 lang。
@@ -70,9 +71,15 @@ const mcApi = {
   onTraySwitchView: (cb: (v: 'query' | 'ai') => void) =>
     ipcRenderer.on('tray:switch-view', (_e, v) => cb(v)),
 
+  // 中国法定节假日安排：主进程联网拉取 + 落盘缓存（见 src/main/holidaySync.ts）。
+  // 拿不到时返回 null，渲染层回退 @shared/holidays 的内置兜底表。
+  getHolidays: (year: number): Promise<HolidayPlan | null> => ipcRenderer.invoke(IPC.HOLIDAY_GET, year),
+
   appVersion: (): string => ipcRenderer.sendSync(IPC.APP_VERSION),
 
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke('mc-open-external', url),
+  // 应用内打开 OA 首页（新窗口共用登录 partition，因此免登录）
+  openOaWindow: (): Promise<boolean> => ipcRenderer.invoke('mc-open-oa-window'),
   getZoom: (): Promise<number> => ipcRenderer.invoke('mc-get-zoom'),
   setZoom: (factor: number): Promise<void> => ipcRenderer.invoke('mc-set-zoom', factor),
   resetZoom: (): Promise<void> => ipcRenderer.invoke('mc-reset-zoom'),

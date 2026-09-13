@@ -1,31 +1,119 @@
+/* ============================================================================
+   ① 主题 token 层（浅色多主题）
+   ----------------------------------------------------------------------------
+   命名空间约定：
+   - `--mc-*`   mc-tool 自有语义 token，全部由「主题原始值」派生。
+                换肤只需改 html[data-theme] 与下面 3 个原始值，由 theme.ts 的
+                applyTheme() 同步写入，其余衍生态在 CSS 里用 color-mix() 算，
+                因此 16 套主题每套只需维护 3 个颜色。
+   - `--animal-*`  animal-island-ui 的运行时 token。下面「兼容别名」一段保留
+                历史变量名（被既有上千行样式与 ai-chat.css 大量引用），只把取值
+                改成派生值，不做重命名，避免牵动全量样式引发回归。
+   ========================================================================== */
 :root {
-  --animal-green: #19c8b9;
-  --animal-green-deep: #138a7e;
-  --animal-amber: #f0a544;
-  --animal-brown: #4d3e36;
-  --animal-cream: #f6f1e7;
-  --animal-cream-2: #fffdf8;
-  --animal-yellow: #ebcf55;
-  --animal-red: #e06b5c;
-  --animal-blue: #6ea7e8;
-  --animal-text: #4d3e36;
-  --animal-text-soft: #8a7a6c;
-  --animal-line: #e7ddca;
-  --animal-radius: 18px;
-  --animal-radius-lg: 28px;
-  --animal-shadow: 0 6px 20px rgba(77, 62, 54, 0.12);
-  --animal-shadow-soft: 0 2px 10px rgba(77, 62, 54, 0.08);
+  /* ── 主题原始值：默认与 <Background type="default"> 一致，applyTheme() 会覆盖 ── */
+  --mc-page: #f7f3df;
+  --mc-accent: #725d42;
+  --mc-accent-soft: #d4c4a8;
+
+  /* ── 派生 token（color-mix 在 Electron 33 / Chromium 130 可用）── */
+  --mc-accent-deep: color-mix(in srgb, var(--mc-accent) 84%, #2f2620);
+  --mc-accent-tint: color-mix(in srgb, var(--mc-accent) 14%, #fffdf8);
+  --mc-surface: color-mix(in srgb, var(--mc-page) 22%, #fffdf8);
+  --mc-surface-2: color-mix(in srgb, var(--mc-page) 45%, #fffdf8);
+  --mc-surface-veil: color-mix(in srgb, var(--mc-surface) 88%, transparent);
+  --mc-line: color-mix(in srgb, var(--mc-accent-soft) 38%, #e7ddca);
+  --mc-line-strong: color-mix(in srgb, var(--mc-accent-soft) 72%, #cbbca0);
+  --mc-ink: #4d3e36;
+  --mc-ink-soft: #8a7a6c;
+  --mc-radius: 18px;
+  --mc-radius-sm: 10px;
+  --mc-radius-lg: 28px;
+  --mc-radius-pill: 999px;
+  --mc-shadow: 0 6px 20px rgba(77, 62, 54, 0.12);
+  --mc-shadow-soft: 0 2px 10px rgba(77, 62, 54, 0.08);
+
+  /* ── 状态色：语义固定，不随主题变化（对齐设计体系的功能色）── */
+  --mc-yellow: #f7cd67;
+  --mc-amber: #f0a544;
+  --mc-red: #e06b5c;
+  --mc-blue: #6ea7e8;
+  /* 状态色的「深色文字版」：用于浅色底上的可读文本（徽章/错误条/状态胶囊），
+     由功能色与正文最深色混合得到，避免再写死 #b4463a / #2f6fd0 这类孤值。 */
+  --mc-red-deep: color-mix(in srgb, var(--mc-red) 78%, #2f2620);
+  --mc-blue-deep: color-mix(in srgb, var(--mc-blue) 78%, #2f2620);
+
+  /* ── 统一字号：一致性治理，所有自有样式在此取值 ── */
+  --mc-font-sm: 12.5px;
+  --mc-font-base: 13.5px;
+  --mc-font-lg: 15px;
+
+  /* 按钮度量不再自建 token —— 统一交给库 <Button> 的 size 档位。 */
+
+  /* ── 库 token 基线：把库默认值收敛到 mc-tool 调色板（一致性治理）── */
+  --animal-text-color: var(--mc-ink);
+  --animal-text-color-secondary: var(--mc-ink-soft);
+  --animal-font-family: Nunito, 'Noto Sans SC', -apple-system, BlinkMacSystemFont,
+    'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+
+  /* ── 兼容别名：旧变量名 → 派生值 ── */
+  --animal-green: var(--mc-accent);
+  --animal-green-deep: var(--mc-accent-deep);
+  --animal-brown: var(--mc-ink);
+  --animal-cream: var(--mc-page);
+  --animal-cream-2: var(--mc-surface);
+  --animal-line: var(--mc-line);
+  --animal-text: var(--mc-ink);
+  --animal-text-soft: var(--mc-ink-soft);
+  --animal-yellow: var(--mc-yellow);
+  --animal-amber: var(--mc-amber);
+  --animal-red: var(--mc-red);
+  --animal-blue: var(--mc-blue);
+  --animal-radius: var(--mc-radius);
+  --animal-radius-lg: var(--mc-radius-lg);
+  /* 注意：不再占用 --animal-shadow / --animal-shadow-soft —— 前者是库自己的 token 名，
+     语义是 0 2px 4px 的小阴影，与 mc-tool 的大阴影不同，继续借用会污染库组件。 */
 }
 
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
-  background: var(--animal-cream);
-  color: var(--animal-text);
+  font-family: var(--animal-font-family);
+  background: var(--mc-page);
+  color: var(--mc-ink);
   -webkit-font-smoothing: antialiased;
 }
+
+/* ── 全局壁纸层 ──
+   <Background> 是纯 div（只带 background 属性、自身没有 position），铺满窗口与压层
+   都由这里定义。关键点：z-index 必须为负。
+   若写 0，它作为「定位元素」会与同为定位元素的 .panel / .settings-wrap 一起排在第 6 层，
+   而 .panel-body、.card 这些未定位块级元素只排在第 3 层 —— 壁纸会盖住整页内容。
+   取 -1 后它落在「负 z-index 后代」层：位于画布底色之上、所有正文内容之下。 */
+.mc-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  animation: mc-backdrop-in 200ms ease-out both;
+}
+@keyframes mc-backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* ── 统一滚动条（一致性治理）── */
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: var(--mc-line-strong);
+  background-clip: content-box;
+  border: 2px solid transparent;
+  border-radius: var(--mc-radius-pill);
+}
+*::-webkit-scrollbar-thumb:hover { background: var(--mc-accent-soft); background-clip: content-box; }
+*::-webkit-scrollbar-corner { background: transparent; }
 .app-root { height: 100%; display: flex; flex-direction: column; position: relative; overflow: hidden; }
 
 /* ── SSO 落地中 Loading 覆盖层（自定义，避免外部组件残留/布局异常） ── */
@@ -36,8 +124,8 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(246, 241, 231, 0.95);
-  backdrop-filter: blur(2px);
+  background: color-mix(in srgb, var(--mc-page) 92%, transparent);
+  backdrop-filter: blur(3px);
   pointer-events: auto;
 }
 .sso-loading-box {
@@ -46,87 +134,69 @@ body {
   align-items: center;
   gap: 16px;
   padding: 34px 44px;
-  background: var(--animal-cream-2);
-  border-radius: var(--animal-radius-lg);
-  box-shadow: var(--animal-shadow);
-  border: 1px solid var(--animal-line);
+  background: var(--mc-surface);
+  border-radius: var(--mc-radius-lg);
+  box-shadow: var(--mc-shadow);
+  border: 1px solid var(--mc-line);
 }
 .sso-loading-spinner {
   width: 46px;
   height: 46px;
-  border: 4px solid var(--animal-line);
-  border-top-color: var(--animal-green);
+  border: 4px solid var(--mc-line);
+  border-top-color: var(--mc-accent);
   border-radius: 50%;
   animation: mq-spin 0.9s linear infinite;
 }
 .sso-loading-text {
-  font-size: 14px;
+  font-size: var(--mc-font-lg);
   font-weight: 600;
-  color: var(--animal-text-soft);
+  color: var(--mc-ink-soft);
 }
 @keyframes mq-spin {
   to { transform: rotate(360deg); }
 }
 
-/* ── 更新条 ── */
+/* ── 更新条 / 登录失效条 ──
+   底色改为主题强调色的浅调，与整窗同色系；错误态用功能红轻微染色。
+   原先靠深绿底 + 白字，需要在多处用 !important 覆写库组件文字色，
+   改成浅色底后这些覆写全部不再需要（见后面顶栏/设置面板的删除说明）。 */
 .update-bar {
   display: flex; align-items: center; gap: 10px;
-  background: linear-gradient(90deg, var(--animal-green), var(--animal-green-deep));
-  color: #fff; padding: 8px 16px; font-size: 13px;
-  box-shadow: var(--animal-shadow-soft); z-index: 50;
+  background: var(--mc-accent-tint);
+  color: var(--mc-ink);
+  border-bottom: 1px solid var(--mc-line);
+  padding: 8px 16px; font-size: var(--mc-font-sm);
+  box-shadow: var(--mc-shadow-soft); z-index: 50;
 }
-.update-bar .btn { margin-left: auto; }
-.update-bar__text { white-space: nowrap; }
-.update-bar__progress { flex: 1; min-width: 160px; max-width: 320px; }
-/* 让 Progress 在更新条绿色背景上仍清晰可读 */
-.update-bar__progress .animal-progress { background: rgba(255,255,255,0.25); border-radius: 999px; }
+.update-bar--error { background: color-mix(in srgb, var(--mc-red) 13%, var(--mc-surface)); }
+.update-bar__text { flex: 1; min-width: 0; }
+.update-bar__progress { flex: 0 1 300px; min-width: 140px; }
 
 /* ── 登录遮罩 ── */
 .login-overlay {
   position: fixed; inset: 0; z-index: 100;
-  background: rgba(246, 241, 231, 0.92);
+  background: color-mix(in srgb, var(--mc-page) 82%, transparent);
   display: flex; align-items: center; justify-content: center;
-  backdrop-filter: blur(4px);
+  backdrop-filter: blur(6px);
 }
 .login-card {
-  background: var(--animal-cream-2); border-radius: var(--animal-radius-lg);
+  background: var(--mc-surface); border-radius: var(--mc-radius-lg);
   padding: 38px 44px; text-align: center; max-width: 440px;
-  box-shadow: var(--animal-shadow); border: 1px solid var(--animal-line);
+  box-shadow: var(--mc-shadow); border: 1px solid var(--mc-line);
 }
-.login-icon { font-size: 54px; }
-.login-card h1 { margin: 12px 0 8px; font-size: 22px; color: var(--animal-brown); }
-.login-hint { color: var(--animal-text-soft); font-size: 13px; line-height: 1.7; margin-bottom: 18px; }
-.login-status { display: inline-block; padding: 6px 16px; border-radius: 999px; font-size: 13px; font-weight: 600; margin-bottom: 18px; }
-.login-status.checking { background: #eaf2ff; color: #2f80ed; }
-.login-status.logging { background: #eaf2ff; color: #2f80ed; }
-.login-status.no { background: #fbe3df; color: var(--animal-red); }
-.login-status.failed { background: #fbe3df; color: var(--animal-red); }
-.login-status.ok { background: #d6f5f0; color: var(--animal-green-deep); }
-.login-btn { margin-top: 0; width: 100%; }
+/* 已删除：.login-icon / .login-card h1 / .login-hint / .login-status* / .dot /
+   .login-btn / .login-rebtn 与 mq-dot-pulse 关键帧 ——
+   登录页已重构为二维码卡片（.qr-* 系列），这套「大图标 + 标题 + 状态胶囊 + 按钮」
+   的旧结构全工程无引用；状态胶囊的语义由 .qr-status-row 承载，
+   主按钮由库 <Button> 承载。 */
 
-/* 状态指示小圆点 */
-.login-status .dot {
-  display: inline-block;
-  width: 8px; height: 8px;
-  border-radius: 50%;
-  margin-right: 8px;
-  background: currentColor;
-  vertical-align: middle;
-}
-.login-status .dot.pulsing { animation: mq-dot-pulse 1s ease-in-out infinite; }
-@keyframes mq-dot-pulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: .35; transform: scale(.7); }
-}
-.login-rebtn { margin-top: 16px; width: 100%; }
-
-/* 二维码登录界面（animal-island-ui 风格） */
+/* 二维码登录界面：底色 / 描边 / 强调色全部跟随主题，与主界面同源 */
 .qr-login-card {
   max-width: 420px;
   width: 92vw;
   padding: 32px 28px 28px;
   text-align: center;
-  background: linear-gradient(180deg, #fffdf9 0%, #f9f5ee 100%);
+  background: linear-gradient(180deg, var(--mc-surface) 0%, var(--mc-surface-2) 100%);
 }
 
 .qr-login-header {
@@ -136,27 +206,28 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 5px;
   height: 26px;
   padding: 0 14px;
   margin-bottom: 12px;
   font-size: 12px;
   font-weight: 600;
-  color: #8c6b4a;
-  background: #f3e6d6;
-  border-radius: 999px;
+  color: var(--mc-accent);
+  background: var(--mc-accent-tint);
+  border-radius: var(--mc-radius-pill);
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.6), 0 2px 4px rgba(140,107,74,0.08);
 }
 .qr-login-title {
   margin: 0 0 8px;
   font-size: 22px;
   font-weight: 700;
-  color: #5c4f3f;
+  color: var(--mc-ink);
   letter-spacing: 0.5px;
 }
 .qr-login-subtitle {
   margin: 0;
-  font-size: 13px;
-  color: #8c7b64;
+  font-size: var(--mc-font-sm);
+  color: var(--mc-ink-soft);
 }
 
 .qr-frame {
@@ -165,11 +236,12 @@ body {
   height: 220px;
   margin: 0 auto 18px;
   padding: 14px;
+  /* 二维码必须是纯白底以保证识别率，这里刻意不跟随主题 */
   background: #fff;
   border-radius: 22px;
-  border: 2px solid #e8dfd3;
+  border: 2px solid var(--mc-line);
   box-shadow:
-    0 8px 0 #e0d5c6,
+    0 8px 0 var(--mc-line),
     0 16px 24px rgba(120, 100, 80, 0.14);
   display: flex;
   align-items: center;
@@ -180,9 +252,9 @@ body {
   opacity: 0.7;
 }
 .qr-frame--scanned {
-  border-color: #9cc285;
+  border-color: var(--mc-accent-soft);
   box-shadow:
-    0 8px 0 #b5d6a4,
+    0 8px 0 var(--mc-accent-soft),
     0 16px 24px rgba(120, 100, 80, 0.14);
 }
 
@@ -198,13 +270,13 @@ body {
   flex-direction: column;
   align-items: center;
   gap: 8px;
-  color: #a99b89;
-  font-size: 13px;
+  color: var(--mc-ink-soft);
+  font-size: var(--mc-font-sm);
 }
-.qr-placeholder-icon {
-  font-size: 36px;
-  filter: grayscale(0.2);
-}
+/* 占位图标恢复 1.0.38 的 📷 emoji：库 <Icon name="Camera"> 是深色描边线性图标，
+   放在这张奶油色卡片里又硬又小，与「二维码加载中」这句文案不是一种气质。
+   故回到 emoji + 轻微去饱和的旧写法。 */
+.qr-placeholder-icon { font-size: 36px; line-height: 1; filter: grayscale(0.2); }
 
 .qr-scanned-mask {
   position: absolute;
@@ -212,7 +284,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(156, 194, 133, 0.92);
+  background: color-mix(in srgb, var(--mc-accent) 88%, transparent);
   color: #fff;
   font-size: 18px;
   font-weight: 700;
@@ -226,44 +298,44 @@ body {
   gap: 8px;
   margin-bottom: 14px;
   padding: 8px 16px;
-  background: #f3ece2;
-  border-radius: 999px;
-  font-size: 13px;
-  color: #7d6b58;
+  background: var(--mc-surface-2);
+  border-radius: var(--mc-radius-pill);
+  font-size: var(--mc-font-sm);
+  color: var(--mc-ink-soft);
 }
 .qr-status-dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #d4a36a;
+  background: var(--mc-accent-soft);
   animation: pulse 1.4s ease-in-out infinite;
 }
 .qr-status-dot--scanned {
-  background: #7fb069;
+  background: var(--mc-accent);
   animation: none;
 }
 .qr-status-row--scanned {
-  background: #eaf5e4;
-  color: #4f7a3a;
+  background: color-mix(in srgb, var(--mc-accent) 12%, var(--mc-surface));
+  color: var(--mc-accent-deep);
 }
 .qr-status-row--expired {
-  background: #ffe1ec;
-  color: #d6336c;
-  border: 1px solid #ffb3cf;
+  background: color-mix(in srgb, var(--mc-red) 15%, var(--mc-surface));
+  color: var(--mc-red-deep);
+  border: 1px solid color-mix(in srgb, var(--mc-red) 35%, var(--mc-surface));
 }
 .qr-status-dot--expired {
-  background: #d6336c;
+  background: var(--mc-red);
   animation: none;
 }
 
 .qr-error {
   margin-bottom: 14px;
   padding: 10px 14px;
-  background: #fff0ed;
-  border: 1px solid #f0c9c0;
+  background: color-mix(in srgb, var(--mc-red) 10%, var(--mc-surface));
+  border: 1px solid color-mix(in srgb, var(--mc-red) 28%, var(--mc-surface));
   border-radius: 12px;
-  color: #c45c4a;
-  font-size: 13px;
+  color: var(--mc-red-deep);
+  font-size: var(--mc-font-sm);
   line-height: 1.5;
 }
 
@@ -274,48 +346,12 @@ body {
 .qr-hint {
   margin: 0;
   font-size: 12px;
-  color: #a99b89;
+  color: var(--mc-ink-soft);
   line-height: 1.5;
 }
 
-/* 3D 药丸按钮 */
-.animal-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  height: 42px;
-  padding: 0 26px;
-  font-size: 14px;
-  font-weight: 700;
-  color: #5c4f3f;
-  background: linear-gradient(180deg, #fff8ef 0%, #f3e6d6 100%);
-  border: 2px solid #d6c9b8;
-  border-radius: 999px;
-  box-shadow: 0 5px 0 #c8baaa, 0 6px 10px rgba(120,100,80,0.12);
-  cursor: pointer;
-  transition: transform 0.08s, box-shadow 0.08s;
-  user-select: none;
-}
-.animal-btn:hover {
-  transform: translateY(-1px);
-}
-.animal-btn:active:not(:disabled) {
-  transform: translateY(3px);
-  box-shadow: 0 2px 0 #c8baaa, 0 3px 6px rgba(120,100,80,0.12);
-}
-.animal-btn:disabled {
-  opacity: 0.65;
-  cursor: not-allowed;
-}
-.animal-btn--primary {
-  color: #fff;
-  background: linear-gradient(180deg, #f0b87a 0%, #d99a5b 100%);
-  border-color: #c98e53;
-  box-shadow: 0 5px 0 #b37d4a, 0 6px 10px rgba(180,120,70,0.18);
-}
-.animal-btn--primary:active:not(:disabled) {
-  box-shadow: 0 2px 0 #b37d4a, 0 3px 6px rgba(180,120,70,0.18);
-}
+/* 登录页原有的「3D 药丸按钮」(.animal-btn / .animal-btn--primary) 已彻底移除：
+   登录页按钮改用库 <Button>，主色由主题强调色驱动，不再有第二套立体配色。 */
 
 @keyframes pulse {
   0%, 100% { opacity: 1; transform: scale(1); }
@@ -332,72 +368,129 @@ body {
 .panel { flex: 1; display: flex; flex-direction: column; min-height: 0; position: relative; }
 .panel-locked { filter: blur(2px); }
 .panel-lock-mask { position: absolute; inset: 0; z-index: 10; cursor: not-allowed; }
+/* 顶部栏：由「深绿实心渐变 + 白字」改为「主题强调色的浅渐变 + 细描边 + 深色文字」，
+   不再是整窗里一条割裂的深色带。 */
 .panel-header {
   position: relative;
   display: flex; align-items: center; justify-content: space-between;
-  padding: 14px 22px; background: linear-gradient(135deg, var(--animal-green) 0%, var(--animal-green-deep) 100%);
-  color: #fff; border-bottom: 3px solid rgba(255,255,255,0.25);
+  /* 顶栏整体压矮：logo 56 + 上下 12 = 80px（原 72 + 14 = 100px）。
+     让出来的高度用来在标题下方放「距离下班还有 hh:mm:ss」，见 .brand-text。 */
+  padding: 12px 22px;
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--mc-accent) 8%, var(--mc-surface)) 0%,
+    color-mix(in srgb, var(--mc-accent) 20%, var(--mc-surface)) 100%
+  );
+  color: var(--mc-ink);
+  border-bottom: 3px solid var(--mc-accent-soft);
 }
 .brand { display: flex; align-items: center; gap: 14px; }
 .brand-icon-btn { padding: 0; border: 0; background: transparent; display: inline-flex; cursor: pointer; }
-.brand-icon { font-size: 32px; width: 72px; height: 72px; object-fit: contain; cursor: pointer; transition: transform .15s ease; }
+/* 品牌图标改用原生 <img>：库 1.12 的 <Icon src> 会退化成 span + background-image，
+   尺寸不匹配时图形被裁切并平铺（顶栏图标显示异常的根因）。
+   object-fit: contain 保证整幅图形等比缩放，font-size 随之失去意义，已删除。 */
+.brand-icon { display: block; width: 56px; height: 56px; object-fit: contain; cursor: pointer; transition: transform .15s ease; }
 .brand-icon:hover { transform: scale(1.05); }
-.brand-text { display: flex; flex-direction: column; gap: 4px; }
-.brand-title { font-size: 32px; font-weight: 700; letter-spacing: .5px; line-height: 1; }
-.brand-sub { font-size: 12px; color: var(--animal-text-soft); font-weight: 500; letter-spacing: .3px; }
-.header-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; overflow: visible; }
-.header-time {
-  display: inline-flex;
-  opacity: .9;
-  overflow: visible;
-}
-.mc-time {
-  display: inline-flex;
-  align-items: center;
-  gap: 14px;
-  background: #fffef5;
-  border: 2px solid #8b6f47;
-  border-radius: 14px;
-  padding: 10px 22px;
-  box-shadow: 0 4px 0 rgba(0,0,0,0.06);
-  color: #5d4a32;
+/* 标题 + 倒计时两行：22px 标题 + 3px 间距 + 约 27px 倒计时 ≈ 52px，不会撑高 56px 的 logo */
+.brand-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.brand-title { font-size: 22px; font-weight: 700; letter-spacing: .5px; line-height: 1; color: var(--mc-accent); }
+.brand-sub { font-size: 12px; color: var(--mc-ink-soft); font-weight: 500; letter-spacing: .3px; }
+
+/* ── 顶栏下班倒计时（库 <Countdown variant="default">，文档 #/countdown）──
+   与右侧 <Time> 同一套「紧凑化」思路：库的 default 档是按展示页设计的
+   （12/18 内边距、48px 最小高、26px 数字），原样塞进顶栏会把 header 顶高一截。
+   这里只改尺寸 / 底色 / 描边；数字块自身的渐变与配色保持库默认 ——
+   18 套主题全是浅色系，浅底 + 库的暖棕数字在任何一套下都可读，
+   所以不必（也不该）去命中库的哈希类名。 */
+.mc-countdown {
+  background: var(--mc-surface);
+  border: 1.5px solid var(--mc-accent-soft);
+  border-radius: 12px;
+  padding: 3px 10px;
+  min-height: 0;
+  gap: 6px;
+  font-size: 12px;
+  box-shadow: none;
   user-select: none;
 }
-.mc-time-date {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  line-height: 1.2;
-  padding-right: 14px;
-  border-right: 2px solid #e0d6c2;
-}
-.mc-time-weekday {
+/* 库的固定结构是「prefix + 数字组 + 无障碍文本」三段，第 2 段即数字组。
+   组内全部节点（数字格 / 冒号 / 分隔符）统一压到 15px（small 档为 20px）——
+   数字格高 1.2em，于是整条药丸约 27px。 */
+.mc-countdown > span:nth-child(2),
+.mc-countdown > span:nth-child(2) * { font-size: 15px; }
+
+/* 休息日 / 已下班时的替代文案：与倒计时同形同高，切换时顶栏不会跳一下 */
+.brand-wish {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  padding: 3px 10px;
+  border-radius: 12px;
+  background: var(--mc-accent-tint);
+  border: 1.5px solid var(--mc-accent-soft);
+  color: var(--mc-accent);
   font-size: 12px;
-  font-weight: 700;
-  letter-spacing: .5px;
-  opacity: .8;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
 }
-.mc-time-monthday {
-  font-size: 18px;
-  font-weight: 800;
+/* 顶栏右侧两行：上行时钟、下行「设置 / 帮助 / 退出登录」。
+   align-items 用 stretch 而不是 flex-end，是为了让时钟自动撑到与按钮行等宽，
+   即「时钟宽度 = 设置 + 间隔 + 帮助 + 间隔 + 退出登录」：
+   列向 flex 容器里 stretch 会把每一项拉到容器宽度，而容器宽度由最宽的那一项
+   （按钮行）决定，于是时钟始终与按钮行左右对齐 —— 不用写死像素，
+   按钮文案/语言/主题变化时也不会错位。 */
+.header-actions { display: flex; flex-direction: column; align-items: stretch; gap: 6px; overflow: visible; }
+.header-time {
+  display: flex;
+  opacity: .95;
+  overflow: visible;
 }
-.mc-time-clock {
-  font-size: 34px;
-  font-weight: 800;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 1px;
-  min-width: 5ch;
-  text-align: center;
+/* ── 顶栏时钟 ──
+   原为自绘的 .mc-time 挂件，现改用库 <Time>（文档 #/time 同款：
+   HH:MM 带闪烁冒号 + 星期三/日期胶囊），只做「紧凑化」覆写。
+   库的 Time 是按展示页设计的大卡片（卡片底色、20/32 内边距、44px 数字、纵向排列），
+   原样塞进顶栏会把头部撑高一倍，所以这里按结构压到挂件尺寸。
+   Time 的 DOM 固定为「外层 div > [clock div, date div]」，顺序稳定；
+   这里只改尺寸/排布/配色，不命中库的哈希类名 ——
+   真出现结构变化时，样式最多退回库默认外观，不会坏掉功能。 */
+.mc-time-compact {
+  /* flex:1 覆盖库的 width:fit-content，让时钟吃满 .header-time（= 按钮行宽度）；
+     space-between 把「12:24」贴左、日期胶囊贴右，多出来的宽度才是有意分配掉的，
+     而不是在右侧留一块空白。 */
+  flex: 1;
+  justify-content: space-between;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  border-radius: 14px;
+  background: var(--mc-surface);
+  border: 2px solid var(--mc-accent-soft);
+  box-shadow: 0 4px 0 color-mix(in srgb, var(--mc-accent-soft) 45%, transparent);
+  user-select: none;
 }
-.header-tools { display: flex; align-items: center; gap: 8px; }
+/* 时钟数字（库默认 44px） */
+.mc-time-compact > div:first-child { font-size: 22px; letter-spacing: .5px; }
+/* 星期 / 日期胶囊：底色与文字都换成主题色，避免固定青绿与其他主题打架 */
+.mc-time-compact > div:last-child {
+  gap: 3px;
+  padding: 2px 10px;
+  background: var(--mc-accent-tint);
+  font-size: 11px;
+}
+.mc-time-compact > div:last-child > span:first-child { color: var(--mc-accent); }
+/* justify-content:flex-end 是配合上面的 stretch 兜底：万一按钮行比时钟窄
+   （极端窄窗），被拉伸的是按钮行，靠右对齐才不会出现按钮贴左、右侧留空。 */
+.header-tools { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 /* 缩放百分比临时标识：仅缩放操作时显示 1 秒，位于语言切换按钮左侧 */
 .zoom-badge {
-  background: rgba(255,255,255,0.22);
-  color: #fff;
+  background: var(--mc-accent-tint);
+  color: var(--mc-accent);
   font-size: 12px;
   font-weight: 700;
   padding: 4px 8px;
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   min-width: 42px;
   text-align: center;
   font-variant-numeric: tabular-nums;
@@ -409,65 +502,43 @@ body {
   from { opacity: 0; transform: scale(0.92); }
   to { opacity: 1; transform: scale(1); }
 }
-/* 语言切换 / 帮助下拉框固定 32px 高、当前宽度一半 */
-.header-tools [class*="wrapper-"] {
-  min-width: 70px !important;
-  width: 70px !important;
-}
-.header-tools [class*="trigger-"] {
-  height: 32px !important;
-  line-height: 32px !important;
-  padding-top: 0 !important;
-  padding-bottom: 0 !important;
-  width: 70px !important;
-  min-width: 70px !important;
-  white-space: nowrap !important;
-}
-/* 头部语言/帮助 Select 文字改为棕色 RGB(121,79,39)；帮助占位符字重 600 */
-/* 注意：animal-island 的 Select 不接收 className 透传，故直接命中 .header-tools 下的 placeholder/value */
-.header-tools [class*="value-"],
-.header-tools [class*="placeholder-"],
-.header-tools [class*="trigger-"] {
-  color: rgb(121, 79, 39) !important;
-  font-size: 13px !important;
-}
-.header-tools [class*="placeholder-"] {
-  font-weight: 600 !important;
-}
-/* 退出登录按钮文本纯白（仅文字，不含图标） */
-.header-tools .btn-ghost span,
-.header-tools [class*="ghost-"] span {
-  color: #fff !important;
-  font-size: 13px !important;
-}
-/* 语言/帮助下拉面板保持足够宽度，不被 trigger 宽度过窄影响 */
-.header-tools [class*="dropdown-"],
-.header-tools [class*="menu-"] {
-  min-width: 70px !important;
-  width: auto !important;
-}
-.lang-btn { min-width: 48px; font-weight: 700; letter-spacing: .5px; }
+/* 顶栏 Select 的尺寸与文字不再靠命中库内部类名（wrapper- / trigger- / value- /
+   placeholder- / ghost- / dropdown- / menu-）实现：
+   - 1.12.0 的 Select 只接收 options/value/onChange/placeholder/disabled/aria-*，
+     既不支持 className 也不支持 size，无法从外部改度量；
+   - 它自身度量已固定：wrapper 为 inline-block / min-width:140px，触发器为
+     8px 13px 内边距 + 2px 描边 + 12px 圆角，默认文字色 #725d42 在浅色顶栏上本就清晰；
+   - 原先硬把触发器压到 70px 宽、32px 高，反而把「检查更新」这类文案挤成省略号。
+   故此处原有 9 条 !important 覆盖（含 1 条全局 [class*="animal-btn-ghost"]）全部删除，
+   并改由 .settings-trigger 主动对齐 Select 触发器的真实度量，使同一行视觉齐平。 */
+/* 已删除 .lang-btn —— 语言分段选项由 .settings-seg button 承载，该旧类名无引用。 */
 
-/* ── 「设置」按钮 + 弹出设置面板（animal-island 配色）────────── */
+/* ── 「设置」按钮 + 弹出设置面板 ────────── */
 .settings-wrap { position: relative; }
-/* 触发按钮与旁边 Select 触发器同风格：奶油底 + 棕字 + 32px 高 */
+/* 触发按钮对齐库 Select 触发器的真实度量（8px 13px 内边距、2px 描边、12px 圆角、
+   14px/600 文字），以便与紧邻的两个 Select 在同一行齐平 */
 .settings-trigger {
-  height: 32px;
-  min-width: 70px;
-  padding: 0 12px;
-  border: 1px solid var(--animal-line);
-  border-radius: 10px;
-  background: #fbf7ef;
-  color: rgb(121, 79, 39);
-  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 96px;
+  padding: 8px 13px;
+  border: 2px solid var(--mc-line-strong);
+  border-radius: 12px;
+  background: var(--mc-surface);
+  color: var(--mc-ink);
+  font-family: inherit;
+  font-size: var(--mc-font-base);
   font-weight: 600;
   cursor: pointer;
-  transition: background .12s, box-shadow .12s;
+  transition: background .12s, border-color .12s, box-shadow .12s;
 }
 .settings-trigger:hover,
 .settings-trigger.open {
-  background: #fffdf8;
-  box-shadow: var(--animal-shadow-soft);
+  background: var(--mc-surface);
+  border-color: var(--mc-accent-soft);
+  box-shadow: var(--mc-shadow-soft);
 }
 /* 点击面板外的透明遮罩层：收起面板 */
 .settings-overlay {
@@ -481,289 +552,486 @@ body {
   top: calc(100% + 8px);
   right: 0;
   z-index: 100;
-  min-width: 300px;
+  min-width: 320px;
   padding: 4px 16px 6px;
-  background: var(--animal-cream-2);
-  border: 1px solid var(--animal-line);
+  background: var(--mc-surface);
+  border: 1px solid var(--mc-line);
   border-radius: 14px;
-  box-shadow: var(--animal-shadow);
+  box-shadow: var(--mc-shadow);
 }
 .settings-panel-title {
   padding: 10px 0 6px;
-  font-size: 13px;
+  font-size: var(--mc-font-base);
   font-weight: 700;
-  color: var(--animal-text);
+  color: var(--mc-ink);
 }
+/* 「帮助」面板：外壳与遮罩直接复用 .settings-wrap / .settings-overlay / .settings-panel，
+   只覆写宽度和菜单项 —— 这样两个顶栏菜单在度量、描边、阴影上是同一套语言。
+   （原先是库 <Select>：wrapper 写死 min-width:140px 而显得过宽，展开后又是黄色大圆角菜单。） */
+.help-panel { min-width: 176px; padding: 6px; }
+.help-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 10px;
+  font-family: inherit;
+  font-size: var(--mc-font-base);
+  font-weight: 600;
+  text-align: left;
+  color: var(--mc-ink);
+  border: none;
+  border-radius: var(--mc-radius-sm);
+  background: transparent;
+  cursor: pointer;
+  transition: background .12s ease;
+}
+.help-item:hover { background: var(--mc-accent-tint); color: var(--mc-accent); }
 .settings-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
   padding: 10px 0;
-  border-bottom: 1px solid var(--animal-line);
+  border-bottom: 1px solid var(--mc-line);
 }
 .settings-row:last-child { border-bottom: none; }
+/* 主题行：标签在上、图案网格在下，整行占满，避免网格被挤成窄条 */
+.settings-row--stack { flex-direction: column; align-items: stretch; gap: 8px; }
 .settings-label {
-  font-size: 12.5px;
-  color: var(--animal-text);
+  font-size: var(--mc-font-sm);
+  color: var(--mc-ink);
   white-space: nowrap;
 }
-.settings-label.disabled { color: var(--animal-text-soft); opacity: .7; }
+.settings-label.disabled { color: var(--mc-ink-soft); opacity: .7; }
 /* 语言分段选择器：中文 | English */
 .settings-seg {
   display: inline-flex;
-  border: 1px solid var(--animal-line);
-  border-radius: 8px;
+  border: 1px solid var(--mc-line);
+  border-radius: var(--mc-radius-sm);
   overflow: hidden;
-  background: #fbf7ef;
+  background: var(--mc-surface-2);
 }
 .settings-seg button {
   border: none;
   background: transparent;
-  color: var(--animal-text);
+  color: var(--mc-ink);
   font-size: 12px;
   padding: 4px 10px;
   cursor: pointer;
   white-space: nowrap;
 }
 .settings-seg button.active {
-  background: var(--animal-green);
+  background: var(--mc-accent);
   color: #fff;
   font-weight: 600;
 }
-/* 关闭按钮行为小下拉 */
-.settings-select {
-  height: 28px;
-  border: 1px solid var(--animal-line);
-  border-radius: 8px;
-  background: #fbf7ef;
-  color: var(--animal-text);
-  font-size: 12.5px;
-  padding: 0 6px;
-  outline: none;
+/* 关闭按钮行为下拉：控件已换成库 <Select>，其 wrapper 自带 min-width:140px，
+   这里只保证它在行内不被压扁 */
+.settings-select-wrap { display: flex; flex-shrink: 0; }
+/* 主题行表头：左侧标签 + 右侧一句操作说明 */
+.settings-row-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.settings-hint { font-size: 11px; line-height: 1.4; color: var(--mc-ink-soft); text-align: right; }
+/* 退出登录按钮：浅色顶栏下直接用库默认文字色。
+   原先为深绿底写的 [class*="animal-btn-ghost"] 白色覆写（2 条 !important）已删除。
+   已删除 .logout-btn —— 退出按钮已换成库 <Button ghost>，没有自定义类名挂在上面。 */
+
+/* ── 设置面板内的「主题」选择器 ── */
+.theme-picker {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+.theme-swatch {
+  position: relative;
+  border: 2px solid var(--mc-line);
+  border-radius: var(--mc-radius-sm);
+  background: transparent;
+  padding: 0;
   cursor: pointer;
+  overflow: hidden;
+  transition: transform .15s ease, border-color .15s ease, box-shadow .15s ease;
 }
-.settings-select:disabled { color: var(--animal-text-soft); cursor: not-allowed; }
-.logout-btn { font-weight: 600; }
-/* 退出登录按钮（ghost 默认按钮）文本色 */
-.logout-btn,
-[class*="animal-btn-ghost"] {
-  color: rgb(179, 191, 255) !important;
+.theme-swatch:hover { transform: translateY(-2px); box-shadow: var(--mc-shadow-soft); }
+.theme-swatch.active {
+  border-color: var(--mc-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--mc-accent) 28%, transparent);
+  animation: themeSwatchPop .18s ease-out;
 }
-[class*="animal-btn-ghost"]:hover {
-  color: rgb(199, 209, 255) !important;
+@keyframes themeSwatchPop {
+  0% { transform: scale(1); }
+  55% { transform: scale(1.07); }
+  100% { transform: scale(1); }
 }
+/* 缩略图承载 <Background> 自身（就是一块壁纸纹理），只需给定高度 */
+.theme-swatch__bg { display: block; height: 40px; }
+.theme-swatch__name {
+  display: block;
+  font-size: 11px;
+  line-height: 1.9;
+  color: var(--mc-ink);
+  background: var(--mc-surface);
+  border-top: 1px solid var(--mc-line);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 4px;
+}
+.theme-swatch.active .theme-swatch__name { color: var(--mc-accent); font-weight: 700; }
+/* 窄窗口下图案网格收成两列，标签不换行 */
+@media (max-width: 720px) {
+  .theme-picker { grid-template-columns: repeat(2, 1fr); }
+}
+/* 主题行右侧摘要：当前图案色块 + 名称（点击展开网格） */
+.theme-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: 1px solid var(--mc-line);
+  border-radius: var(--mc-radius-sm);
+  background: var(--mc-surface-2);
+  padding: 3px 10px 3px 4px;
+  cursor: pointer;
+  text-align: left;
+}
+.theme-summary__dot {
+  display: block;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 1px solid var(--mc-line-strong);
+  flex: none;
+}
+.theme-summary__text {
+  font-size: var(--mc-font-sm);
+  font-weight: 600;
+  color: var(--mc-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 主题摘要右侧的展开指示：库的 Play 图标本身是三角，旋转得到 ▼ / ▲ */
+.theme-arrow {
+  display: inline-flex;
+  margin-left: auto;
+  color: var(--mc-ink-soft);
+  transform: rotate(90deg);
+  transition: transform .15s ease;
+}
+.theme-arrow.open { transform: rotate(-90deg); }
 
-/* ── 顶部操作栏（查询/重置） ── */
-.top-actions {
-  display: flex; gap: 10px; margin-bottom: 14px;
-}
+/* 已删除：.top-actions —— 查询/重置按钮已统一在 fields 区块的 .fields-actions 中，
+   这套顶部操作栏样式全工程无引用。 */
 
-/* 表格可排序列标题 */
-.th-sort { cursor: pointer; user-select: none; white-space: nowrap; }
-.th-sort:hover { text-decoration: underline; }
-.sort-ico { color: var(--animal-text-soft); font-size: 11px; margin-left: 3px; }
+/* 已删除：.th-sort —— 可排序列标题由 MaterialTable 直接给 <th> 绑定 onClick
+   （见其 className 用 .td-* 系列），该自建类无引用；.sort-ico 已在上方表格段统一。 */
 
 /* 行展开详情（对齐用户脚本 v4.1 的 .mq-expand） */
 .mq-expand td {
   background: var(--animal-cream);
   border-bottom: 1px solid var(--animal-line);
-  padding: 0 !important;
+  /* 无需 !important：`.mq-expand td`(0,1,1) 已胜过通用 `td`(0,0,1) 的 9px 12px 内边距 */
+  padding: 0;
 }
 .mq-expand-inner {
   padding: 12px 16px; font-size: 13px; line-height: 1.9; color: var(--animal-text-soft);
 }
 .mq-expand-inner strong { color: var(--animal-brown); }
 .mq-expand-actions { margin-top: 10px; display: flex; gap: 10px; }
-.mq-mini-btn {
-  border: none; border-radius: 999px; padding: 6px 14px; font-size: 12.5px; font-weight: 600;
-  background: var(--animal-green); color: #fff; cursor: pointer;
-  transition: transform .12s ease, background .15s ease; box-shadow: var(--animal-shadow-soft);
-}
-.mq-mini-btn:hover { background: var(--animal-green-deep); transform: translateY(-1px); }
-.mq-mini-btn:active { transform: translateY(1px); }
+/* 已删除：.mq-mini-btn（含 :hover / :active）——
+   行展开区的「查BOM / 查附件」与导出按钮已全部换成库 <Button>（图标用库 <Icon>），
+   自建立一个语义的第二套药丸按钮不再存在。 */
 
-/* 批量折叠内容 */
-.batch-body { display: flex; flex-direction: column; gap: 10px; }
+/* 已删除：.batch-body —— 批量折叠内容现由库 <Collapse> 的 answer 区承载
+   （宿主类名为 .mq-batch-collapse），.batch-body / .mq-batch-panel 两个旧类名均无引用。 */
 
 .panel-body { flex: 1; overflow-y: auto; padding: 18px 22px 80px; }
 
-/* ── 卡片 ── */
+/* ── 卡片 ──
+   半透明卡片底 + 细描边，让壁纸纹理从卡片外围与间隙透出，形成「纸片浮在壁纸上」的层次。 */
 .card {
-  background: var(--animal-cream-2); border: 1px solid var(--animal-line);
-  border-radius: var(--animal-radius); padding: 16px 18px; margin-bottom: 14px;
-  box-shadow: var(--animal-shadow-soft);
+  background: var(--mc-surface-veil);
+  border: 1px solid var(--mc-line);
+  border-radius: var(--mc-radius); padding: 16px 18px; margin-bottom: 14px;
+  box-shadow: var(--mc-shadow-soft);
+  transition: transform .15s ease, box-shadow .15s ease;
 }
+.card:hover { box-shadow: var(--mc-shadow); }
 
-/* ── 按钮 ── */
-.btn {
-  border: none; border-radius: 999px; padding: 9px 18px; font-size: 13.5px;
-  font-weight: 600; cursor: pointer; background: #efe7d6; color: var(--animal-brown);
-  transition: transform .12s ease, box-shadow .12s ease; box-shadow: var(--animal-shadow-soft);
-}
-.btn:hover { transform: translateY(-1px); }
-.btn:active { transform: translateY(1px); }
-.btn:disabled { opacity: .55; cursor: not-allowed; }
-.btn.accent { background: linear-gradient(135deg, var(--animal-green), var(--animal-green-deep)); color: #fff; }
-.btn.small { padding: 6px 13px; font-size: 12.5px; }
-.btn.ghost { background: rgba(255,255,255,0.2); color: #fff; box-shadow: none; }
-.btn.ghost:hover { background: rgba(255,255,255,0.32); }
+/* 已删除：.btn / .mq-btn / .animal-btn 三套自建按钮样式与配套的 --mc-btn-* 度量 token ——
+   全工程按钮已统一为库 <Button>（type primary/default/dashed/text/link + size + ghost/danger），
+   度量、圆角、立体阴影与配色全部由库与主题 token 驱动；
+   之所以删除而非保留，是因为保留第二套按钮语言会让「同一语义两套外观」的问题复发。 */
 
 /* ── 料号直接搜索 / BOM / 规格文件模块 ── */
 .mq-itemno-section { padding: 16px 18px; }
 .mq-itemno-label { font-weight: 700; color: var(--animal-brown); margin-bottom: 10px; font-size: 15px; }
 .mq-itemno-row { display: flex; gap: 10px; align-items: center; justify-content: center; flex-wrap: wrap; }
-.mq-itemno-input {
-  flex: 1; padding: 9px 16px; border-radius: 999px; border: 1.5px solid var(--animal-line);
-  font-size: 14px; background: #fff; outline: none; transition: border .15s;
-}
-.mq-itemno-input:focus { border-color: var(--animal-green); }
-.mq-itemno-hint { color: var(--animal-text-soft); font-size: 12px; margin-top: 8px; line-height: 1.6; }
+/* 库 <Input> 的 className 落在外层 span（wrapper）上，所以这里只负责布局：
+   撑满 flex 行且可收缩。原先写的 .mq-itemno-input / .field-input 两套重复定义已删除。
+   现在 .mq-grow 既挂在库 <Input> 上也挂在 .hist-input（历史下拉的定位外壳）上，
+   两者都是行内可伸缩项，行为一致。 */
+.mq-grow { flex: 1; min-width: 0; }
 
-/* ── 批量 ── */
-.mq-batch-toggle {
-  display: flex; justify-content: flex-start;
-  margin-top: 10px; padding: 8px 0;
-  border: none; background: transparent; font-size: 14px; font-weight: 700;
-  color: var(--animal-green-deep); cursor: pointer;
+/* ── 输入框可见性 ──
+   库默认形态是「同底色 + 3px 立体投影」，在浅色卡片上偏淡，换肤后更不明显。
+   这里只强化挂在我们自己类名上的 wrapper（className 落在库外层 span），
+   不去命中库内部的哈希类名：加一圈浅描边 + 加深底投影。
+   同时补上焦点态 —— 库的 wrapper 没有 :focus-within，而其内部 input 是
+   outline:none，因此光标落进输入框时原本完全没有视觉反馈。 */
+.mq-input {
+  background: var(--mc-surface);
+  /* 描边用真实 border，而不是 inset box-shadow —— 这是「悬停时边框消失」的根因：
+     库的 wrapper 自带 `.animal-wrapper-xxx:hover:not(.animal-wrapper-disabled-xxx){
+     box-shadow:0 3px #c4b89e}`，特异度 (0,4,0)；而 `.mq-input` 只有 (0,1,0)，
+     悬停时它会把整个 box-shadow 值替换掉，连带把我们的 inset 描边一起抹去。
+     上一版注释写的「不再做 hover 变化」只删掉了我们自己的 hover 规则，
+     并没有挡住库那条，所以描边照旧消失。
+     改用 border 之后，描边不再属于 box-shadow，任何覆盖 box-shadow 的规则都动不了它，
+     从机制上杜绝复发。box-sizing 显式给 border-box，
+     否则 wrapper 会因多了 3px 描边而比同排控件高出一点。 */
+  border: 1.5px solid var(--mc-line);
+  box-sizing: border-box;
+  box-shadow: 0 3px 0 var(--mc-line-strong);
 }
-.mq-batch-toggle:hover { text-decoration: underline; }
-.mq-batch-panel { margin-top: 10px; }
+/* 悬停：把底部投影的颜色从库写死的 #c4b89e 拉回主题色。
+   库那条规则是 `.animal-wrapper-xxx:hover:not(.animal-wrapper-disabled-xxx)`，
+   特异度 (0,4,0)；`.hist-input .mq-input:hover` 只有 (0,3,0)，会被它压住，
+   所以把 .mq-input 写两遍凑到 (0,4,0) —— 这是压过「库自带高特异度 hover 规则」
+   的标准写法，不是手滑重复。
+   凑到同分就够：本表在库样式之后引入，同分时后声明者胜
+   —— 上面基础规则 .mq-input 压过 .animal-wrapper-xxx 用的也是同一套机制。
+   禁用态无需单独写：那时投影本来就该是这颗同色值，这条生效与否像素一致。 */
+.hist-input .mq-input.mq-input:hover {
+  box-shadow: 0 3px 0 var(--mc-line-strong);
+}
+/* 焦点态：描边与投影一起换成主题色（原先的 2px inset 描边由 border 承接，
+   厚度从 2px 变 1.5px，观感基本一致，不再叠加第二圈） */
+.mq-input:focus-within {
+  background: var(--mc-surface);
+  border-color: var(--mc-accent-soft);
+  box-shadow: 0 3px 0 var(--mc-accent-soft);
+}
+
+/* ── 输入框历史下拉（替代原生 <datalist>）──
+   原生 datalist 的弹出层由 Chromium 绘制，CSS 够不到，永远是白底直角，
+   与换肤后的圆角输入框同屏并存。这里改由 React 自绘，
+   视觉与 .lifecycle-panel / .settings-panel 保持同一套（14px 圆角 + 纸感阴影 + 主题悬停色）。 */
+.hist-input { position: relative; display: block; }
+.hist-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 40;
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 6px;
+  background: var(--mc-surface);
+  border: 1px solid var(--mc-line);
+  border-radius: 14px;
+  box-shadow: var(--mc-shadow);
+  animation: histPanelIn .14s ease-out;
+}
+@keyframes histPanelIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: none; }
+}
+.hist-item {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  text-align: left;
+  font-family: inherit;
+  font-size: var(--mc-font-base);
+  font-weight: 600;
+  color: var(--mc-ink);
+  background: transparent;
+  border: none;
+  border-radius: var(--mc-radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background .12s ease;
+}
+/* active 是键盘 ↑↓ 当前项，hover 是鼠标当前项，两者同一样式 */
+.hist-item:hover,
+.hist-item.active { background: var(--mc-accent-tint); color: var(--mc-accent); }
+.mq-itemno-hint { color: var(--mc-ink-soft); font-size: 12px; margin-top: 8px; line-height: 1.6; }
+
+/* ── 批量 ──
+   折叠壳改用库 <Collapse>（文档 #/collapse）：展开/收起、箭头旋转、内容高度过渡
+   都由库实现，原自绘的 .mq-batch-toggle / .mq-disclosure / .mq-batch-panel 三条规则
+   已随组件替换删除。这里只补两块：折叠卡自身的定位与标题行样式。 */
+.mq-batch-collapse { margin-top: 14px; }
+/* 「+/−」徽标（库的 span.animal-questionIcon-*）：库默认 28px 圆 + 18px 字号，是按
+   FAQ 区尺度定的，放在这里比同一行的 16px 文件夹图标和标题文字都大一圈，
+   故压到 20×20 / 14px，与 ai-chat.css 的 .ai-tool-run-collapse 完全一致——
+   两处折叠卡的徽标同尺寸，跨页面切换时不会一大一小。
+   只依赖 Collapse 稳定的 DOM 顺序 button > [icon, text, leaf]（与 ai-chat.css 的
+   .ai-tool-run-collapse 同一套做法），不命中库的哈希类名；
+   库若改结构，最多退回库默认外观，不影响展开/收起。 */
+.mq-batch-collapse > button > span:first-child {
+  width: 20px;
+  height: 20px;
+  font-size: 14px;
+  box-shadow: none;
+}
+.mq-batch-collapse .mq-batch-q {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-weight: 700; font-size: 15px;
+}
 .mq-batch-textarea {
-  width: 100%; min-height: 96px; border-radius: 14px; border: 1.5px solid var(--animal-line);
-  padding: 12px 14px; font-size: 13px; resize: vertical; outline: none; font-family: inherit;
+  width: 100%; min-height: 96px; border-radius: 14px; border: 1.5px solid var(--mc-line);
+  padding: 12px 14px; font-size: var(--mc-font-base); resize: vertical; outline: none;
+  font-family: inherit; background: var(--mc-surface); color: var(--mc-ink);
 }
-.mq-batch-textarea:focus { border-color: var(--animal-green); }
+.mq-batch-textarea:focus { border-color: var(--mc-accent); }
 .mq-batch-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 10px; }
-.mq-batch-hint { color: var(--animal-text-soft); font-size: 12px; line-height: 1.6; margin-top: 8px; }
-.mq-batch-count { color: var(--animal-green-deep); font-size: 12px; font-weight: 600; white-space: nowrap; }
-/* 批量查询进度内嵌在按钮中 */
-.batch-btn { position: relative; min-width: 140px; }
-.batch-btn-inner { display: inline-flex; align-items: center; gap: 6px; }
-/* 三点跳动加载动画（替代旋转 🔍，更轻盈不突兀） */
-.batch-spinner { display: inline-flex; gap: 3px; align-items: center; }
-.batch-spinner i {
-  width: 6px; height: 6px; border-radius: 50%; background: #fff;
-  display: inline-block; animation: dot-bounce 1s infinite ease-in-out both;
-}
-.batch-spinner i:nth-child(1) { animation-delay: -0.32s; }
-.batch-spinner i:nth-child(2) { animation-delay: -0.16s; }
-@keyframes dot-bounce {
-  0%, 80%, 100% { transform: scale(0.6); opacity: 0.5; }
-  40% { transform: scale(1); opacity: 1; }
-}
-.batch-progress-inline {
-  background: rgba(255,255,255,0.25); padding: 2px 10px; border-radius: 999px;
-  font-size: 12px; font-weight: 700; margin-left: 2px;
-}
+.mq-batch-hint { color: var(--mc-ink-soft); font-size: 12px; line-height: 1.6; margin-top: 8px; }
+.mq-batch-count { color: var(--mc-accent); font-size: 12px; font-weight: 600; white-space: nowrap; }
+/* 已删除：.batch-btn / .batch-btn-inner / .batch-spinner（含 dot-bounce 关键帧）/
+   .batch-progress-inline —— 这四条是早期静态 HTML 版本遗留，全工程已无引用，
+   批量查询按钮现由库 <Button> 承载，加载态用按钮文案表达。 */
 
-/* ── 多条件 ── */
-.fields-label { font-weight: 700; color: var(--animal-brown); margin-bottom: 10px; }
-.fields-scroll { max-height: 280px; overflow-y: auto; overflow-x: hidden; padding-right: 6px; overscroll-behavior: contain; }
-.fields-scroll::-webkit-scrollbar { width: 8px; }
-.fields-scroll::-webkit-scrollbar-track { background: var(--animal-cream); border-radius: 4px; }
-.fields-scroll::-webkit-scrollbar-thumb { background: var(--animal-green); border-radius: 4px; }
-.fields-scroll::-webkit-scrollbar-thumb:hover { background: var(--animal-green-deep); }
-.field-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-.field-index {
-  min-width: 52px; color: var(--animal-text-soft); font-size: 12px; font-weight: 600;
-  flex-shrink: 0; user-select: none;
+/* ── 多条件 ──
+   已删除：.fields-scroll（多条件列表本身不滚动，交由 .panel-body 统一滚动）与
+   .field-index（条件序号已统一为 .mq-seq 徽标）。 */
+/* 与「批量查询料号」标题同为 15px：两个折叠/区块标题在同一列里上下相邻，
+   字号不一致会显得一轻一重 */
+.fields-label { font-weight: 700; font-size: 15px; color: var(--mc-ink); margin-bottom: 10px; }
+.field-row { position: relative; display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+/* ── 拖拽排序反馈 ──
+   原先拖拽只有「松手后顺序变化」这一个结果，过程中没有任何视觉反馈，
+   手感很虚。这里补三件事：
+   1) 被拖的那行整行淡出（.dragging），一眼能看出「搬的是谁」；
+   2) 落点行用一条主题色横线预告插入位置（.dragover::before），比整行高亮更准确；
+   3) ::after 给落点行加一圈虚线轮廓，拖到行内任意位置都不会「没反应」。 */
+.field-row.dragging { opacity: .45; }
+.field-row.dragging .mq-seq { cursor: grabbing; }
+.field-row.dragover::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -5px;
+  height: 3px;
+  border-radius: 3px;
+  background: var(--mc-accent);
 }
-/* 搜索条件序号：⋮⋮ {idx} 拖拽手柄样式（仅此手柄可拖拽整行，输入框内可正常选词） */
+.field-row.dragover::after {
+  content: '';
+  position: absolute;
+  inset: -3px -3px;
+  border: 2px dashed var(--mc-accent-soft);
+  border-radius: 14px;
+  pointer-events: none;
+}
+/* 搜索条件序号拖拽手柄（仅此手柄可拖拽整行，输入框内仍可正常选词）。
+   原为 Unicode 字符「⋮⋮」，已去掉该字符，改为带主题底色的序号徽标承载拖拽。 */
 .mq-seq {
-  display: inline-flex; align-items: center; gap: 5px; cursor: grab;
-  color: var(--animal-text-soft); font-size: 12px; font-weight: 700; user-select: none;
-  flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 32px; height: 26px; padding: 0 6px;
+  border-radius: var(--mc-radius-sm);
+  background: var(--mc-accent-tint);
+  color: var(--mc-accent);
+  font-size: var(--mc-font-sm); font-weight: 700; user-select: none;
+  flex-shrink: 0; cursor: grab;
 }
 .mq-seq:active { cursor: grabbing; }
-.mq-seq .grip { letter-spacing: 1px; line-height: 1; opacity: .8; }
-/* 通用按钮样式（参考 .mq-btn） */
-.mq-btn {
-  border: none; padding: 9px 15px; border-radius: 999px; font-size: 13.5px; font-weight: 700;
-  cursor: pointer; background: var(--animal-yellow); color: var(--animal-brown);
-  box-shadow: 0 3px 0 #e3b744; transition: transform .08s, box-shadow .08s; white-space: nowrap;
+
+/* 三套自建按钮样式（.btn / .mq-btn / .animal-btn）已整体删除（见上方「已删除」说明），
+   此处只保留 mq-file-btn 的语义变体。 */
+/* 查附件按钮：用功能蓝与查料号的主题色区分（原写死棕色，与注释所述「蓝色调」并不符）。
+   选择器不再带 .mq-btn 前缀 —— 该按钮已换成库 <Button>，
+   单类名选择器与库自身按钮类的优先级相同，靠样式表引入顺序（自有样式在后）生效。 */
+.mq-file-btn {
+  background: var(--mc-blue);
+  color: #fff;
+  box-shadow: 0 3px 0 color-mix(in srgb, var(--mc-blue) 78%, #2f2620);
 }
-.mq-btn:hover { background: #ffd86b; }
-.mq-btn:active { transform: translateY(3px); box-shadow: 0 0 0 #e3b744; }
-.mq-btn.accent { background: var(--animal-green); color: #fff; box-shadow: 0 3px 0 var(--animal-green-deep); }
-.mq-btn.accent:hover { background: var(--animal-green-deep); }
-.mq-btn.accent:active { transform: translateY(3px); box-shadow: 0 0 0 var(--animal-green-deep); }
-.mq-btn:disabled { opacity: .5; cursor: not-allowed; box-shadow: none; transform: none; }
-/* 查附件按钮主题色（区别于查料号绿色，使用蓝色调） */
-.mq-btn.mq-file-btn { background: rgb(77, 62, 54); color: #fff; box-shadow: 0 3px 0 #3e332d; }
-.mq-btn.mq-file-btn:hover { background: rgb(92, 75, 65); box-shadow: 0 3px 0 #3e332d; }
-.mq-btn.mq-file-btn:active { transform: translateY(3px); box-shadow: 0 0 0 #3e332d; }
-.seq {
-  width: 28px; height: 28px; border-radius: 8px; background: var(--animal-yellow);
-  color: var(--animal-brown); font-size: 13px; font-weight: 700; display: flex;
-  align-items: center; justify-content: center; flex-shrink: 0; cursor: grab;
-  user-select: none;
-}
-.seq:active { cursor: grabbing; }
-.field-row.field-dragging { opacity: 0.4; background: var(--animal-cream); border-radius: 10px; }
-.field-row.field-over { border: 2px dashed var(--animal-green); border-radius: 10px; }
-.field-input {
-  flex: 1; padding: 9px 14px; border-radius: 999px; border: 1.5px solid var(--animal-line);
-  font-size: 13.5px; outline: none; background: #fff; min-width: 0;
-}
-.field-input:focus { border-color: var(--animal-green); }
-.del {
-  width: 26px; height: 26px; border-radius: 50%; border: none; background: #f3e6d8;
-  color: var(--animal-text-soft); cursor: pointer; font-size: 12px;
-}
-.del:disabled { opacity: .4; cursor: not-allowed; }
+.mq-file-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--mc-blue) 88%, #2f2620); }
+
+/* 已删除：.seq（与 .mq-seq 重复的另一种序号写法）、
+   .field-row.field-dragging / .field-row.field-over ——
+   QueryPanel 的行拖拽只用 HTML5 draggable，从未切换这两个类。 */
 .fields-actions { display: flex; align-items: center; gap: 12px; margin-top: 6px; }
-/* 查询 / 重置 按钮外观统一 */
-.fields-actions .animal-btn { padding: 7px 18px; font-size: 13.5px; border-radius: 999px; height: auto; }
-/* 查询按钮主题色 RGB(19,138,126) = #138a7e */
-.mq-act-green.animal-btn,
-.mq-act-green.animal-btn-primary { background: #138a7e !important; border-color: #138a7e !important; color: #fff !important; box-shadow: none; }
-.mq-act-green.animal-btn:hover,
-.mq-act-green.animal-btn-primary:hover { background: #16998a !important; border-color: #16998a !important; }
-.add-btn {
-  border: 1.5px dashed var(--animal-green); background: transparent; color: var(--animal-green-deep);
-  padding: 6px 16px; border-radius: 999px; cursor: pointer; font-weight: 600; font-size: 13px;
-}
-.preview { color: var(--animal-text-soft); font-size: 12px; flex: 1; font-family: monospace; }
+/* 查询按钮改为直接使用库 <Button type="primary">：主色已由 --mc-accent 驱动，
+   原先靠 .mq-act-green + 4 条 !important 写死 #138a7e 的覆盖已删除。 */
+/* .preview 是「添加条件」右侧的条件预览串 */
+.preview { color: var(--mc-ink-soft); font-size: 12px; flex: 1; font-family: monospace; }
 
-/* fields 区块底部（添加按钮 + 预览） */
+/* fields 区块底部（添加按钮 + 预览）。添加/删除条件已改用库 <Button>，
+   原 .add-btn / .del / .field-del / .drag-handle / .search-actions / .err-box
+   均已确认全工程无引用，作为静态 HTML 版本的遗留样式删除。 */
 .fields-foot { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
-.drag-handle { cursor: grab; color: var(--animal-text-soft); user-select: none; font-size: 15px; }
-.drag-handle:active { cursor: grabbing; }
-.field-del {
-  width: 26px; height: 26px; border-radius: 50%; border: none; background: #f3e6d8;
-  color: var(--animal-text-soft); cursor: pointer; font-size: 12px; flex-shrink: 0;
-}
-.field-del:disabled { opacity: .4; cursor: not-allowed; }
-.search-actions { margin-top: 12px; display: flex; gap: 10px; }
 
-/* ── 错误框 ── */
-.err-box {
-  background: #fbe3df; color: #c0392b; border: 1px solid #f3c5bd; border-radius: 14px;
-  padding: 12px 16px; font-size: 13px; line-height: 1.7; margin-bottom: 14px;
-}
-
-/* ── Tabs ── */
-.tabs { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
-.tab-btn {
-  border: none; background: #efe7d6; color: var(--animal-text-soft); font-weight: 700;
-  padding: 9px 20px; border-radius: 999px; cursor: pointer; font-size: 13.5px; transition: all .15s;
-}
-.tab-btn.active { background: linear-gradient(135deg, var(--animal-green), var(--animal-green-deep)); color: #fff; }
-.tabs .ml { margin-left: auto; }
+/* 已删除：.tabs / .tab-btn / .tabs .ml —— 页签由库 <Tabs> 渲染，
+   这套自建页签样式（含深绿渐变的选中态）已无任何引用。 */
 
 /* Tabs 区域（库 Tabs + 表格） */
 .tabs-area { margin-top: 4px; }
+
+/* 选中 Tab 右上角的小叶子，按 1.0.38（库 1.4）的原样补回：
+   1.4 会在选中项里渲染 <img class="tabLeaf" src=".../icon-leaf.png"> 并做摇摆动画，
+   1.12 起该装饰连同 DOM 一起删掉（leafAnimation 已 deprecated），这一处动效随之消失。
+   现在的实现用同一张 PNG（见 QueryPanel 的 TabLabel），显隐由 aria-selected 驱动，
+   不依赖任何库内部哈希类名。
+
+   定位基准 —— 叶子为什么会压住文字（2026-09-13 定位并修正）：
+   库渲染的 DOM 是 button[role=tab] > span.tabIcon + span.tabLabel，而**库自己**给
+   tabLabel 设了 position:relative。所以只把我们的 .mq-tab-label 改成 static 是无效的
+   （那个 span 本来就是 static）：叶子的包含块始终是「只有文字宽」的 tabLabel 盒子，
+   right:-4px 于是直接压在最后一个字上 —— 截图里「规格文件」被盖住的就是这一处。
+   库把这两个 span 直接放在按钮下，故用结构选择器（不依赖哈希类名）把它们都压成 static，
+   包含块回到按钮本身，下面的 right/top 才是真正相对胶囊量的。 */
+[role="tab"] { position: relative; }
+[role="tab"] > span,
+[role="tab"] .mq-tab-label { position: static; }
+[role="tab"] .mq-tab-leaf { display: none; }
+[role="tab"][aria-selected="true"] .mq-tab-leaf {
+  display: block;
+  position: absolute;
+  /* 按「胶囊里一半、外面一半」放：让叶子中心正好落在右上角那段圆角弧线上，
+     弧线就把叶子切成面积大致相等的两半（18px 宽范围内弧线近似直线）。
+     圆角实际半径 = 按钮高度/2 ≈ 18.5px —— 库写的是 border-radius:24px，但按钮高度只有
+     约 37px，浏览器会把它等比压到 高度/2；圆心在 (button.right-18.5, button.top+18.5)。
+     取该圆弧上偏右上方那一点作叶子中心，相对圆心：横向 +14.5px、纵向 -11.5px
+     （模长 18.5 ✓ 恰在弧上，约在水平线上方 40°）。换算成 CSS：
+       right:R ⇒ 中心 x = button.right+R-9，top:T ⇒ 中心 y = button.top+T+9
+     故 R=5、T=-2。
+     横向净空是**与字体无关的硬保证**：按钮右内边距 16px 把文字右缘钉死在
+     button.right-16，而 right:5px ⇒ 叶子左缘 = button.right-13，恒定留 3px，绝不相交
+     （摇摆 ±10° 时叶子最左点再外扩约 2px，仍有富余）。
+     探出胶囊的那一半落在 tabList 的 16px 内边距上，不会被外层的 overflow:hidden 裁掉。 */
+  right: 5px;
+  top: -2px;
+  width: 18px;
+  height: 18px;
+  pointer-events: none;
+  animation: mq-leaf-wiggle 2s ease-in-out infinite;
+}
+@keyframes mq-leaf-wiggle {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(-10deg); }
+  75% { transform: rotate(10deg); }
+}
+/* 跟随系统的「减少动态效果」：叶子保留但不再摇摆 */
+@media (prefers-reduced-motion: reduce) {
+  [role="tab"][aria-selected="true"] .mq-tab-leaf { animation: none; }
+}
 .table-area { margin-top: 10px; }
 
 /* ── 筛选条 ── */
 .filter-bar {
   display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap;
-  margin-bottom: 12px; padding: 12px 14px; background: var(--animal-cream-2);
-  border: 1px solid var(--animal-line); border-radius: var(--animal-radius);
+  margin-bottom: 12px; padding: 12px 14px; background: var(--mc-surface-2);
+  border: 1px solid var(--mc-line); border-radius: var(--mc-radius);
 }
 .filter-group { display: flex; flex-direction: column; gap: 5px; }
-.filter-group-label { font-size: 12px; font-weight: 700; color: var(--animal-brown); }
+.filter-group-label { font-size: var(--mc-font-sm); font-weight: 700; color: var(--mc-ink); }
 .filter-kw-group { flex: 1; min-width: 260px; }
 .filter-kw-row { display: flex; gap: 10px; width: 100%; }
 .filter-kw-row > * { flex: 1; min-width: 0; }
@@ -781,140 +1049,116 @@ table.mq.bom thead th:nth-child(7) { width: 58px; }
 table.mq.bom thead th:nth-child(8) { width: 70px; }
 table.mq.bom thead th:nth-child(9) { width: 70px; }
 table.mq.bom thead th:nth-child(10) { width: 56px; }
-/* 类型下拉框固定 40px */
-.filter-type-group [class*="trigger-"] { height: 40px !important; line-height: 40px !important; padding-top: 0 !important; padding-bottom: 0 !important; }
-/* 去重按钮高度与生命周期、类型下拉框对齐 */
-.filter-dedup-btn { height: 40px !important; }
+/* 类型/去重控件的高度不再靠 [class*="trigger-"] 命中库内部类名 + !important 实现：
+   库 <Select> 的触发器默认就是 40px，与去重所用 <Button> 的 middle 档同高，两者天然齐平。
+   原有的三条 !important 覆盖已删除。 */
 .filter-lifecycle-group { min-width: 120px; }
 .lifecycle-dropdown { position: relative; }
+/* 触发器与相邻的库 <Select> 触发器同规格（40px 高、12px 圆角、2px 描边） */
 .lifecycle-trigger {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  height: 40px; padding: 0 14px; border-radius: 999px; border: 1.5px solid var(--animal-line);
-  background: #fff; color: var(--animal-brown); font-size: 13px; font-weight: 600;
-  cursor: pointer; min-width: 110px; user-select: none; box-sizing: border-box;
+  height: 40px; padding: 0 14px;
+  border-radius: 12px;
+  border: 2px solid var(--mc-line-strong);
+  background: var(--mc-surface);
+  color: var(--mc-ink);
+  font-family: inherit;
+  font-size: var(--mc-font-base); font-weight: 600;
+  cursor: pointer; min-width: 130px; user-select: none; box-sizing: border-box;
+  transition: border-color .15s ease;
 }
-.lifecycle-trigger.open { border-color: var(--animal-green); }
+.lifecycle-trigger:hover { border-color: var(--mc-accent-soft); }
+.lifecycle-trigger.open { border-color: var(--mc-accent); }
 .lifecycle-trigger.disabled { opacity: .55; cursor: not-allowed; }
-.lifecycle-arrow { font-size: 10px; color: var(--animal-text-soft); }
+/* 展开三角：库 Play 图标（三角形状）旋转 90° 得到 ▼，展开时转回 ▶ */
+.lifecycle-arrow {
+  display: inline-flex;
+  color: var(--mc-ink-soft);
+  transform: rotate(90deg);
+  transition: transform .15s ease;
+}
+.lifecycle-trigger.open .lifecycle-arrow { transform: rotate(-90deg); }
 .lifecycle-panel {
-  position: absolute; top: calc(100% + 6px); left: 0; z-index: 30; background: #fff;
-  border: 1px solid var(--animal-line); border-radius: 14px; padding: 8px;
-  box-shadow: var(--animal-shadow); min-width: 180px; max-height: 320px; overflow-y: auto;
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 30;
+  background: var(--mc-surface);
+  border: 1px solid var(--mc-line); border-radius: 14px; padding: 8px;
+  box-shadow: var(--mc-shadow); min-width: 190px; max-height: 320px; overflow-y: auto;
 }
+/* 每个选项是 <button>（原为 label + 原生 checkbox） */
 .lifecycle-option {
-  display: flex; align-items: center; gap: 8px; padding: 6px 8px; font-size: 13px;
-  border-radius: 8px; cursor: pointer;
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 7px 8px; font-family: inherit; font-size: var(--mc-font-base);
+  text-align: left; border: none; background: transparent; color: var(--mc-ink);
+  border-radius: var(--mc-radius-sm); cursor: pointer;
+  transition: background .12s ease;
 }
-.lifecycle-option:hover { background: var(--animal-cream); }
-.lifecycle-option input { cursor: pointer; width: 15px; height: 15px; accent-color: var(--animal-green); margin-right: 6px; }
+.lifecycle-option:hover { background: var(--mc-surface-2); }
+.lifecycle-option.on { background: var(--mc-accent-tint); color: var(--mc-accent); font-weight: 700; }
+/* 选中标记用库 Check 图标；未选中时占位保持文字对齐 */
+.lifecycle-option__check { display: inline-flex; width: 14px; color: var(--mc-accent); }
+.lifecycle-option__check.off { visibility: hidden; }
 .lifecycle-clear {
-  margin-top: 6px; padding: 6px 8px; text-align: right; font-size: 12px;
-  color: var(--animal-green-deep); font-weight: 600; cursor: pointer; border-top: 1px solid var(--animal-line);
+  width: 100%; margin-top: 6px; padding: 7px 8px; text-align: right;
+  font-family: inherit; font-size: 12px; font-weight: 600;
+  border: none; border-top: 1px solid var(--mc-line); background: transparent;
+  color: var(--mc-accent); cursor: pointer;
 }
-.lifecycle-empty { padding: 12px 8px; color: var(--animal-text-soft); font-size: 12.5px; text-align: center; }
-.filter-label { font-weight: 700; color: var(--animal-brown); font-size: 13px; }
-.filter {
-  padding: 8px 14px; border-radius: 999px; border: 1.5px solid var(--animal-line);
-  font-size: 13px; outline: none; background: #fff; min-width: 160px;
-}
-.filter:focus { border-color: var(--animal-green); }
-.type-group { display: flex; align-items: center; gap: 6px; }
-.type-label { font-size: 12.5px; color: var(--animal-text-soft); }
-.chip {
-  border: 1.5px solid var(--animal-line); background: #fff; color: var(--animal-text-soft);
-  padding: 6px 14px; border-radius: 999px; cursor: pointer; font-size: 12.5px; font-weight: 600;
-}
-.chip.on { background: var(--animal-green); color: #fff; border-color: var(--animal-green); }
+.lifecycle-empty { padding: 12px 8px; color: var(--mc-ink-soft); font-size: var(--mc-font-sm); text-align: center; }
 
-/* ── 状态下拉 ── */
-.ms-wrap { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
-.ms-label { font-size: 12.5px; color: var(--animal-text-soft); font-weight: 700; }
-.ms-trigger { position: relative; }
-.ms-btn {
-  border: 1.5px solid var(--animal-line); background: #fff; color: var(--animal-brown);
-  padding: 7px 16px; border-radius: 999px; cursor: pointer; font-size: 12.5px; font-weight: 600;
-}
-.ms-menu {
-  position: absolute; top: calc(100% + 6px); left: 0; z-index: 30; background: #fff;
-  border: 1px solid var(--animal-line); border-radius: 14px; padding: 8px; box-shadow: var(--animal-shadow);
-  min-width: 180px; max-height: 320px; overflow-y: auto;
-}
-.ms-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; font-size: 13px; border-radius: 8px; cursor: pointer; }
-.ms-item:hover { background: var(--animal-cream); }
-.ms-clr { padding: 4px 8px; font-size: 12px; color: var(--animal-green-deep); cursor: pointer; font-weight: 600; }
-.ms-div { height: 1px; background: var(--animal-line); margin: 4px 0; }
-.ms-empty { padding: 12px 8px; color: var(--animal-text-soft); font-size: 12.5px; text-align: center; }
-.ms-foot { border-top: 1px solid var(--animal-line); margin-top: 6px; padding-top: 6px; text-align: right; }
-.ms-clear { border: none; background: #f3e6d8; color: var(--animal-text-soft); border-radius: 50%; width: 26px; height: 26px; cursor: pointer; }
+.filter-label { font-weight: 700; color: var(--mc-ink); font-size: var(--mc-font-base); }
 
-/* 状态下拉（FilterBar 用的 ms-drop / ms-btn） */
-.ms-wrap { position: relative; }
-.ms-drop {
-  position: absolute; top: calc(100% + 6px); left: 0; z-index: 30; background: #fff;
-  border: 1px solid var(--animal-line); border-radius: 14px; padding: 8px; box-shadow: var(--animal-shadow);
-  min-width: 200px; max-height: 320px; overflow-y: auto;
-}
+/* 已删除（早期静态 HTML 版本遗留，全工程已无引用）：
+   .filter / .type-group / .type-label / .chip / .kw-line / .csv-btn /
+   .ms-wrap / .ms-wrap-inline / .ms-label / .ms-trigger / .ms-btn / .ms-drop /
+   .ms-menu / .ms-item / .ms-clr / .ms-div / .ms-empty / .ms-foot / .ms-clear ——
+   状态筛选控件现由库 <Select> 与 FilterBar 的 .lifecycle-dropdown 承载。 */
 
-/* 筛选行内联版（类型与生命周期同一行） */
-.ms-wrap-inline { display: flex; align-items: center; gap: 6px; }
-.ms-wrap-inline .ms-label { margin: 0; }
-
-/* ── 表格 ── */
-.count-line, .kw-line { color: var(--animal-text-soft); font-size: 12.5px; margin-bottom: 8px; }
-.count-line { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.csv-btn { margin-left: auto; }
-.kw-line .filter { width: 100%; }
-.table-wrap { overflow: auto; border-radius: 14px; border: 1px solid var(--animal-line); background: #fff; }
-table { width: 100%; border-collapse: collapse; font-size: 12.5px; table-layout: fixed; }
+/* ── 表格 ──
+   表头底色由写死的青绿渐变改为「主题强调色浅调」，随壁纸换肤；
+   行分隔线与悬停高亮同样取自 token，不再出现固定的 teal rgba。 */
+.count-line { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--mc-ink-soft); font-size: var(--mc-font-sm); margin-bottom: 8px; }
+.table-wrap { overflow: auto; border-radius: 14px; border: 1px solid var(--mc-line); background: var(--mc-surface); }
+table { width: 100%; border-collapse: collapse; font-size: var(--mc-font-sm); table-layout: fixed; }
 thead th {
-  position: sticky; top: 0; background: linear-gradient(135deg, #eafaf7, #d8f3ee);
-  color: var(--animal-green-deep); font-weight: 700; padding: 10px 12px; text-align: left;
-  white-space: nowrap; cursor: pointer; border-bottom: 2px solid var(--animal-green);
-  position: relative;
+  position: sticky; top: 0;
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--mc-accent) 16%, var(--mc-surface)) 0%,
+    color-mix(in srgb, var(--mc-accent) 6%, var(--mc-surface)) 100%
+  );
+  color: var(--mc-accent-deep); font-weight: 700; padding: 10px 12px; text-align: left;
+  white-space: nowrap; cursor: pointer; border-bottom: 2px solid var(--mc-accent-soft);
 }
-thead th .sort-ico { color: var(--animal-text-soft); font-size: 11px; margin-left: 3px; }
-thead th .col-resize-handle {
-  position: absolute; right: 0; top: 4px; bottom: 4px; width: 6px;
-  cursor: col-resize; background: transparent;
-  border-right: 2px solid transparent; transition: border-color .15s;
+/* 排序指示：库 <Icon name="Play"> 是实心三角，靠旋转表达升/降序 */
+thead th .sort-ico {
+  display: inline-flex; align-items: center; vertical-align: middle;
+  margin-left: 3px; color: var(--mc-accent);
 }
-thead th .col-resize-handle:hover { border-right-color: var(--animal-green); }
-tbody tr { border-bottom: 1px solid #f1ead9; }
-tbody tr.dr { cursor: pointer; transition: background .12s; }
-tbody tr.dr:hover { background: linear-gradient(90deg, rgba(25,200,185,0.07), rgba(25,200,185,0.02)); }
-tbody tr.exp td { background: var(--animal-cream); font-size: 12px; color: var(--animal-text-soft); line-height: 1.8; }
+thead th .sort-ico.none { opacity: .35; }
+tbody tr { border-bottom: 1px solid var(--mc-line); }
 td { padding: 9px 12px; vertical-align: top; overflow: hidden; text-overflow: ellipsis; text-align: left; }
-.file-link { color: var(--animal-green-deep); text-decoration: underline; font-weight: 600; }
-.file-link:hover { color: var(--animal-green); text-decoration: underline; }
+.file-link { color: var(--mc-accent-deep); text-decoration: underline; font-weight: 600; }
+.file-link:hover { color: var(--mc-accent); text-decoration: underline; }
+/* 无附件兜底文案 */
+.no-file { color: var(--mc-ink-soft); }
 /* 兜底：表格内所有超链接默认带下划线 */
 .mq td a { text-decoration: underline; }
 .td-num { color: var(--animal-text-soft); text-align: right; width: 36px; }
 .td-item { font-family: monospace; color: var(--animal-brown); font-weight: 600; white-space: nowrap; text-align: left; }
 .td-desc { max-width: 300px; white-space: normal; overflow-wrap: anywhere; word-break: break-word; line-height: 1.4; text-align: left; }
 .td-qty { font-weight: 600; text-align: left; white-space: nowrap; }
-.td-qty.qty-pos { color: #138a7e; }
-.td-qty.qty-zero { color: #a9947b; }
+.td-qty.qty-pos { color: var(--mc-accent-deep); }
+.td-qty.qty-zero { color: var(--mc-ink-soft); }
 
-/* ── 徽章 ── */
-.badge { padding: 3px 10px; border-radius: 999px; font-size: 11.5px; font-weight: 700; white-space: nowrap; }
-.badge.gr { background: #d8f3ee; color: var(--animal-green-deep); }
-.badge.b { background: #e7eefb; color: var(--animal-blue); }
-.badge.green { background: #d8f3ee; color: #138a7e; }
-.badge.blue { background: #e7eefb; color: #2f6fb8; }
-.badge.amber { background: #fdeccd; color: #b8860b; }
-.badge.red { background: #fbe3df; color: #c0392b; }
-.badge.gray { background: #eee7d8; color: var(--animal-text-soft); }
-
-/* 生命周期 TAG 颜色（mq-* 系列，与用户脚本一致） */
-.badge.mq-green { background: #d8f3ee; color: #138a7e; border: 1px solid #a8e6cf; }
-.badge.mq-blue { background: #e7eefb; color: #2f6fb8; border: 1px solid #b3d9f7; }
-.badge.mq-amber { background: #fdeccd; color: #b8860b; border: 1px solid #f5d88e; }
-.badge.mq-red { background: #fbe3df; color: #c0392b; border: 1px solid #f5c6bf; }
+/* 已删除：.badge / .badge.gr / .badge.b / .badge.green / .badge.blue / .badge.amber /
+   .badge.red / .badge.gray 与 .badge.mq-* 系列 ——
+   生命周期徽章已由库 <Tag color="app-*">（见 MaterialTable）承载，
+   自建徽章配色全工程已无引用。 */
 
 .empty-box {
-  text-align: center; color: var(--animal-text-soft); padding: 48px 20px;
-  background: var(--animal-cream-2); border: 1px dashed var(--animal-line); border-radius: 14px;
-  font-size: 13.5px;
+  text-align: center; color: var(--mc-ink-soft); padding: 48px 20px;
+  background: var(--mc-surface-veil); border: 1px dashed var(--mc-line-strong); border-radius: 14px;
+  font-size: var(--mc-font-base);
 }
 
 /* 类型列宽（需求：63px） */
@@ -924,58 +1168,40 @@ td { padding: 9px 12px; vertical-align: top; overflow: hidden; text-overflow: el
 
 /* 可点击数据行 */
 .data-row { cursor: pointer; transition: background .12s; }
-.data-row:hover { background: linear-gradient(90deg, rgba(25,200,185,0.07), rgba(25,200,185,0.02)); }
+.data-row:hover {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--mc-accent) 8%, transparent),
+    color-mix(in srgb, var(--mc-accent) 2%, transparent)
+  );
+}
 
-/* 列宽拖拽手柄 */
-thead th { position: relative; }
+/* 列宽拖拽手柄（position: relative 已由上方 thead th 的 sticky 建立包含块） */
 thead th .col-resizer {
   position: absolute; top: 0; right: -3px; width: 7px; height: 100%;
   cursor: col-resize; user-select: none; z-index: 2;
 }
-thead th .col-resizer:hover { background: rgba(19,138,126,0.25); }
+thead th .col-resizer:hover { background: color-mix(in srgb, var(--mc-accent) 25%, transparent); }
 
-/* 列显示控制已移除 */
 .count-actions { display: flex; align-items: center; gap: 8px; }
 
-/* ── 顶层 Tab 内容区 ── */
-.tab-pane { margin-top: 4px; }
+/* 已删除：.tab-pane —— Tab 内容区实际使用 .tab-body（无需额外样式），该旧类名无引用。 */
 
-/* ── BOM 树形（FR-4 Collapse） ── */
-.bom-tree { margin-top: 6px; }
-.bom-node-title { display: flex; align-items: center; gap: 10px; }
-.bom-level {
-  flex-shrink: 0; min-width: 26px; height: 20px; padding: 0 6px; border-radius: 999px;
-  background: var(--animal-yellow); color: var(--animal-brown); font-size: 11px; font-weight: 700;
-  display: inline-flex; align-items: center; justify-content: center;
-}
-.bom-item { font-family: monospace; font-weight: 700; color: var(--animal-brown); }
-.bom-desc { color: var(--animal-text-soft); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.bom-node-body { padding: 4px 2px 2px; }
-.bom-fields { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 12.5px; color: var(--animal-text-soft); line-height: 1.9; }
-.bom-fields b { color: var(--animal-brown); margin-right: 2px; }
-.bom-attach { margin-top: 8px; font-size: 12.5px; color: var(--animal-text-soft); }
-.bom-attach b { color: var(--animal-brown); }
+/* 已删除：.bom-tree / .bom-node-title / .bom-level / .bom-item / .bom-desc /
+   .bom-node-body / .bom-fields / .bom-attach ——
+   BOM 树形视图已被 <BomTable> 的扁平表格取代，这套树节点样式全工程无引用。 */
+/* 行展开详情里的单行字段（用于统一 <br> 手动换行为块级行距） */
+.mq-expand-line { display: block; }
 
 /* 批量未命中 Tag 列表（FR-2） */
 .not-found-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 
-/* 原生 textarea 套组件库 token（animal-island-ui 1.4.0 无 TextArea 组件，按规则14套 token） */
-.ai-textarea {
-  width: 100%; min-height: 96px; border-radius: var(--animal-radius); border: 1.5px solid var(--animal-line);
-  padding: 12px 14px; font-size: 13px; resize: vertical; outline: none; font-family: inherit;
-  background: var(--animal-cream-2); color: var(--animal-text);
-}
-.ai-textarea:focus { border-color: var(--animal-green); box-shadow: 0 0 0 3px rgba(25,200,185,0.15); }
+/* 已删除：.ai-textarea（批量输入框已统一走 .mq-batch-textarea）、
+   第二处 .drag-handle（拖拽手柄已由 .mq-seq 徽标承载）、
+   .batch-btn / .batch-count（静态 HTML 版本遗留，无引用）。 */
 
-/* 字段拖拽手柄（文字替代图标，规则10） */
-.drag-handle { cursor: grab; color: var(--animal-text-soft); user-select: none; font-size: 14px; letter-spacing: 1px; }
-.drag-handle:active { cursor: grabbing; }
-
-/* 批量展开按钮已改为 .mq-batch-toggle */
-.batch-btn { position: relative; min-width: 140px; }
-.batch-count { color: var(--animal-green-deep); font-size: 12px; font-weight: 600; white-space: nowrap; margin-left: 4px; }
-
-/* ── 顶层功能切换 ── */
+/* ── 顶层功能切换（物料查询 / AI 助手）──
+   浮在右下角的胶囊开关，选中态改用主题强调色而非深绿渐变。 */
 .view-switch {
   position: fixed;
   right: 18px;
@@ -984,23 +1210,48 @@ thead th .col-resizer:hover { background: rgba(19,138,126,0.25); }
   display: flex;
   gap: 4px;
   padding: 5px;
-  border-radius: 999px;
-  background: rgba(255, 253, 248, .96);
-  border: 1px solid var(--animal-line);
-  box-shadow: var(--animal-shadow);
+  border-radius: var(--mc-radius-pill);
+  background: var(--mc-surface-veil);
+  border: 1px solid var(--mc-line);
+  box-shadow: var(--mc-shadow);
+  backdrop-filter: blur(4px);
 }
 .view-switch button {
   border: 0;
   background: transparent;
-  color: var(--animal-text-soft);
-  font-size: 12.5px;
+  color: var(--mc-ink-soft);
+  font-family: inherit;
+  font-size: var(--mc-font-sm);
   font-weight: 700;
   padding: 7px 13px;
-  border-radius: 999px;
+  border-radius: var(--mc-radius-pill);
   cursor: pointer;
+  transition: background .15s ease, color .15s ease;
 }
+.view-switch button:hover { color: var(--mc-ink); }
 .view-switch button.active {
-  background: linear-gradient(135deg, var(--animal-green), var(--animal-green-deep));
+  background: var(--mc-accent);
   color: #fff;
-  box-shadow: 0 3px 10px rgba(25, 200, 185, .28);
+  box-shadow: 0 3px 10px color-mix(in srgb, var(--mc-accent) 32%, transparent);
+}
+
+/* ── 返回顶部（库 <BackTop>，文档 #/backtop）──
+   库的默认定位是 fixed / right:24px / bottom:32px，会正好压在右下角的 .view-switch
+   胶囊上（该胶囊 bottom:18px、高约 40px）。这里整体上移到胶囊之上并略微缩小，
+   火箭图标仍用库自带的 SVG。z-index 取 79（低于 .view-switch 的 80），
+   万一窗口很矮出现重叠也不会挡住视图切换按钮。 */
+.mc-backtop {
+  right: 26px;
+  bottom: 76px;
+  z-index: 79;
+}
+.mc-backtop img { width: 52px; height: 52px; }
+
+/* ── 折叠面板（库 <Collapse>，文档 #/collapse）──
+   问答卡自带 --animal-bg-color 底与 --animal-border-color 描边（见 theme.ts 的 token 映射），
+   其底色是页面基色而非卡片面色。放在 .card 里时改用 surface，让折叠卡与所在纸面同层。
+   展开/收起、+/− 徽标、高度过渡都由库负责，这里只统一配色。 */
+.mc-collapse {
+  background: var(--mc-surface);
+  border-color: var(--mc-line);
 }

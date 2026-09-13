@@ -1,15 +1,30 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
+import { Button, Icon } from 'animal-island-ui'
 import { useStore } from '../store'
 
 interface Props {
   loginState: 'checking' | 'logging' | 'failed' | 'ok'
 }
 
+/** 二维码状态只保存「文案键」，渲染时才翻译：
+ *  这样切换语言时状态区立即跟着变，不会残留上一次语言的文案。 */
+type StatusKey =
+  | 'qrPreparing'
+  | 'qrFetching'
+  | 'qrRetrying'
+  | 'qrScanHint'
+  | 'qrScanConfirm'
+  | 'qrLoginOk'
+  | 'qrExpired'
+  | 'qrInvalid'
+  | 'qrFail'
+
 const MAX_POLL_MS = 3 * 60 * 1000 // 最多轮询 3 分钟
 
 export function LoginOverlay({ loginState }: Props) {
   const lang = useStore(s => s.lang)
-  const appName = lang === 'en' ? 'DingTalk' : '钉钉'
+  const t = useStore(s => s.t)
+  const appName = t(lang === 'en' ? 'qrAppEn' : 'qrAppZh')
   const loginError = useStore(s => s.loginError)
   const setLoginError = useStore(s => s.setLoginError)
   const qrRefetchSeq = useStore(s => s.qrRefetchSeq)
@@ -18,7 +33,7 @@ export function LoginOverlay({ loginState }: Props) {
   const [qrToken, setQrToken] = useState('')
   const [authChainCode, setAuthChainCode] = useState('')
   const [lck, setLck] = useState('')
-  const [status, setStatus] = useState('准备二维码...')
+  const [status, setStatus] = useState<StatusKey>('qrPreparing')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [scanned, setScanned] = useState(false)
@@ -65,7 +80,7 @@ export function LoginOverlay({ loginState }: Props) {
     setAuthChainCode('')
     setLck('')
     setExpired(false)
-    setStatus('正在获取二维码...')
+    setStatus('qrFetching')
     try {
       console.log('[QR] invoking startQrLogin...')
       // forceQr=true 表示用户手动点击刷新：跳过主进程自动认证判断，直接获取二维码
@@ -77,16 +92,14 @@ export function LoginOverlay({ loginState }: Props) {
         //  - retryable：IAM 冷启动未签发 lck 上下文（瞬态，重试可恢复）
         if ((res.reason === 'network' || res.reason === 'retryable') && retryLeft > 0) {
           setError(
-            res.reason === 'network'
-              ? '网络异常，正在重新获取二维码...'
-              : '登录服务未就绪，正在重新获取二维码...'
+            useStore.getState().t(res.reason === 'network' ? 'errLoginNetwork' : 'errLoginSvc')
           )
-          setStatus('正在重试...')
+          setStatus('qrRetrying')
           setLoading(false)
           window.setTimeout(() => fetchQr(forceQr, retryLeft - 1), 5000)
           return
         }
-        throw new Error(res.message || '获取二维码失败')
+        throw new Error(res.message || useStore.getState().t('errQrFetch'))
       }
       // OA 已登录态（SESSION 仍热，登录页直接 200 无 lck）：无需扫码，直接进工具
       if (res.alreadyLoggedIn) {
@@ -99,23 +112,23 @@ export function LoginOverlay({ loginState }: Props) {
       }
       const token = res.qrToken || res.data?.qrToken
       const msg = res.qrMsg || res.data?.qrMessage || res.data?.qrMsg || res.data?.qrData
-      if (!token || !msg) throw new Error('二维码数据不完整')
+      if (!token || !msg) throw new Error(useStore.getState().t('errQrIncomplete'))
       setQrToken(token)
       setAuthChainCode(res.authChainCode || res.data?.authChainCode || '')
       setLck(res.lck || res.data?.lck || '')
       setQrSrc(buildQrSrc(msg))
-      setStatus(`请使用 ${appName} 手机 App 扫码登录`)
+      setStatus('qrScanHint')
       setLoading(false)
     } catch (e: any) {
-      const msg = e.message || '获取二维码失败'
+      const msg = e.message || useStore.getState().t('errQrFetch')
       // 主进程正在并发获取二维码（互斥锁拒绝），稍候自动重试，不向用户报错
       if (/正在获取二维码/.test(msg)) {
-        setStatus('正在获取二维码...')
+        setStatus('qrFetching')
         window.setTimeout(() => fetchQr(forceQr, retryLeft), 800)
         return
       }
       setError(msg)
-      setStatus('获取二维码失败')
+      setStatus('qrFail')
       setLoading(false)
     }
   }, [buildQrSrc, stopPolling])
@@ -159,7 +172,7 @@ export function LoginOverlay({ loginState }: Props) {
       if (Date.now() - startedAtRef.current > MAX_POLL_MS) {
         pollingRef.current = false
         setExpired(true)
-        setStatus('二维码已过期，请点击刷新重试')
+        setStatus('qrExpired')
         return
       }
       pollTimerRef.current = window.setTimeout(runPoll, delay)
@@ -177,7 +190,7 @@ export function LoginOverlay({ loginState }: Props) {
           pollingRef.current = false
           stopPolling()
           setScanned(true)
-          setStatus('登录成功，正在进入工具...')
+          setStatus('qrLoginOk')
           // 不立即 reloadLogin：主进程会在 SSO 落地 OA 会话后主动推送 OA_CHECK_LOGGED。
           // 若 8s 内未收到（SSO 失败），再主动检测一次，届时失败会回到二维码重试。
           window.setTimeout(() => {
@@ -188,7 +201,7 @@ export function LoginOverlay({ loginState }: Props) {
 
         if (poll.data?.status === 'scanned' || poll.scanned) {
           setScanned(true)
-          setStatus('已扫码，请在手机上确认登录')
+          setStatus('qrScanConfirm')
           schedule(1000)
           return
         }
@@ -199,7 +212,7 @@ export function LoginOverlay({ loginState }: Props) {
           pollingRef.current = false
           setExpired(true)
           setError('')
-          setStatus('二维码已失效，请点击刷新重试')
+          setStatus('qrInvalid')
           return
         }
 
@@ -212,7 +225,7 @@ export function LoginOverlay({ loginState }: Props) {
         if (!poll.success) {
           // 真正的业务失败
           pollingRef.current = false
-          setError(poll.message || '轮询失败')
+          setError(poll.message || useStore.getState().t('qrPollFail'))
           return
         }
 
@@ -241,45 +254,47 @@ export function LoginOverlay({ loginState }: Props) {
   if (loginState === 'ok') return null
 
   return (
-    <div className="login-overlay show">
+    <div className="login-overlay">
       <div className="login-card qr-login-card">
         <div className="qr-login-header">
-          <div className="qr-login-badge">OA 登录</div>
-          <h2 className="qr-login-title">扫码登录</h2>
-          <p className="qr-login-subtitle">请使用 {appName} 手机 App 扫描二维码</p>
+          <div className="qr-login-badge">
+            <Icon name="Lock" size={13} />
+            {t('loginBadge')}
+          </div>
+          <h2 className="qr-login-title">{t('qrTitle')}</h2>
+          <p className="qr-login-subtitle">{t('qrSubtitle', { app: appName })}</p>
         </div>
 
         <div className={`qr-frame ${loading ? 'qr-frame--loading' : ''} ${scanned ? 'qr-frame--scanned' : ''}`}>
           {qrSrc ? (
-            <img src={qrSrc} alt="OA 登录二维码" className="qr-image" />
+            <img src={qrSrc} alt={t('qrImageAlt')} className="qr-image" />
           ) : (
             <div className="qr-placeholder">
+              {/* 恢复 1.0.38 的 📷 emoji：库 <Icon name="Camera"> 是深色描边线性图标，
+                  放在这张奶油色卡片上又硬又小，和「二维码加载中」这句话不是一种气质。 */}
               <span className="qr-placeholder-icon">📷</span>
-              <span>二维码加载中</span>
+              <span>{t('qrLoading')}</span>
             </div>
           )}
-          {scanned && <div className="qr-scanned-mask">已扫码</div>}
+          {scanned && <div className="qr-scanned-mask">{t('qrScanned')}</div>}
         </div>
 
         <div className={`qr-status-row ${expired ? 'qr-status-row--expired' : ''} ${scanned ? 'qr-status-row--scanned' : ''}`}>
           <span className={`qr-status-dot ${scanned ? 'qr-status-dot--scanned' : ''} ${expired ? 'qr-status-dot--expired' : ''}`} />
-          <span className="qr-status-text">{status}</span>
+          <span>{t(status, { app: appName })}</span>
         </div>
 
         {error && <div className="qr-error">{error}</div>}
         {!error && loginError && <div className="qr-error">{loginError}</div>}
 
         <div className="qr-actions">
-          <button
-            className="animal-btn animal-btn--primary"
-            onClick={() => fetchQr(true, 6)}
-            disabled={loading}
-          >
-            {loading ? '加载中...' : '刷新二维码'}
-          </button>
+          {/* 原生 button + 自建立体样式 → 库 <Button type="primary">，主色跟随主题 */}
+          <Button type="primary" onClick={() => fetchQr(true, 6)} disabled={loading}>
+            {loading ? t('qrLoadingBtn') : t('qrRefresh')}
+          </Button>
         </div>
 
-        <p className="qr-hint">如果长时间未跳转，请确保手机已完成确认登录</p>
+        <p className="qr-hint">{t('qrHint')}</p>
       </div>
     </div>
   )

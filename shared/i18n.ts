@@ -4,6 +4,12 @@ export const I18N: Record<string, Record<string, string | string[]>> = {
     appTitle: 'MC物料查询',
     help: '帮助',
     about: '关于',
+    // 品牌图标悬停提示（库 <Tooltip variant="default">）
+    brandOpenOa: '打开 OA 工作台（应用内免登录打开；按住 Ctrl / ⌘ 点击改用系统浏览器）',
+    // 顶栏下班倒计时（库 <Countdown variant="default">，见 WorkCountdown.tsx）
+    offWorkPrefix: '距离下班还有',
+    restDayWish: '今天不上班，好好休息吧~',
+    afterWorkWish: '今天已下班，好好休息吧~',
     aboutInfo: 'MC物料查询\n\n说明：MC物料查询是一款面向锐明技术（Streamax）员工的物料信息速查桌面工具，支持料号 / BOM / 规格文件一键查询、批量查询、结果筛选与导出。\n内置 AI 助手：对话式查询物料 / 库存 / 生命周期，支持读取与修改本地 Excel / Word / PDF 文档、搜索文件、下载规格文件到指定目录。\n\n作者：Sean Mao\n联系方式：sean@streamax.com\n\n版本：{v}',
     checkForUpdate: '检查更新',
     zoomHint: 'Ctrl+滚轮缩放页面，Ctrl+0 复位',
@@ -28,20 +34,22 @@ export const I18N: Record<string, Record<string, string | string[]>> = {
     btnBom: '查BOM',
     btnFile: '查附件',
     itemnoHint: '支持模糊匹配，直接按回车或点击右侧按钮查询；查BOM/查附件需输入完整料号。',
-    batchToggle: '批量查询料号 ▾',
-    batchToggleClose: '批量查询料号 ▴',
+    // 折叠三角由库 <Icon name="Play"> 旋转得到，文案里不再带 ▾ / ▴ 字符
+    batchToggle: '批量查询料号',
     batchPh: '粘贴多个料号，支持换行 / 空格 / 逗号 / 制表符分隔',
     btnBatch: '批量查询',
     batchHint: '按完整料号精确匹配逐个查询并合并结果，查询完成后可在下方结果区继续筛选、排序、导出；未查到的料号会在下方提示。',
     batchCount: '共 {total} 个料号（含重复 {dup} 个）',
     fieldsLabel: '搜索条件（多条件按顺序用 && 自动拼接）',
     addField: '添加条件',
+    dragHint: '拖动调整条件顺序',
     fieldIdx: '{idx}',
     fieldPh: '关键词，如 X1N、0400、EC25、锐明英文LOGO...',
     previewEmpty: '（暂无条件）',
     search: '查询',
     reset: '重置',
     delete: '删除',
+    edit: '编辑',
     langLabel: '语言',
     settings: '设置',
     trayMinimize: '后台常驻系统托盘',
@@ -75,7 +83,6 @@ export const I18N: Record<string, Record<string, string | string[]>> = {
     sortAsc: '升序',
     sortDesc: '降序',
     sortNone: '排序',
-    sortIco: '↕',
     thNum: '#',
     colToggle: '显示/隐藏列',
     thItemNo: '料号',
@@ -95,7 +102,7 @@ export const I18N: Record<string, Record<string, string | string[]>> = {
     thFile: '规格文件',
     emptyMat: '请输入料号后点击「查料号」或搜索条件后点击「查询」',
     emptyFiltered: '暂无匹配结果',
-    emptyBom: '尚未查询 BOM，请输入料号后点击「🌳 查BOM」<br>或者尝试通过 🛠 PLM系统查询：<a href="http://plm.streamax.com:7001/Agile/default/login-cms.jsp" target="_blank">http://plm.streamax.com:7001/Agile/default/login-cms.jsp</a>',
+    emptyBom: '尚未查询 BOM，请输入料号后点击「查BOM」<br>或者尝试通过 PLM 系统查询：<a href="http://plm.streamax.com:7001/Agile/default/login-cms.jsp" target="_blank">http://plm.streamax.com:7001/Agile/default/login-cms.jsp</a>',
     emptyFile: '尚未查询到规格文件，请输入料号后点击「查附件」',
     noAttachment: '无附件',
     downloading: '下载中…',
@@ -201,6 +208,7 @@ export const I18N: Record<string, Record<string, string | string[]>> = {
     aiQueued: '已排队 {n} 条（AI 回复中，将依次发送）',
     aiQueueRemove: '移除排队',
     // AI 自定义供应商
+    aiProvider: '供应商',
     aiBuiltinProvider: '内置供应商',
     aiCustomProvider: '自定义供应商',
     aiAddCustom: '添加自定义供应商',
@@ -223,12 +231,72 @@ export const I18N: Record<string, Record<string, string | string[]>> = {
     aiPromptReset: '重置',
     aiPromptClose: '关闭',
     aiPromptEmpty: '暂无保存的提示词',
-    aiPromptSaveCurrent: '保存当前'
+    aiPromptSaveCurrent: '保存当前',
+
+    // 主题（浅色多主题：壁纸图案 + 配套配色）
+    themeLabel: '主题',
+    themePickerHint: '选择壁纸图案，界面配色会随之联动',
+    themeExpand: '展开图案选择',
+    themeCollapse: '收起图案选择',
+    themeDefault: '奶油波点',
+    themeGrid: '网格',
+    themeSprinkles: '彩色针糖',
+    themeSweetCorner: '甜甜圈角落',
+    themeCoffeeBreak: '咖啡时光',
+    themeDotsBrown: '棕色波点',
+    themeDotsWarmPeachPink: '暖桃粉波点',
+    themeDotsDarkGreen: '深绿波点',
+    themeDotsGreen: '绿色波点',
+    themeDotsTeal: '青色波点',
+    themeDotsLimeGreen: '青柠绿波点',
+    themeDotsYellowGreen: '黄绿色波点',
+    themeDotsPink: '粉色波点',
+    themeDotsPurple: '紫色波点',
+    themeDotsBlue: '蓝色波点',
+    themeDotsYellow: '黄色波点',
+    themeDotsOrange: '橙色波点',
+    themeDotsRed: '红色波点',
+
+    // 登录页 / 扫码登录（原先整页写死中文，切英文后不生效）
+    loginBadge: 'OA 登录',
+    qrTitle: '扫码登录',
+    qrSubtitle: '请使用 {app} 手机 App 扫描二维码',
+    qrImageAlt: 'OA 登录二维码',
+    qrAppEn: 'DingTalk',
+    qrAppZh: '钉钉',
+    qrLoading: '二维码加载中',
+    qrLoadingBtn: '加载中…',
+    qrRefresh: '刷新二维码',
+    qrScanned: '已扫码',
+    qrHint: '如果长时间未跳转，请确保手机已完成确认登录',
+    qrPreparing: '准备二维码…',
+    qrFetching: '正在获取二维码…',
+    qrRetrying: '正在重试…',
+    qrScanHint: '请使用 {app} 手机 App 扫码登录',
+    qrScanConfirm: '已扫码，请在手机上确认登录',
+    qrLoginOk: '登录成功，正在进入工具…',
+    qrExpired: '二维码已过期，请点击刷新重试',
+    qrInvalid: '二维码已失效，请点击刷新重试',
+    qrPollFail: '二维码轮询失败，请刷新重试',
+    errQrFetch: '获取二维码失败',
+    errQrIncomplete: '二维码数据不完整',
+    errLoginNetwork: '网络异常，正在重新获取二维码…',
+    errLoginIncomplete: '登录未完成，正在重新获取二维码…',
+    errLoginSvc: '登录服务未就绪，正在重新获取二维码…',
+    ssoEntering: '正在进入工具…',
+
+    errCsvExport: 'CSV 导出失败：{m}'
   },
   en: {
     appTitle: 'MC Material Query',
     help: 'Help',
     about: 'About',
+    // Hover hint on the brand icon (library <Tooltip variant="default">)
+    brandOpenOa: 'Open the OA workspace (in-app, already signed in; hold Ctrl / ⌘ and click to use the system browser)',
+    // Header countdown to the end of the workday (library <Countdown variant="default">)
+    offWorkPrefix: 'Off work in',
+    restDayWish: 'No work today — enjoy your day off~',
+    afterWorkWish: 'You are off work — enjoy your evening~',
     aboutInfo: 'MC Material Query\n\nDescription: MC Material Query is a desktop quick-search tool for Streamax employees to look up item information, BOM and spec files, supporting batch queries, filtering and export.\nBuilt-in AI assistant: ask questions in natural language to query items / stock / lifecycle, read and edit local Excel / Word / PDF documents, search files, and download spec files to a chosen folder.\n\nAuthor: Sean Mao\nContact: sean@streamax.com\n\nVersion: {v}',
     checkForUpdate: 'Check for Update',
     zoomHint: 'Ctrl+wheel to zoom, Ctrl+0 to reset',
@@ -253,20 +321,22 @@ export const I18N: Record<string, Record<string, string | string[]>> = {
     btnBom: 'Search BOM',
     btnFile: 'Search File',
     itemnoHint: 'Supports fuzzy matching; press Enter or click the button to query. BOM/File queries require a full item no.',
-    batchToggle: 'Batch Query ▾',
-    batchToggleClose: 'Batch Query ▴',
+    // The disclosure triangle is rendered by the library <Icon name="Play">, so no ▾ / ▴ here
+    batchToggle: 'Batch Query',
     batchPh: 'Paste multiple item nos., separated by newline / space / comma / tab',
     btnBatch: 'Batch Search',
     batchHint: 'Queries each full item no. exactly and merges results. After completion you can filter, sort and export below; unmatched item nos. will be listed in the tip.',
     batchCount: 'Total {total} item nos. ({dup} duplicates)',
     fieldsLabel: 'Search Conditions (multiple conditions joined with &&)',
     addField: 'Add Condition',
+    dragHint: 'Drag to reorder conditions',
     fieldIdx: '{idx}',
     fieldPh: 'Keyword, e.g. X1N, 0400, EC25, Streamax...',
     previewEmpty: '(No conditions yet)',
     search: 'Search',
     reset: 'Reset',
     delete: 'Delete',
+    edit: 'Edit',
     langLabel: 'Language',
     settings: 'Settings',
     trayMinimize: 'Keep in system tray',
@@ -300,7 +370,6 @@ export const I18N: Record<string, Record<string, string | string[]>> = {
     sortAsc: 'Asc',
     sortDesc: 'Desc',
     sortNone: 'Sort',
-    sortIco: '↕',
     thNum: '#',
     colToggle: 'Show/Hide columns',
     thItemNo: 'Item No.',
@@ -320,7 +389,7 @@ export const I18N: Record<string, Record<string, string | string[]>> = {
     thFile: 'Spec File',
     emptyMat: 'Please enter an item no. and click "Search Item" or condition and click "Search"',
     emptyFiltered: 'No matching results',
-    emptyBom: 'No BOM queried yet; enter an item no. and click "🌳 Search BOM"<br>Or try the 🛠 PLM system: <a href="http://plm.streamax.com:7001/Agile/default/login-cms.jsp" target="_blank">http://plm.streamax.com:7001/Agile/default/login-cms.jsp</a>',
+    emptyBom: 'No BOM queried yet; enter an item no. and click "Search BOM"<br>Or try the PLM system: <a href="http://plm.streamax.com:7001/Agile/default/login-cms.jsp" target="_blank">http://plm.streamax.com:7001/Agile/default/login-cms.jsp</a>',
     emptyFile: 'No spec file queried yet; enter an item no. and click "Search File"',
     noAttachment: 'No file',
     downloading: 'Downloading…',
@@ -426,6 +495,7 @@ export const I18N: Record<string, Record<string, string | string[]>> = {
     aiQueued: '{n} queued (will be sent in order)',
     aiQueueRemove: 'Remove',
     // AI custom provider
+    aiProvider: 'Provider',
     aiBuiltinProvider: 'Built-in',
     aiCustomProvider: 'Custom',
     aiAddCustom: 'Add custom provider',
@@ -448,7 +518,61 @@ export const I18N: Record<string, Record<string, string | string[]>> = {
     aiPromptReset: 'Reset',
     aiPromptClose: 'Close',
     aiPromptEmpty: 'No saved prompts',
-    aiPromptSaveCurrent: 'Save current'
+    aiPromptSaveCurrent: 'Save current',
+
+    // Theme (light multi-theme: wallpaper pattern + matched palette)
+    themeLabel: 'Theme',
+    themePickerHint: 'Pick a wallpaper pattern; the interface palette follows it',
+    themeExpand: 'Show pattern picker',
+    themeCollapse: 'Hide pattern picker',
+    themeDefault: 'Cream dots',
+    themeGrid: 'Grid',
+    themeSprinkles: 'Sprinkles',
+    themeSweetCorner: 'Sweet corner',
+    themeCoffeeBreak: 'Coffee break',
+    themeDotsBrown: 'Brown dots',
+    themeDotsWarmPeachPink: 'Warm peach dots',
+    themeDotsDarkGreen: 'Dark green dots',
+    themeDotsGreen: 'Green dots',
+    themeDotsTeal: 'Teal dots',
+    themeDotsLimeGreen: 'Lime green dots',
+    themeDotsYellowGreen: 'Yellow green dots',
+    themeDotsPink: 'Pink dots',
+    themeDotsPurple: 'Purple dots',
+    themeDotsBlue: 'Blue dots',
+    themeDotsYellow: 'Yellow dots',
+    themeDotsOrange: 'Orange dots',
+    themeDotsRed: 'Red dots',
+
+    // Login / QR sign-in (was hardcoded Chinese, ignored the language switch)
+    loginBadge: 'OA Login',
+    qrTitle: 'Scan to sign in',
+    qrSubtitle: 'Scan the QR code with the {app} mobile app',
+    qrImageAlt: 'OA login QR code',
+    qrAppEn: 'DingTalk',
+    qrAppZh: '钉钉',
+    qrLoading: 'Loading QR code',
+    qrLoadingBtn: 'Loading…',
+    qrRefresh: 'Refresh QR code',
+    qrScanned: 'Scanned',
+    qrHint: 'If the app does not proceed, make sure you confirmed the sign-in on your phone',
+    qrPreparing: 'Preparing QR code…',
+    qrFetching: 'Fetching QR code…',
+    qrRetrying: 'Retrying…',
+    qrScanHint: 'Scan with the {app} mobile app to sign in',
+    qrScanConfirm: 'Scanned, please confirm on your phone',
+    qrLoginOk: 'Signed in, entering the tool…',
+    qrExpired: 'QR code expired, click refresh to retry',
+    qrInvalid: 'QR code is no longer valid, click refresh to retry',
+    qrPollFail: 'QR code polling failed, please refresh',
+    errQrFetch: 'Failed to fetch the QR code',
+    errQrIncomplete: 'Incomplete QR code data',
+    errLoginNetwork: 'Network error, fetching a new QR code…',
+    errLoginIncomplete: 'Sign-in incomplete, fetching a new QR code…',
+    errLoginSvc: 'Sign-in service not ready, fetching a new QR code…',
+    ssoEntering: 'Entering the tool…',
+
+    errCsvExport: 'CSV export failed: {m}'
   }
 }
 
@@ -463,4 +587,50 @@ export function translate(lang: Lang, key: string, vars?: Record<string, string 
     s = s.replace(/\{(\w+)\}/g, (m, k2) => (vars[k2] !== undefined ? String(vars[k2]) : m))
   }
   return s as string
+}
+
+/**
+ * 结果「取值」的翻译 —— 与 `translate()` 的区别是本函数翻译的是**数据**而不是 key。
+ *
+ * 表头一直走 `t()`，但单元格里的物料类型 / 生命周期是接口原样返回的中文枚举，
+ * 之前直接渲染，于是切英文后表格里只有表头是英文、取值仍是中文。
+ * 这些取值是封闭集合（生命周期见 MaterialTable 的 STATUS_TAG_COLOR，类型只有采购/制造），
+ * 所以放在这里维护一份取值字典，而不是往上面扁平的 I18N 字典里加 key ——
+ * 调用侧的入参是数据值，用 `statusNormal` 这类 key 命名反而要多套一层映射。
+ *
+ * 未收录的取值原样返回，这样接口将来新增枚举时界面不会出现空白或被翻译成 key 名。
+ * 注意：这里只影响**显示**。筛选 / 排序 / 导出仍用原始值，
+ * 否则「切语言」会连带改变筛选语义（已选中的生命周期会对不上）。
+ */
+const ITEM_TYPE_EN: Record<string, string> = {
+  采购: 'Purchase',
+  制造: 'Manufacture'
+}
+
+const LIFECYCLE_EN: Record<string, string> = {
+  正常: 'Normal',
+  量产: 'Mass Production',
+  '批量-推荐': 'Recommended',
+  研发样品: 'R&D Sample',
+  未承样: 'Sample Pending',
+  冻结: 'Frozen',
+  预释放: 'Pre-release',
+  停产: 'Discontinued',
+  预退市: 'Pre-phase-out',
+  逐步淘汰: 'Phasing Out',
+  '批量-不推荐': 'Not Recommended',
+  退市: 'End of Life',
+  禁购: 'Purchase Blocked',
+  禁用: 'Banned',
+  淘汰: 'Obsolete'
+}
+
+/** 物料类型取值（ITEM_TYPE）：采购 / 制造 */
+export function translateItemType(lang: Lang, value: string): string {
+  return lang === 'en' ? (ITEM_TYPE_EN[value] ?? value) : value
+}
+
+/** 生命周期取值（INV_STATUS_NAME） */
+export function translateLifecycle(lang: Lang, value: string): string {
+  return lang === 'en' ? (LIFECYCLE_EN[value] ?? value) : value
 }

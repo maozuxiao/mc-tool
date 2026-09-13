@@ -23,6 +23,17 @@ export interface UpdateInfo {
   downloaded?: boolean
 }
 
+// 中国法定节假日安排（主进程联网拉取，见 src/main/holidaySync.ts）
+export interface HolidayPlan {
+  year: number
+  /** 放假日，YYYY-MM-DD（含由周末调休而来的日子） */
+  off: string[]
+  /** 调休上班日，YYYY-MM-DD（本来是周末，但按通知要上班） */
+  work: string[]
+  /** 数据来源标记（timor.tech / holiday-cn / cache(...)），仅用于日志排查 */
+  source: string
+}
+
 // 渲染进程 -> 主进程 的 IPC 通道名
 export const IPC = {
   OA_LOGIN_READY: 'oa-login-ready',          // 渲染进程通知：已跳转到目标页且 cookie 就绪
@@ -40,6 +51,7 @@ export const IPC = {
   OA_QR_LOGIN_POLL: 'oa-qr-login-poll',      // 轮询 IAM 二维码登录状态
   LOG_ERROR: 'log-error',                     // 渲染进程上报崩溃日志
   COOKIE_GET: 'cookie-get',
+  HOLIDAY_GET: 'holiday-get',                  // 拉取某年中国法定节假日安排（顶栏下班倒计时用）
   COOKIE_SET: 'cookie-set',
   COOKIE_CLEAR: 'cookie-clear',
   CHECK_UPDATE: 'check-update',

@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import { homedir } from 'os'
-import { basename, existsSync, join, resolve } from 'path'
+import { existsSync } from 'fs'
+import { basename, join, resolve } from 'path'
 
 export interface AllowedRoot {
   /** 空字符串表示主工作区（裸相对路径）；其余为额外目录的别名 */
