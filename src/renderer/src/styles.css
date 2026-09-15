@@ -563,7 +563,18 @@ body {
   border: 1px solid var(--mc-line);
   border-radius: 14px;
   box-shadow: var(--mc-shadow);
+  /* 1.0.41：面板是高柱内容（主题网格展开后整体可超 600px），而它挂在顶栏下方，
+     窗口不够高时「关闭按钮行为 / 开机自启」会被挤到窗口外，且没有任何滚动入口 ——
+     设置项直接够不着。这里给面板一个高度上限并允许内部滚动：
+     上限 = 视口高 - 顶栏区（约 90px）与面板 8px 间距 + 底部留白，正常窗口下
+     （768 高）不再出现截断；极窄窗口（顶栏偏高）仍由滚动兜住。 */
+  max-height: calc(100vh - 160px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
+/* 只有设置面板需要预留滚动条宽度（避免滚动条出现/消失时主题网格左右跳）；
+   「帮助」面板复用同一个外壳但内容很短，加上 gutter 会在右侧留一条空带。 */
+.settings-panel:not(.help-panel) { scrollbar-gutter: stable; }
 .settings-panel-title {
   padding: 10px 0 6px;
   font-size: var(--mc-font-base);
@@ -799,20 +810,24 @@ body {
   box-sizing: border-box;
   box-shadow: 0 3px 0 var(--mc-line-strong);
 }
-/* 悬停：把底部投影的颜色从库写死的 #c4b89e 拉回主题色。
-   库那条规则是 `.animal-wrapper-xxx:hover:not(.animal-wrapper-disabled-xxx)`，
-   特异度 (0,4,0)；`.hist-input .mq-input:hover` 只有 (0,3,0)，会被它压住，
-   所以把 .mq-input 写两遍凑到 (0,4,0) —— 这是压过「库自带高特异度 hover 规则」
-   的标准写法，不是手滑重复。
-   凑到同分就够：本表在库样式之后引入，同分时后声明者胜
-   —— 上面基础规则 .mq-input 压过 .animal-wrapper-xxx 用的也是同一套机制。
-   禁用态无需单独写：那时投影本来就该是这颗同色值，这条生效与否像素一致。 */
-.hist-input .mq-input.mq-input:hover {
-  box-shadow: 0 3px 0 var(--mc-line-strong);
+/* 悬停：底部投影消失，控件像被「按下去」一层（过渡由库自带的 transition: all 提供）。
+   1.0.41：这就是关键词筛选输入框**原有**的手感 —— 它没有被 .hist-input 包裹，
+   于是库的 no-shadow 悬停规则 `box-shadow:none`（特异度 (0,3,0)）能直接盖掉上面的
+   基础规则；而搜索条件输入框（HistoryInput 多包一层 .hist-input）被旧代码里
+   限定在 .hist-input 作用域的那条规则保住了投影，悬停毫无变化 ——
+   同一个 .mq-input 在两地表现不一致，正是本次要修的问题。
+   现在两处统一：悬停 → 投影消失。
+   这里显式写出来而不依赖库那条：把「投影消失」从库的副作用变成有意设计，
+   库换哈希类名 / 改默认形态时行为也不会漂移；
+   .mq-input 写两遍是凑到 (0,3,0)，靠「本表在库样式之后引入」压过库那条同名规则。 */
+.mq-input.mq-input:hover {
+  box-shadow: none;
 }
 /* 焦点态：描边与投影一起换成主题色（原先的 2px inset 描边由 border 承接，
-   厚度从 2px 变 1.5px，观感基本一致，不再叠加第二圈） */
-.mq-input:focus-within {
+   厚度从 2px 变 1.5px，观感基本一致，不再叠加第二圈）。
+   同样写两遍凑到 (0,3,0) 并放在 hover 之后：否则「悬停 + 聚焦」并存时会被 hover
+   的 box-shadow: none 压住，聚焦换不上主题色。 */
+.mq-input.mq-input:focus-within {
   background: var(--mc-surface);
   border-color: var(--mc-accent-soft);
   box-shadow: 0 3px 0 var(--mc-accent-soft);
