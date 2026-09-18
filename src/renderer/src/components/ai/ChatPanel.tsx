@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeSanitize from 'rehype-sanitize'
@@ -73,6 +73,35 @@ export function ChatPanel({ disabled }: Props) {
   const [conversations, setConversations] = useState<AIConversation[]>([])
   const [conversationId, setConversationId] = useState<string | null>(null)
   const [messages, setMessages] = useState<AIMessage[]>([])
+
+  // ── 流式 delta 的「按帧合并」（1.0.42 性能优化）──
+  // 原先每个 delta 都 setState 一次，而一次回复动辄几百上千个 delta：每来一个 token 都要
+  // 重建 messages 数组、重渲染整条消息列表（并重新解析所有 Markdown）。现改为先把文本累积
+  // 在 ref 里，等到下一帧再统一 flush —— 渲染次数从「每个 token 一次」降到「每帧一次」
+  // （上限约 60 次/秒），且不会漏字。
+  // 另外：非 delta 事件（done / error / tool-* / message-created）与切换会话前都必须先 flush，
+  // 否则尾部文本会丢，或落到另一个会话的消息上。
+  const pendingDeltaRef = useRef<{ id: string; text: string } | null>(null)
+  const deltaRafRef = useRef<number | null>(null)
+  const flushDeltas = useCallback(() => {
+    if (deltaRafRef.current !== null) {
+      cancelAnimationFrame(deltaRafRef.current)
+      deltaRafRef.current = null
+    }
+    const pending = pendingDeltaRef.current
+    if (!pending) return
+    pendingDeltaRef.current = null
+    setMessages(prev => prev.map(m => (m.id === pending.id ? { ...m, content: m.content + pending.text } : m)))
+  }, [])
+  const queueDelta = useCallback((id: string, text: string) => {
+    const cur = pendingDeltaRef.current
+    pendingDeltaRef.current = cur && cur.id === id ? { id, text: cur.text + text } : { id, text }
+    if (deltaRafRef.current === null) deltaRafRef.current = requestAnimationFrame(flushDeltas)
+  }, [flushDeltas])
+  // 生成态的「镜像 ref」：滚动跟随的 effect 只依赖 messages，不想把生成态写进依赖
+  // （否则生成结束会额外触发一次平滑滚动），又需要读到最新值 —— 用 ref 承接。
+  const streamingIdsRef = useRef<string[]>([])
+  const pendingNewStreamRef = useRef(false)
   const [drafts, setDrafts] = useState<Record<string, string>>({})
   // 每会话独立的输入框草稿：键为会话 id（新会话视图用 '__new__'），切换会话互不串扰
   const draftKey = conversationId ?? '__new__'
@@ -87,6 +116,9 @@ export function ChatPanel({ disabled }: Props) {
   // 新会话在 conversation-created 回来之前还没有 id，单独记一个生成态
   const [pendingNewStream, setPendingNewStream] = useState(false)
   const [stopping, setStopping] = useState(false)
+  // 生成态的镜像 ref（供滚动跟随的 effect 读取，理由见该 effect 的注释）
+  streamingIdsRef.current = streamingIds
+  pendingNewStreamRef.current = pendingNewStream
   // 运行模式：ask 纯对话 / mc 物料查询 / build 文件读写与命令。
   // 刻意不做持久化：Build 是高风险模式，每次启动都回到 mc，由用户主动切换。
   const [mode, setMode] = useState<AIAgentMode>('mc')
@@ -206,9 +238,11 @@ export function ChatPanel({ disabled }: Props) {
   // 不能把它们的增量内容塞进当前视图。
   const conversationIdRef = useRef<string | null>(null)
   const setActiveConversation = useCallback((id: string | null) => {
+    // 切会话前先把按帧累积的正文落地：否则这几个字会被算到下一条消息上（见 queueDelta）
+    flushDeltas()
     conversationIdRef.current = id
     setConversationId(id)
-  }, [])
+  }, [flushDeltas])
   const markStreaming = useCallback((id: string, on: boolean) => {
     setStreamingIds(prev => (on
       ? (prev.includes(id) ? prev : [...prev, id])
@@ -250,6 +284,10 @@ export function ChatPanel({ disabled }: Props) {
       // 由 conversation-created 先补上 id，随后的事件就能对上号。
       const isActive = activeId !== null && event.conversationId === activeId
 
+      // delta 走「按帧合并」（见 queueDelta）；其余事件一律先把待落地的文本 flush 掉，
+      // 保证「正文尾段 → 工具卡片 / 完成态」的先后顺序不乱。
+      if (event.type !== 'delta') flushDeltas()
+
       if (event.type === 'conversation-created') {
         // 只有停留在「新对话」视图时才接管这个新会话；
         // 若用户已经切到别的会话，就让它在后台生成，不打断当前视图。
@@ -277,7 +315,7 @@ export function ChatPanel({ disabled }: Props) {
 
       if (event.type === 'delta') {
         if (!isActive) return
-        setMessages(prev => prev.map(m => m.id === event.messageId ? { ...m, content: m.content + (event.content || '') } : m))
+        queueDelta(event.messageId!, event.content || '')
         return
       }
 
@@ -321,7 +359,7 @@ export function ChatPanel({ disabled }: Props) {
         refreshConversations()
       }
     })
-  }, [refreshConversations, refreshProviders, setActiveConversation, markStreaming, t])
+  }, [refreshConversations, refreshProviders, setActiveConversation, markStreaming, flushDeltas, queueDelta, t])
 
   useEffect(() => {
     if (!providerId) return
@@ -346,10 +384,22 @@ export function ChatPanel({ disabled }: Props) {
   //   （避免每次切回来都自动滚到最底部）。
   // - 普通流式 / 发送消息：自动滚到最底部。
   useEffect(() => {
-    if (pendingScrollRef.current.id && messagesRef.current) {
+    const el = messagesRef.current
+    if (pendingScrollRef.current.id && el) {
       const saved = scrollPositionsRef.current.get(pendingScrollRef.current.id)
-      messagesRef.current.scrollTop = saved ?? 0
+      el.scrollTop = saved ?? 0
       pendingScrollRef.current.id = null
+      return
+    }
+    // 1.0.42 性能优化：流式期间 messages 每帧都在变，此前每次都重新触发一次
+    // scrollIntoView({ behavior:'smooth' })——滚动动画互相打断，观感上就是整页在抖，
+    // 且每帧都要跑一遍布局。现改为：流式时直接设置 scrollTop（无动画），
+    // 并且只在你本来就贴着底部时才自动跟随；上滚查看历史时不再被强行拉回底部。
+    // 生成态从 ref 读取（而不是写进依赖）：依赖里加上它会让「生成结束」也额外触发一次
+    // 平滑滚动，把正在上翻历史的用户拽回底部。
+    if (el && (streamingIdsRef.current.length > 0 || pendingNewStreamRef.current)) {
+      const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+      if (nearBottom) el.scrollTop = el.scrollHeight
       return
     }
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -834,7 +884,19 @@ export function ChatPanel({ disabled }: Props) {
               value={input}
               placeholder={disabled ? t('aiLoginRequired') : t('aiInputPh')}
               disabled={disabled}
-              onChange={e => setInput(e.target.value)}
+              onChange={e => {
+                // 输入延迟探针（仅开发模式）：只在「本次输入到下一帧」超过 30ms 时打印，
+                // 用来判断打字卡顿是否还在、以及是否已经降到可忽略。
+                // 打包后 import.meta.env.DEV 为 false，整段被摇掉。
+                if ((import.meta as any).env?.DEV === true) {
+                  const t0 = performance.now()
+                  requestAnimationFrame(() => {
+                    const dt = performance.now() - t0
+                    if (dt > 30) console.log(`[perf] 输入到下一帧 ${dt.toFixed(1)}ms（>30ms）`)
+                  })
+                }
+                setInput(e.target.value)
+              }}
               onKeyDown={e => {
                 if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit() }
               }}
@@ -1049,10 +1111,27 @@ function fmtDate(ts?: number): string {
   return `${yyyy}/${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
 }
 
-function MessageItem({ message, thinking }: { message: AIMessage; thinking?: boolean }) {
+const MessageItem = memo(function MessageItem({ message, thinking }: { message: AIMessage; thinking?: boolean }) {
   const t = useStore(s => s.t)
   const [copied, setCopied] = useState(false)
   const copyTimer = useRef<number | null>(null)
+
+  // Markdown 解析（remark / rehype + 代码高亮）是这里最贵的一步：此前只要父组件重渲染
+  // （每次 delta、每次切视图、每次改语言或主题）就会把**全部历史消息**重新解析一遍。
+  // 按 content 记忆化后，内容未变的消息永远复用上一次的结果；叠加 memo，
+  // 流式期间只有正在增长的那一条会重新解析。
+  const rendered = useMemo(
+    () => (
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        rehypePlugins={[rehypeSanitize, rehypeHighlight]}
+        components={{ a: MarkdownLink }}
+      >
+        {message.content}
+      </ReactMarkdown>
+    ),
+    [message.content]
+  )
 
   useEffect(() => () => { if (copyTimer.current) window.clearTimeout(copyTimer.current) }, [])
 
@@ -1073,7 +1152,7 @@ function MessageItem({ message, thinking }: { message: AIMessage; thinking?: boo
           {message.role === 'assistant'
             ? (
               <>
-                <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize, rehypeHighlight]} components={{ a: MarkdownLink }}>{message.content}</ReactMarkdown>
+                {rendered}
                 {thinking && (
                   <div className="ai-thinking">
                     <span className="ai-thinking-dots"><i /><i /><i /></span>
@@ -1094,7 +1173,7 @@ function MessageItem({ message, thinking }: { message: AIMessage; thinking?: boo
       </div>
     </div>
   )
-}
+})
 
 /** 展开区 JSON 超过这个字符数就不再高亮。
  *  库 <CodeBlock> 是「按 token 切词再逐个拼 <span>」的实现，一份十万字符的工具返回
@@ -1102,6 +1181,36 @@ function MessageItem({ message, thinking }: { message: AIMessage; thinking?: boo
  *  高亮只是可读性优化，不值得为一次大响应牺牲面板的响应速度。
  *  （阈值按「正常工具返回都在几千字符内」留足余量，实际几乎不会触发。） */
 const CODE_HIGHLIGHT_MAX = 20000
+
+/** 展开区 JSON 真正写进 DOM 的硬上限（1.0.42 性能优化）。
+ *
+ *  库的 <Collapse> 把 answer **一直挂在 DOM 里**（靠 grid-template-rows 收起，见其源码），
+ *  所以「折叠着」并不等于「没有成本」。而一次物料查询的 output 就可能是几百行 JSON
+ *  （实测：197 条记录），十来张工具卡叠起来就是 MB 级文本常驻对话区 ——
+ *  它同时解释了两个现象：
+ *    · 在 AI 输入框里打字发卡：每个字符都要让浏览器重排这一大片 DOM；
+ *    · 展开工具卡发卡：展开动画要对整块巨型文本重新布局。
+ *  因此这里对**真正进 DOM 的那一份**做截断；完整内容仍可一键复制，信息不丢。
+ *  注：JSON.stringify「完整内容」那一步仍然保留（复制要用），但只是内存里的字符串，
+ *  不进 DOM，成本远低于让几 MB 文本参与布局。 */
+const TOOL_JSON_MAX_CHARS = 3000
+const TOOL_JSON_MAX_LINES = 50
+
+/** 按行数与字符数双重上限截断，返回截断后的文本与是否发生了截断 */
+function clampJson(text: string): { shown: string; truncated: boolean } {
+  let shown = text
+  let truncated = false
+  const lines = shown.split('\n')
+  if (lines.length > TOOL_JSON_MAX_LINES) {
+    shown = lines.slice(0, TOOL_JSON_MAX_LINES).join('\n')
+    truncated = true
+  }
+  if (shown.length > TOOL_JSON_MAX_CHARS) {
+    shown = shown.slice(0, TOOL_JSON_MAX_CHARS)
+    truncated = true
+  }
+  return { shown, truncated }
+}
 
 /** 把库 <CodeBlock> 压进聊天气泡的尺寸。
  *
@@ -1137,12 +1246,27 @@ const CODE_BLOCK_STYLE: React.CSSProperties = {
  * 它的分词器覆盖「字符串 / 数字 / true·false·null / 括号冒号」——正好是 JSON 的全部词法，
  * 所以直接拿来用，不需要额外的高亮库。
  */
-function ToolRunCard({ run }: { run: AIToolRun }) {
-  // useMemo：这份 JSON 可能不小，避免父组件每次重渲染都重新序列化一遍
-  const code = useMemo(() => {
+const ToolRunCard = memo(function ToolRunCard({ run }: { run: AIToolRun }) {
+  const t = useStore(s => s.t)
+  const [copied, setCopied] = useState(false)
+  const copyTimer = useRef<number | null>(null)
+  useEffect(() => () => { if (copyTimer.current) window.clearTimeout(copyTimer.current) }, [])
+
+  // 完整 JSON：只用于「复制完整内容」，不进 DOM（见 TOOL_JSON_MAX_CHARS 的说明）
+  const full = useMemo(() => {
     const head = JSON.stringify(run.input, null, 2)
     return run.output ? `${head}\n${JSON.stringify(run.output, null, 2)}` : head
   }, [run.input, run.output])
+  // 真正写进 DOM 的那一份：已截断
+  const { shown, truncated } = useMemo(() => clampJson(full), [full])
+
+  const handleCopyFull = async () => {
+    const ok = await copyText(full)
+    if (!ok) return
+    setCopied(true)
+    if (copyTimer.current) window.clearTimeout(copyTimer.current)
+    copyTimer.current = window.setTimeout(() => setCopied(false), 1500)
+  }
 
   return (
     <Collapse
@@ -1156,10 +1280,27 @@ function ToolRunCard({ run }: { run: AIToolRun }) {
         </span>
       }
       answer={
-        code.length > CODE_HIGHLIGHT_MAX
-          ? <pre className="ai-tool-run__pre">{code}</pre>
-          : <CodeBlock code={code} style={CODE_BLOCK_STYLE} />
+        <>
+          {/* 被截断（= 本来就是个超大返回）时直接走纯文本兜底：
+              一是与上面 CODE_HIGHLIGHT_MAX 的既定策略一致（大返回不做高亮），
+              二是避免库 <CodeBlock> 把这几千字符再切成上千个 <span>，
+              三是它的内置复制按钮只能复制「这一段」，容易让人以为复制到了完整内容 ——
+              完整内容由下面这行的按钮负责。 */}
+          {truncated || shown.length > CODE_HIGHLIGHT_MAX
+            ? <pre className="ai-tool-run__pre">{shown}</pre>
+            : <CodeBlock code={shown} style={CODE_BLOCK_STYLE} />}
+          {/* 被截断时才出现这一行：完整内容仍可一键复制，信息不会丢 */}
+          {truncated && (
+            <div className="ai-tool-run__more">
+              <span className="ai-tool-run__more-hint">{t('aiJsonTruncated', { n: full.length })}</span>
+              <button type="button" className="ai-copy-btn" onClick={handleCopyFull}>
+                <Icon name={copied ? 'Check' : 'File'} size={13} />
+                <span>{copied ? t('aiCopied') : t('aiCopyFull')}</span>
+              </button>
+            </div>
+          )}
+        </>
       }
     />
   )
-}
+})

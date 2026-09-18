@@ -171,6 +171,31 @@ async function fetchJSON(url: string, _retry = true): Promise<any> {
 const initialLang: Lang = (localStorage.getItem('mc-lang') as Lang) || 'zh'
 const makeT = (lang: Lang) => (key: string, vars?: Record<string, string | number>) => translate(lang, key, vars)
 
+/**
+ * 关键词 / 类型筛选的「停止输入后再算」（1.0.42 性能优化）。
+ *
+ * 这三个输入框原先每按一个键就同步跑一次全量过滤：过滤本身是 O(结果集行数)，
+ * 更贵的是它会让 `filtered` 换引用 → 整张表（结果集行数量级的 DOM）重渲染。
+ * 连续打字时这笔开销每键一次，输入框会明显发木。
+ * 现改为：输入框自身的值（kw / kwNot / typeFilter）仍然即时写入 store（手感不变），
+ * 只把「重算 filtered」推迟到停止输入 120ms 之后。
+ */
+let filterDebounceTimer: number | null = null
+function scheduleFilter(run: () => void): void {
+  if (filterDebounceTimer !== null) window.clearTimeout(filterDebounceTimer)
+  filterDebounceTimer = window.setTimeout(() => {
+    filterDebounceTimer = null
+    run()
+  }, 120)
+}
+/** 把尚未执行的那次过滤立刻跑完（导出这类「按当前结果集取数」的动作前调用，避免拿到旧结果）。 */
+function flushPendingFilter(): void {
+  if (filterDebounceTimer === null) return
+  window.clearTimeout(filterDebounceTimer)
+  filterDebounceTimer = null
+  useStore.getState().applyFilterInternal()
+}
+
 export const useStore = create<State>((set, get) => ({
   lang: initialLang,
   theme: readStoredTheme(),
@@ -336,9 +361,10 @@ export const useStore = create<State>((set, get) => ({
     finally { set({ loading: false }) }
   },
 
-  setKw: (v) => { set({ kw: v }); get().applyFilterInternal() },
-  setKwNot: (v) => { set({ kwNot: v }); get().applyFilterInternal() },
-  setTypeFilter: (v) => { set({ typeFilter: v }); get().applyFilterInternal() },
+  // 三个筛选输入走防抖（见 scheduleFilter）：值即时更新，重算 filtered 延后到停止输入。
+  setKw: (v) => { set({ kw: v }); scheduleFilter(() => get().applyFilterInternal()) },
+  setKwNot: (v) => { set({ kwNot: v }); scheduleFilter(() => get().applyFilterInternal()) },
+  setTypeFilter: (v) => { set({ typeFilter: v }); scheduleFilter(() => get().applyFilterInternal()) },
   toggleStatus: (st) => {
     const cur = new Set(get().selectedStatuses)
     if (cur.has(st)) cur.delete(st); else cur.add(st)
@@ -420,6 +446,7 @@ export const useStore = create<State>((set, get) => ({
   }),
 
   exportMatCSV: async () => {
+    flushPendingFilter() // 先把防抖中的过滤跑完，避免导出到「停止输入之前」的旧结果集
     const s = get()
     if (!s.filtered.length) return
     try {
@@ -433,6 +460,7 @@ export const useStore = create<State>((set, get) => ({
     }
   },
   exportBomCSV: async () => {
+    flushPendingFilter() // 同 exportMatCSV：导出前先把防抖中的过滤跑完
     const s = get()
     if (!s.bomFiltered.length) return
     try {

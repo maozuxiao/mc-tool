@@ -7,7 +7,7 @@ export const ORG = '102'
 // 生命状态 -> 样式类（用于 TAG 着色）
 export const STATUS_CLS: Record<string, string> = {
   '量产': 'mq-green', '批量-推荐': 'mq-green',
-  '研发样品': 'mq-blue', '未承样': 'mq-blue',
+  '研发样品': 'mq-blue', '试产样品': 'mq-blue', '未承样': 'mq-blue',
   '预退市': 'mq-amber', '逐步淘汰': 'mq-amber', '批量-不推荐': 'mq-amber',
   '退市': 'mq-red', '禁购': 'mq-red', '禁用': 'mq-red'
 }

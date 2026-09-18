@@ -1,4 +1,4 @@
-import { useRef, Fragment } from 'react'
+import { memo, useRef, Fragment } from 'react'
 import { useStore } from '../store'
 import { useColResize } from '../hooks/useColResize'
 import { escapeHtml } from '@shared/query'
@@ -11,8 +11,9 @@ const STATUS_TAG_COLOR: Record<string, any> = {
   '正常': 'app-green',
   '量产': 'app-green',
   '批量-推荐': 'app-green',
-  // 蓝：研发样品/未承样/冻结
+  // 蓝：研发样品/试产样品/未承样/冻结（都属「未量产」阶段）
   '研发样品': 'app-blue',
+  '试产样品': 'app-blue',
   '未承样': 'app-blue',
   '冻结': 'app-blue',
   // 黄：预释放
@@ -29,7 +30,13 @@ const STATUS_TAG_COLOR: Record<string, any> = {
   '淘汰': 'app-red',
 }
 
-export function MaterialTable() {
+/**
+ * 1.0.42 性能优化：组件没有任何 props，数据全部来自 store —— memo 之后，
+ * 只有 store 里它真正订阅的字段（结果集 / 排序 / 展开态等）变化才会重渲染。
+ * 此前父组件 QueryPanel 的任何一次重渲染（在料号、批量、搜索条件输入框里打字、
+ * 切 Tab、主题或语言变化）都会把整张表连同「结果集行数」个 <tr> 重渲染一遍。
+ */
+export const MaterialTable = memo(function MaterialTable() {
   const t = useStore(s => s.t)
   const lang = useStore(s => s.lang)
   const matData = useStore(s => s.allData)
@@ -137,7 +144,10 @@ export function MaterialTable() {
                       if (c.k === 'ITEM_TYPE') return <td key={c.k} className="td-type">{escapeHtml(translateItemType(lang, String(r.ITEM_TYPE ?? '')))}</td>
                       if (c.k === 'INV_STATUS_NAME') {
                         const st = String(r.INV_STATUS_NAME ?? '')
-                        return <td key={c.k} className="td-status"><Tag color={STATUS_TAG_COLOR[st] || 'default'}>{translateLifecycle(lang, st)}</Tag></td>
+                        // 取值可能带分类前缀（如 `[产品]量产`）：查配色前先去前缀，
+                        // 否则会退化成默认灰色标签（文案侧的归一化见 @shared/i18n 的 lookupValue）
+                        const stKey = st.replace(/^\[[^\]]*\]/, '')
+                        return <td key={c.k} className="td-status"><Tag color={STATUS_TAG_COLOR[stKey] || 'default'}>{translateLifecycle(lang, st)}</Tag></td>
                       }
                       if (c.k === 'ON_HAND_QTY') {
                         const raw = r.ON_HAND_QTY
@@ -201,4 +211,4 @@ export function MaterialTable() {
       </div>
     </div>
   )
-}
+})

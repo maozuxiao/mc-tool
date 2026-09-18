@@ -1,4 +1,4 @@
-import { Fragment } from 'react'
+import { memo, Fragment } from 'react'
 import { useStore } from '../store'
 import { escapeHtml, fixLinks } from '@shared/query'
 import { OA_ORIGIN } from '@shared/constants'
@@ -7,7 +7,11 @@ import { Button, Icon } from 'animal-island-ui'
 // 空值兜底显示「—」（对齐用户脚本 v4.1）
 const v = (x: any) => (x === undefined || x === null || x === '') ? '—' : escapeHtml(String(x))
 
-export function BomTable() {
+/**
+ * 1.0.42 性能优化：与 MaterialTable 同理 —— 无 props、数据全走 store，
+ * memo 之后不再被父组件的无关重渲染（在输入框打字、切 Tab、换主题等）连带重渲染整表。
+ */
+export const BomTable = memo(function BomTable() {
   const t = useStore(s => s.t)
   const bomData = useStore(s => s.bomData)
   const bomFiltered = useStore(s => s.bomFiltered)
@@ -114,4 +118,4 @@ export function BomTable() {
       </div>
     </div>
   )
-}
+})

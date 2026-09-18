@@ -177,7 +177,9 @@ body {
   position: fixed; inset: 0; z-index: 100;
   background: color-mix(in srgb, var(--mc-page) 82%, transparent);
   display: flex; align-items: center; justify-content: center;
-  backdrop-filter: blur(6px);
+  /* 1.0.42 性能优化：整窗 6px 模糊改为 3px（登录阶段整屏常驻，模糊半径越大采样越贵；
+     视觉上仍是「糊住底下的查询页」，但成本减半）。 */
+  backdrop-filter: blur(3px);
 }
 .login-card {
   background: var(--mc-surface); border-radius: var(--mc-radius-lg);
@@ -366,7 +368,10 @@ body {
 .view-pane > .panel,
 .view-pane > .ai-page { flex: 1; min-height: 0; }
 .panel { flex: 1; display: flex; flex-direction: column; min-height: 0; position: relative; }
-.panel-locked { filter: blur(2px); }
+/* 1.0.42 性能优化：登录失效时锁定面板，原先用 filter: blur(2px) ——
+   整块面板（含大表格）会因此常驻一个模糊合成层，每次内容变化都要重新光栅化。
+   改为只降透明度：没有模糊核，成本几乎为 0，锁定语义仍然一目了然（另有 .panel-lock-mask 拦截点击）。 */
+.panel-locked { opacity: .55; }
 .panel-lock-mask { position: absolute; inset: 0; z-index: 10; cursor: not-allowed; }
 /* 顶部栏：由「深绿实心渐变 + 白字」改为「主题强调色的浅渐变 + 细描边 + 深色文字」，
    不再是整窗里一条割裂的深色带。 */
@@ -1041,7 +1046,20 @@ body {
 @media (prefers-reduced-motion: reduce) {
   [role="tab"][aria-selected="true"] .mq-tab-leaf { animation: none; }
 }
-.table-area { margin-top: 10px; }
+/* 窗口失焦 / 最小化 / 切到后台时暂停纯装饰性动画（类名由 App.tsx 维护）。
+   这几处动画会一直跑，后台常驻托盘时持续唤醒合成器与 GPU，是 GPU 进程占用的来源之一。
+   只暂停装饰性的：顶栏倒计时数字由库按 JS 定时器刷新，不受影响。 */
+html.win-idle .mq-tab-leaf,
+html.win-idle .mc-backdrop,
+html.win-idle .ai-thinking-dots i {
+  animation-play-state: paused !important;
+}
+/* 布局隔离（1.0.42 二轮性能优化）：表格区加 contain —— 表格内部的任何改动（排序、展开行、
+   筛选结果更新）不再把整篇文档标脏，重排被限制在这一块里。
+   安全性：本容器内没有 position: fixed 的后代；表头拖拽手柄 .col-resizer 是绝对定位，
+   但它的包含块是 position: sticky 的 <th>（仍然在内部），不受影响。
+   注意不能把 contain 加到 .panel-body / .view-pane：库 <BackTop> 是 fixed，会被改基准。 */
+.table-area { margin-top: 10px; contain: layout style; }
 
 /* ── 筛选条 ── */
 .filter-bar {
@@ -1189,7 +1207,12 @@ table.mq.bom thead th:nth-child(10) { width: 56px; }
    表头底色由写死的青绿渐变改为「主题强调色浅调」，随壁纸换肤；
    行分隔线与悬停高亮同样取自 token，不再出现固定的 teal rgba。 */
 .count-line { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--mc-ink-soft); font-size: var(--mc-font-sm); margin-bottom: 8px; }
-.table-wrap { overflow: auto; border-radius: 14px; border: 1px solid var(--mc-line); background: var(--mc-surface); }
+/* 1.0.42：给滚动容器加上绘制隔离 —— 表格滚动 / 翻页时重绘范围被限制在这一块之内，
+   不会牵动整页（含固定壁纸与半透明卡片）一起重绘。
+   这里刻意只用 contain: paint（不用 layout / size / content-visibility）：
+   McSelect 的下拉面板是 position: fixed、按视口坐标定位的，一旦给祖先加 layout/paint 之外的
+   包含性（或 content-visibility），它们就会被当成包含块而被裁切、错位。 */
+.table-wrap { overflow: auto; border-radius: 14px; border: 1px solid var(--mc-line); background: var(--mc-surface); contain: paint; }
 table { width: 100%; border-collapse: collapse; font-size: var(--mc-font-sm); table-layout: fixed; }
 thead th {
   position: sticky; top: 0;
@@ -1283,10 +1306,13 @@ thead th .col-resizer:hover { background: color-mix(in srgb, var(--mc-accent) 25
   gap: 4px;
   padding: 5px;
   border-radius: var(--mc-radius-pill);
-  background: var(--mc-surface-veil);
+  /* 1.0.42 性能优化：去掉 backdrop-filter: blur(4px)。
+     这个胶囊浮在所有内容之上且常驻可见 —— 它背后的内容每变一次（滚动、流式输出、
+     切视图、窗口缩放）浏览器都要重新做一次背景模糊采样，是 GPU 进程常驻占用的主要来源之一。
+     改用更实的底色（96% 不透明）后观感几乎一致，但不再需要逐帧模糊。 */
+  background: color-mix(in srgb, var(--mc-surface) 96%, transparent);
   border: 1px solid var(--mc-line);
   box-shadow: var(--mc-shadow);
-  backdrop-filter: blur(4px);
 }
 .view-switch button {
   border: 0;

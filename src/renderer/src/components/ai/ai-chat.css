@@ -260,6 +260,12 @@
   display: flex;
   flex-direction: column;
   gap: 14px;
+  /* 布局隔离（1.0.42 二轮性能优化）：Blink 没有布局边界时，任何深层节点的改动都会把
+     整篇文档标脏 —— 消息列表很大，于是「流式输出一帧」「在某条消息里展开工具卡」
+     都会连带另一个视图面板（大表格）一起重排。加 contain 后重排被限制在本列表内。
+     安全性：本容器内部没有 position: fixed 的后代（消息里只有普通块级元素、Collapse、
+     CodeBlock 与绝对定位在各自相对父级内的元素），不会像 McSelect / BackTop 那样被改基准。 */
+  contain: layout style;
 }
 .ai-empty {
   margin: auto;
@@ -428,8 +434,27 @@
   border: 1px solid #3d3028;
   color: #e8d5bc;
 }
+/* 「工具返回被截断」时的底部提示行（1.0.42 性能优化，见 ChatPanel 的 TOOL_JSON_MAX_CHARS）：
+   左侧说明、右侧一键复制完整 JSON。只在真的发生截断时渲染，正常卡片完全不受影响。 */
+.ai-tool-run__more {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
+}
+.ai-tool-run__more-hint { font-size: 11px; color: var(--mc-ink-soft); }
 
-.ai-composer { border-top: 1px solid var(--mc-line); padding: 12px 16px 16px; background: var(--mc-surface); }
+.ai-composer {
+  border-top: 1px solid var(--mc-line);
+  padding: 12px 16px 16px;
+  background: var(--mc-surface);
+  /* 布局隔离（1.0.42 二轮性能优化）：输入框的行为改动不再把整篇文档标脏，
+     打字引发的重排被限制在这块输入区里。
+     安全性：+ 按钮与提示词面板虽然都是 position: absolute，但它们的包含块
+     .ai-composer-input-wrap 就在本容器内部（position: relative），加隔离不会挪位。 */
+  contain: layout style;
+}
 .ai-composer textarea {
   width: 100%;
   min-height: 72px;

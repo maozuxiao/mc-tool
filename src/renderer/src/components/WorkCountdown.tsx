@@ -62,11 +62,23 @@ export function WorkCountdown() {
 
   useEffect(() => {
     let alive = true
-    void syncHolidayPlans().then(() => {
-      if (alive) setPlanVer(v => v + 1)
-    })
+    const run = () => {
+      void syncHolidayPlans().then(() => {
+        if (alive) setPlanVer(v => v + 1)
+      })
+    }
+    // 1.0.42 启动优化：节假日同步要走 IPC + 联网，原先在挂载时立即发起，等于和首屏渲染
+    // 抢主线程。这里推到首帧渲染完成之后的空闲时段（不支持 requestIdleCallback 时退化为
+    // 250ms 延时）；内置兜底表在首帧就已给出正确判断，所以推迟不影响显示。
+    const idle = (window as any).requestIdleCallback as
+      | ((cb: () => void, opts?: { timeout: number }) => number)
+      | undefined
+    const handle = idle ? idle(run, { timeout: 2000 }) : window.setTimeout(run, 250)
     return () => {
       alive = false
+      const cancelIdle = (window as any).cancelIdleCallback as ((h: number) => void) | undefined
+      if (idle && cancelIdle) cancelIdle(handle)
+      else window.clearTimeout(handle)
     }
   }, [])
 

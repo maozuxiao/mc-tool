@@ -177,6 +177,8 @@ export const I18N: Record<string, Record<string, string | string[]>> = {
     aiTimeout: '请求超时（60 秒），已自动停止，请重试或切换模型',
     aiCopy: '复制',
     aiCopied: '已复制',
+    aiCopyFull: '复制完整内容',
+    aiJsonTruncated: '内容过长，这里只显示开头部分（完整 {n} 字符）',
     aiCollapseSettings: '收起配置',
     aiMdEditor: 'Markdown 编辑器',
     aiMdEditorTip: '打开在线 Markdown 编辑器；复制的消息内容可以粘贴进去渲染后查阅',
@@ -464,6 +466,8 @@ export const I18N: Record<string, Record<string, string | string[]>> = {
     aiTimeout: 'Request timed out (60s) and was stopped. Please retry or switch model',
     aiCopy: 'Copy',
     aiCopied: 'Copied',
+    aiCopyFull: 'Copy full content',
+    aiJsonTruncated: 'Content too long — showing the beginning only ({n} chars total)',
     aiCollapseSettings: 'Hide settings',
     aiMdEditor: 'Markdown editor',
     aiMdEditorTip: 'Open the online Markdown editor; paste the copied message there to render and review',
@@ -612,6 +616,11 @@ const LIFECYCLE_EN: Record<string, string> = {
   量产: 'Mass Production',
   '批量-推荐': 'Recommended',
   研发样品: 'R&D Sample',
+  // 1.0.42 补收录：OA 实际会返回「试产样品」（研发→试产→量产的中间态），
+  // 我们自己的查询脚本 scripts/mc_query.js 的 statusClass 里一直有它，
+  // 但最初建这份字典时按 MaterialTable 的配色表抄，漏掉了这一项 ——
+  // 于是切英文后下拉与表格里唯独它还是中文（未命中的取值按约定原样返回）。
+  试产样品: 'Trial Sample',
   未承样: 'Sample Pending',
   冻结: 'Frozen',
   预释放: 'Pre-release',
@@ -625,12 +634,22 @@ const LIFECYCLE_EN: Record<string, string> = {
   淘汰: 'Obsolete'
 }
 
+/**
+ * 查取值字典：先按原值命中，未命中再按「去掉 `[xxx]` 分类前缀」的值命中。
+ *
+ * MC 的数据里确实存在带前缀的写法（本地 IMX307 明细里就是 `[产品]量产` / `[产品]试产样品`），
+ * 而字典是按不带前缀的枚举维护的。多这一层归一化，接口哪天换个前缀写法也不会又漏翻译。
+ */
+function lookupValue(map: Record<string, string>, value: string): string | undefined {
+  return map[value] ?? map[value.replace(/^\[[^\]]*\]/, '')]
+}
+
 /** 物料类型取值（ITEM_TYPE）：采购 / 制造 */
 export function translateItemType(lang: Lang, value: string): string {
-  return lang === 'en' ? (ITEM_TYPE_EN[value] ?? value) : value
+  return lang === 'en' ? (lookupValue(ITEM_TYPE_EN, value) ?? value) : value
 }
 
 /** 生命周期取值（INV_STATUS_NAME） */
 export function translateLifecycle(lang: Lang, value: string): string {
-  return lang === 'en' ? (LIFECYCLE_EN[value] ?? value) : value
+  return lang === 'en' ? (lookupValue(LIFECYCLE_EN, value) ?? value) : value
 }

@@ -7,19 +7,29 @@ import type { HolidayPlan } from '@shared/types'
 // 确保按钮与标题跟随界面语言，无需每个调用点手动传 lang。
 let currentLang: 'zh' | 'en' = 'zh'
 
+/**
+ * 订阅主进程事件并返回「取消订阅」函数。
+ *
+ * 1.0.42 性能优化：原先这些 on* 直接 `return ipcRenderer.on(...)`，返回的是 IpcRenderer
+ * 对象（不可调用）—— 渲染层既无法清理监听，也不能把它当 cleanup 用；React StrictMode 下
+ * effect 会「挂载→卸载→再挂载」，没有 cleanup 就会注册两份监听，同一条事件被处理两次
+ * （登录态、更新进度都会重复触发）。统一收敛成返回 disposer。
+ */
+function subscribe(channel: string, cb: (...args: any[]) => void): () => void {
+  const listener = (_e: unknown, ...args: any[]) => cb(...args)
+  ipcRenderer.on(channel, listener)
+  return () => { ipcRenderer.removeListener(channel, listener) }
+}
+
 const mcApi = {
   openOALogin: () => ipcRenderer.invoke(IPC.OA_NAVIGATE),
   reloadLogin: () => ipcRenderer.invoke(IPC.OA_RELOAD),
   getLoginUrl: (): Promise<string> => ipcRenderer.invoke(IPC.OA_GET_LOGIN_URL),
   clearLogin: () => ipcRenderer.invoke(IPC.COOKIE_CLEAR),
-  onLoginChecked: (cb: (s: { loggedIn: boolean }) => void) =>
-    ipcRenderer.on(IPC.OA_CHECK_LOGGED, (_e, s) => cb(s)),
-  onLoginReady: (cb: (s: { loggedIn: boolean }) => void) =>
-    ipcRenderer.on(IPC.OA_LOGIN_READY, (_e, s) => cb(s)),
-  onLoginState: (cb: (s: { state: string }) => void) =>
-    ipcRenderer.on(IPC.OA_LOGIN_STATE, (_e, s) => cb(s)),
-  onLoginLanding: (cb: () => void) =>
-    ipcRenderer.on(IPC.OA_LOGIN_LANDING, () => cb()),
+  onLoginChecked: (cb: (s: { loggedIn: boolean }) => void) => subscribe(IPC.OA_CHECK_LOGGED, cb),
+  onLoginReady: (cb: (s: { loggedIn: boolean }) => void) => subscribe(IPC.OA_LOGIN_READY, cb),
+  onLoginState: (cb: (s: { state: string }) => void) => subscribe(IPC.OA_LOGIN_STATE, cb),
+  onLoginLanding: (cb: () => void) => subscribe(IPC.OA_LOGIN_LANDING, cb),
 
   fetchOA: (url: string): Promise<any> => ipcRenderer.invoke(IPC.OA_FETCH, url),
   downloadFile: (payload: { url: string; filename?: string }): Promise<any> =>
@@ -33,15 +43,15 @@ const mcApi = {
 
   checkForUpdates: () => ipcRenderer.invoke(IPC.CHECK_UPDATE),
   startDownload: () => ipcRenderer.invoke(IPC.START_DOWNLOAD),
-  onUpdateAvailable: (cb: (p: any) => void) => ipcRenderer.on('update-available', (_e, p) => cb(p)),
-  onUpdateDownloaded: (cb: (p: any) => void) => ipcRenderer.on('update-downloaded', (_e, p) => cb(p)),
+  onUpdateAvailable: (cb: (p: any) => void) => subscribe('update-available', cb),
+  onUpdateDownloaded: (cb: (p: any) => void) => subscribe('update-downloaded', cb),
   onUpdateProgress: (cb: (p: { percent: number; transferred: number; total: number }) => void) =>
-    ipcRenderer.on('update-progress', (_e, p) => cb(p)),
-  onUpdateNotAvailable: (cb: (p: any) => void) => ipcRenderer.on('update-not-available', (_e, p) => cb(p)),
-  onUpdateError: (cb: (p: any) => void) => ipcRenderer.on('update-error', (_e, p) => cb(p)),
+    subscribe('update-progress', cb),
+  onUpdateNotAvailable: (cb: (p: any) => void) => subscribe('update-not-available', cb),
+  onUpdateError: (cb: (p: any) => void) => subscribe('update-error', cb),
   installUpdate: () => ipcRenderer.invoke(IPC.INSTALL_UPDATE),
   // 托盘右键菜单「检查更新」：通知渲染层复用已有的 checkUpdate() 流程（含完整 UI 反馈）
-  onTrayCheckUpdate: (cb: () => void) => ipcRenderer.on('tray:check-update', () => cb()),
+  onTrayCheckUpdate: (cb: () => void) => subscribe('tray:check-update', cb),
 
   saveCsv: (content: string, defaultName: string) =>
     ipcRenderer.invoke('dialog:saveCsv', content, defaultName),
@@ -68,8 +78,7 @@ const mcApi = {
   setSetting: (key: 'minimizeToTray' | 'closeToTray' | 'autoLaunch', v: boolean): Promise<{ ok: boolean }> =>
     ipcRenderer.invoke('app:setSetting', key, v),
   // 托盘右键菜单「物料查询 / AI 助手」→ 渲染层切换视图
-  onTraySwitchView: (cb: (v: 'query' | 'ai') => void) =>
-    ipcRenderer.on('tray:switch-view', (_e, v) => cb(v)),
+  onTraySwitchView: (cb: (v: 'query' | 'ai') => void) => subscribe('tray:switch-view', cb),
 
   // 中国法定节假日安排：主进程联网拉取 + 落盘缓存（见 src/main/holidaySync.ts）。
   // 拿不到时返回 null，渲染层回退 @shared/holidays 的内置兜底表。
