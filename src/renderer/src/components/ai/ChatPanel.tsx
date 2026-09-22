@@ -1627,6 +1627,28 @@ function MarkdownLink({ href, children }: { href?: string; children?: React.Reac
   const t = useStore(s => s.t)
   const display = typeof children === 'string' ? children : ''
   const [downloading, setDownloading] = useState(false)
+  // 流式下载进度（主进程边下边写时按块推过来）：链接文案显示「下载中 42%」，
+  // 让「选完保存位置后文件慢慢长大」这件事在界面上看得见
+  const [progress, setProgress] = useState<{ received: number; total: number } | null>(null)
+  const dlIdRef = useRef('')
+
+  useEffect(() => {
+    const off = window.mcApi.onDownloadProgress?.(p => {
+      if (!p || p.id !== dlIdRef.current) return
+      if (p.error || p.done) { setProgress(null); return }
+      setProgress({ received: Number(p.received || 0), total: Number(p.total || 0) })
+    })
+    return () => { off?.() }
+  }, [])
+
+  /** 每次点击生成一个下载 id：进度事件靠它认领自己那一条（同一页可能同时有多个下载链接） */
+  const beginDownload = (): string => {
+    const id = `dl-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
+    dlIdRef.current = id
+    setProgress(null)
+    return id
+  }
+
   const handleClick = async (e: React.MouseEvent<HTMLAnchorElement>) => {
     e.preventDefault()
     e.stopPropagation()
@@ -1645,10 +1667,11 @@ function MarkdownLink({ href, children }: { href?: string; children?: React.Reac
         void window.mcApi.openOaWindow?.(url)
         return
       }
-      // 下载 = 弹「另存为」：主进程先按 fileGuid 换出原始文件直链，再落盘到用户选的路径
+      // 下载 = 弹「另存为」：主进程先按 fileGuid 换出原始文件直链，再**流式**落盘到用户选的路径
+      const id = beginDownload()
       setDownloading(true)
       try {
-        const res: any = await window.mcApi.wjxtDownload({ fileGuid: wjxt.fileGuid, name: wjxt.name })
+        const res: any = await window.mcApi.wjxtDownload({ fileGuid: wjxt.fileGuid, name: wjxt.name, id })
         if (!res?.ok && !res?.canceled) {
           void window.mcApi.showMessage({
             type: 'error',
@@ -1677,9 +1700,10 @@ function MarkdownLink({ href, children }: { href?: string; children?: React.Reac
       try { filename = decodeURIComponent(filename) } catch { /* 保持原样 */ }
       // 下载/保存都不弹提示框：链接文案本身会变成「下载中…」，
       // 只有真正出错（登录失效、网络失败）才提示，避免打扰用户。
+      const id = beginDownload()
       setDownloading(true)
       try {
-        const res: any = await window.mcApi.downloadFile({ url, filename })
+        const res: any = await window.mcApi.downloadFile({ url, filename, id })
         if (!res?.ok && !res?.canceled) {
           void window.mcApi.showMessage({
             type: 'error',
@@ -1716,7 +1740,11 @@ function MarkdownLink({ href, children }: { href?: string; children?: React.Reac
       onClick={handleClick}
       aria-disabled={downloading}
     >
-      {downloading ? t('downloading') : children}
+      {downloading
+        ? (progress?.total
+          ? t('downloadingPercent', { p: Math.min(99, Math.round((progress.received / progress.total) * 100)) })
+          : t('downloading'))
+        : children}
     </a>
   )
 }

@@ -1,7 +1,8 @@
 import { session } from 'electron'
 import http from 'http'
 import https from 'https'
-import { existsSync, mkdirSync, writeFileSync } from 'fs'
+import { Readable } from 'stream'
+import { closeSync, createWriteStream, existsSync, mkdirSync, openSync, readSync, renameSync, unlinkSync } from 'fs'
 import { basename, join, resolve, sep } from 'path'
 import { OA_ORIGIN } from '@shared/constants'
 import type { AIExtraRoot } from '@shared/ai-types'
@@ -9,10 +10,12 @@ import type { AIExtraRoot } from '@shared/ai-types'
 /** 持久化 partition 名（与登录会话共用，Cookie 跨启动保留）。单一来源，index.ts 从这里取。 */
 export const PARTITION = 'persist:mc-query'
 
-// 单个文件下载的体积上限（200MB），防止异常/超大响应撑爆内存
+// 单个文件下载的体积上限（200MB）：流式写入下这只是个保护上限，不再占用同等内存
 const MAX_BYTES = 200 * 1024 * 1024
-// 默认下载超时
-const TIMEOUT_MS = 60000
+// 「拿到响应头」的超时（连不上/一直不给头才失败）
+const OPEN_TIMEOUT_MS = 30000
+// 空闲超时：**只在一段时间没有任何新数据**时判失败 —— 大文件慢慢下不会被打断
+const IDLE_TIMEOUT_MS = 60000
 // 重定向最多跟随 5 跳，避免重定向环
 const MAX_REDIRECTS = 5
 
@@ -44,124 +47,268 @@ function isReauthLocation(loc?: string): boolean {
     /(authCenter\/authenticate|state=IAM_OA_SSO|authnEngine|idp\/)/i.test(loc)
 }
 
-interface OnceResult {
-  status: number
-  headers: http.IncomingHttpHeaders
-  body: Buffer
-}
-
-/** 发一次 GET，返回状态码 / 响应头 / 完整 body；超时与体积超限均中断 */
-function requestOnce(url: string, headers: Record<string, string>, timeoutMs: number): Promise<OnceResult> {
-  return new Promise((resolve, reject) => {
-    let u: URL
-    try { u = new URL(url) } catch { reject(new Error('BAD_URL')); return }
-    const useHttps = u.protocol === 'https:'
-    const lib = useHttps ? https : http
-    const req = lib.request({
-      hostname: u.hostname,
-      port: u.port || (useHttps ? 443 : 80),
-      path: u.pathname + u.search,
-      method: 'GET',
-      headers
-    }, (res) => {
-      const chunks: Buffer[] = []
-      let total = 0
-      res.on('data', (c: Buffer) => {
-        total += c.length
-        if (total > MAX_BYTES) {
-          req.destroy()
-          reject(new Error('TOO_LARGE'))
-          return
-        }
-        chunks.push(c)
-      })
-      res.on('end', () => resolve({
-        status: res.statusCode || 0,
-        headers: res.headers,
-        body: Buffer.concat(chunks)
-      }))
-      res.on('error', reject)
-    })
-    req.on('error', reject)
-    req.setTimeout(timeoutMs, () => { req.destroy(); reject(new Error('download timeout')) })
-    req.end()
-  })
-}
-
 /**
- * 下载一个 URL 到内存 Buffer。
- * - 传 cookie 时带 Cookie 头（OA 下载），OA 域自动补 Referer；
- * - 自动跟随最多 5 跳重定向；若跳到 IAM 认证则抛 NEED_RELOGIN；
- * - 4xx/5xx、超时、超体积都会抛错，由调用方转成结构化结果。
- * 手动点击下载（IPC.OA_FILE_DOWNLOAD）与 AI 的 file_download 共用此函数。
- */
-export async function downloadBuffer(url: string, cookie?: string, timeoutMs: number = TIMEOUT_MS, referer?: string): Promise<Buffer> {
-  let target = String(url || '').trim()
-  if (!target) throw new Error('BAD_URL')
-  for (let hop = 0; ; hop++) {
-    const headers: Record<string, string> = {
-      'User-Agent': UA,
-      'Accept': '*/*'
-    }
-    if (cookie) headers['Cookie'] = cookie
-    // OA 域固定补 OA_ORIGIN；其它站点（如鸿翼文件系统）可显式传 referer
-    if (isOaUrl(target)) headers['Referer'] = OA_ORIGIN
-    else if (referer) headers['Referer'] = referer
-
-    const res = await requestOnce(target, headers, timeoutMs)
-    const loc = res.headers?.location ? String(res.headers.location) : ''
-    if (res.status >= 300 && res.status < 400 && loc) {
-      if (isReauthLocation(loc)) {
-        const e: any = new Error('NEED_RELOGIN')
-        e.code = 'NEED_RELOGIN'
-        throw e
-      }
-      if (hop >= MAX_REDIRECTS) throw new Error('TOO_MANY_REDIRECTS')
-      try { target = new URL(loc, target).toString() } catch { throw new Error('BAD_REDIRECT') }
-      continue
-    }
-    if (res.status >= 400) throw new Error('HTTP ' + res.status)
-    return res.body
-  }
-}
-
-/** 下载 OA 域文件：自动带上当前 OA 登录态 Cookie，会话失效抛 NEED_RELOGIN */
-export async function downloadOaBuffer(url: string, timeoutMs: number = 30000): Promise<Buffer> {
-  const cookie = await getOaCookieString()
-  return downloadBuffer(url, cookie, timeoutMs)
-}
-
-/**
- * 用应用分区会话下载（1.0.43，鸿翼文件系统这类内网 https 站点用）。
+ * 下载到指定路径（**流式**，1.0.43）。所有「下载到本机」的入口都走这里。
  *
- * 与 downloadBuffer 的区别：
- * - 走 Chromium 网络栈：用系统证书库（内网自签/内部 CA 时 node https 会验签失败）、走系统代理、自动跟随重定向；
- * - 自动带上分区里该域名的登录 cookie（调用方只需给 Referer）。
+ * 为什么改流式：此前是「先把整份内容读进内存 Buffer，再弹保存框 / 写盘」——
+ * 点了下载要等整份下完（20MB 的 PDF 也得等好几秒，大文件更久），保存框也迟迟不出现，
+ * 内存占用还跟文件大小成正比。现在跟浏览器一致：**先选保存位置，然后边下边写**，
+ * 数据分块落盘（先写 `<file>.part`，成功再改名，失败删掉半截文件），内存只占一个块。
+ *
+ * 超时策略同样是浏览器式的：
+ * - 「拿到响应头」有 30s 上限（连不上 / 一直不给头才失败）；
+ * - 正文阶段用**空闲超时**（默认 60s 没有新数据才失败）—— 大文件慢慢下不会被打断。
  */
-export async function downloadBufferViaSession(url: string, referer?: string, timeoutMs: number = TIMEOUT_MS): Promise<Buffer> {
-  const target = String(url || '').trim()
-  if (!target) throw new Error('BAD_URL')
-  const headers: Record<string, string> = { 'User-Agent': UA, 'Accept': '*/*' }
-  if (referer) headers['Referer'] = referer
+export interface DownloadToPathInput {
+  url: string
+  /** 最终落盘路径；下载期间写 `${filePath}.part` */
+  filePath: string
+  /** 走 Chromium 分区会话（内网 https / 鸿翼文件系统等）；默认 node 直连 */
+  useSession?: boolean
+  /** node 直连的 Cookie（不传时：OA 域自动取分区登录态） */
+  cookie?: string
+  /** 显式 Referer（鸿翼文件系统要求 preview.html；OA 域自动用 OA_ORIGIN） */
+  referer?: string
+  /** 空闲超时（毫秒） */
+  idleTimeoutMs?: number
+  /** 体积上限（毫秒之外的另一层保护） */
+  maxBytes?: number
+  /** 进度回调：已写字节数 / 总字节数（未知时为 0） */
+  onProgress?: (received: number, total: number) => void
+  /** 外部中止（用户取消） */
+  signal?: AbortSignal
+}
+
+export interface DownloadToPathResult {
+  ok: true
+  size: number
+  finalUrl: string
+}
+
+/** 已建立、正文尚未读取的响应（交给 pipeToFile 流式消费） */
+interface OpenStream {
+  stream: NodeJS.ReadableStream | null
+  total: number
+  finalUrl: string
+}
+
+/** 会话通道的请求头 */
+function sessionHeaders(input: DownloadToPathInput): Record<string, string> {
+  const h: Record<string, string> = { 'User-Agent': UA, 'Accept': '*/*' }
+  if (input.referer) h['Referer'] = input.referer
+  return h
+}
+
+/** node 直连的请求头：OA 域自动补登录态 Cookie 与 Referer */
+async function nodeHeaders(input: DownloadToPathInput): Promise<Record<string, string>> {
+  const h: Record<string, string> = { 'User-Agent': UA, 'Accept': '*/*' }
+  if (isOaUrl(input.url)) {
+    h['Referer'] = OA_ORIGIN
+    if (!input.cookie) {
+      const ck = await getOaCookieString()
+      if (ck) h['Cookie'] = ck
+    }
+  } else if (input.referer) {
+    h['Referer'] = input.referer
+  }
+  if (input.cookie) h['Cookie'] = input.cookie
+  return h
+}
+
+/**
+ * 走 Chromium 网络栈（系统证书库 / 代理 / 分区登录 cookie）。
+ * 关键点：`AbortSignal` 只在「响应头还没到」这段挂着，拿到头立刻撤掉 ——
+ * 否则整段超时会把慢慢下的大文件中途掐断（这正是旧实现的问题之一）。
+ */
+async function openViaSession(url: string, headers: Record<string, string>): Promise<OpenStream> {
   const sess = session.fromPartition(PARTITION)
-  const res = await sess.fetch(target, { headers, signal: AbortSignal.timeout(timeoutMs) } as any)
+  const ac = new AbortController()
+  const openTimer = setTimeout(() => ac.abort(new Error('download timeout')), OPEN_TIMEOUT_MS)
+  let res: any
+  try {
+    res = await sess.fetch(url, { headers, signal: ac.signal } as any)
+  } finally {
+    clearTimeout(openTimer)
+  }
   if (res.status === 401 || res.status === 403) throw new Error('NEED_RELOGIN')
   // 落到认证页 / 登录页 = 会话失效：此时响应码往往仍是 200，只能看最终落点。
   // OA/IAM 是 iam.streamax.com，鸿翼文件系统（edoc2）未登录时 302 到 /sso/auth/goToLoginPage。
   if (/iam\.streamax\.com|goToLoginPage|\/sso\//i.test(String(res.url || ''))) throw new Error('NEED_RELOGIN')
   if (res.status >= 400) throw new Error('HTTP ' + res.status)
-  const len = Number(res.headers.get('content-length') || 0)
-  if (len && len > MAX_BYTES) throw new Error('TOO_LARGE')
-  const buf = Buffer.from(await res.arrayBuffer())
-  // 期望的是文件却收到 HTML 页面（且不是 .html 文件本身）：说明拿回来的是登录页，不是文件
+  const total = Number(res.headers.get('content-length') || 0)
+  if (total && total > MAX_BYTES) throw new Error('TOO_LARGE')
+  // 期望的是文件却收到 HTML 页面（且不是 .html 文件本身）：说明拿回来的是登录页，不是文件。
+  // 这一步在任何字节落盘之前完成，所以不会留下垃圾文件。
   const ct = String(res.headers.get('content-type') || '')
-  if (/text\/html/i.test(ct) && !/\.html?($|\?)/i.test(target)) throw new Error('NEED_RELOGIN')
-  if (buf.length > MAX_BYTES) throw new Error('TOO_LARGE')
-  return buf
+  if (/text\/html/i.test(ct) && !/\.html?($|\?)/i.test(url)) throw new Error('NEED_RELOGIN')
+  if (!res.body) throw new Error('EMPTY_BODY')
+  return { stream: Readable.fromWeb(res.body as any), total, finalUrl: String(res.url || url) }
+}
+
+/** node 直连（http/https）：自跟随重定向、识别 IAM 重新认证；正文保持流式 */
+async function openViaNode(url: string, headers: Record<string, string>): Promise<OpenStream> {
+  let target = url
+  for (let hop = 0; ; hop++) {
+    let u: URL
+    try { u = new URL(target) } catch { throw new Error('BAD_URL') }
+    const useHttps = u.protocol === 'https:'
+    const lib = useHttps ? https : http
+    const opened = await new Promise<OpenStream>((resolve, reject) => {
+      const req = lib.request({
+        hostname: u.hostname,
+        port: u.port || (useHttps ? 443 : 80),
+        path: u.pathname + u.search,
+        method: 'GET',
+        headers
+      }, (res) => {
+        const status = res.statusCode || 0
+        const loc = res.headers.location ? String(res.headers.location) : ''
+        if (status >= 300 && status < 400 && loc) {
+          res.resume() // 丢掉重定向响应体，避免连接挂住
+          if (isReauthLocation(loc)) {
+            const e: any = new Error('NEED_RELOGIN')
+            e.code = 'NEED_RELOGIN'
+            reject(e)
+            return
+          }
+          resolve({ stream: null, total: 0, finalUrl: new URL(loc, target).toString() })
+          return
+        }
+        if (status >= 400) { res.resume(); reject(new Error('HTTP ' + status)); return }
+        const total = Number(res.headers['content-length'] || 0)
+        if (total && total > MAX_BYTES) { res.destroy(); reject(new Error('TOO_LARGE')); return }
+        // 期望的是文件却收到 HTML 页面（且不是 .html 文件本身）：说明拿回来的是登录页，不是文件。
+        // 与会话通道同一判据 —— node 通道此前漏了这一步，会把登录页当规格文件存下来
+        //（探针实测：服务端回 text/html 时旧实现照样落盘）。
+        const ct = String(res.headers['content-type'] || '')
+        if (/text\/html/i.test(ct) && !/\.html?($|\?)/i.test(target)) {
+          res.resume()
+          const e: any = new Error('NEED_RELOGIN')
+          e.code = 'NEED_RELOGIN'
+          reject(e)
+          return
+        }
+        resolve({ stream: res, total, finalUrl: target })
+      })
+      req.setTimeout(OPEN_TIMEOUT_MS, () => req.destroy(new Error('download timeout')))
+      req.on('error', reject)
+      req.end()
+    })
+    if (opened.stream) return opened
+    if (hop >= MAX_REDIRECTS) throw new Error('TOO_MANY_REDIRECTS')
+    target = opened.finalUrl
+  }
+}
+
+/** 把响应流写进文件：空闲超时 + 体积上限 + 可中止，返回写入字节数 */
+function pipeToFile(
+  stream: NodeJS.ReadableStream,
+  partPath: string,
+  opts: { maxBytes: number; idleTimeoutMs: number; total: number; onProgress?: (r: number, t: number) => void; signal?: AbortSignal }
+): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const ws = createWriteStream(partPath)
+    let received = 0
+    let settled = false
+    let idle: ReturnType<typeof setTimeout> | null = null
+    const cleanup = () => {
+      if (idle) { clearTimeout(idle); idle = null }
+      opts.signal?.removeEventListener('abort', onAbort)
+    }
+    const finish = (err?: Error) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      if (err) {
+        // 中断时把两端都关掉：源流 destroy 会连带取消底层请求
+        try { (stream as any).destroy?.() } catch { /* ignore */ }
+        try { ws.destroy() } catch { /* ignore */ }
+        reject(err)
+        return
+      }
+      // end 的回调 = 数据已 flush、fd 已关闭，此时改名才安全
+      ws.end(() => resolve(received))
+    }
+    const onAbort = () => finish(new Error('DOWNLOAD_CANCELED'))
+    const armIdle = () => {
+      if (idle) clearTimeout(idle)
+      idle = setTimeout(() => finish(new Error('download timeout')), opts.idleTimeoutMs)
+    }
+
+    if (opts.signal?.aborted) { finish(new Error('DOWNLOAD_CANCELED')); return }
+    opts.signal?.addEventListener('abort', onAbort, { once: true })
+    armIdle()
+
+    stream.on('data', (chunk: Buffer) => {
+      if (settled) return
+      received += chunk.length
+      if (received > opts.maxBytes) { finish(new Error('TOO_LARGE')); return }
+      // 背压：写不动就暂停源流，排空后继续（内存里始终只有一个块）
+      if (!ws.write(chunk)) { (stream as any).pause?.(); ws.once('drain', () => (stream as any).resume?.()) }
+      armIdle()
+      opts.onProgress?.(received, opts.total)
+    })
+    stream.on('end', () => finish())
+    stream.on('error', (e: Error) => finish(e))
+    ws.on('error', (e: Error) => finish(e))
+  })
+}
+
+/** 读取本地文件头几个字节（下载后做文件头校验用） */
+function readHeadSync(p: string, n: number): Buffer {
+  try {
+    const fd = openSync(p, 'r')
+    try {
+      const buf = Buffer.alloc(n)
+      const read = readSync(fd, buf, 0, n, 0)
+      return buf.subarray(0, read)
+    } finally {
+      closeSync(fd)
+    }
+  } catch {
+    return Buffer.alloc(0)
+  }
+}
+
+/** 流式下载一个 URL 到指定路径；失败自动清掉 `.part` 半截文件 */
+export async function downloadToPath(input: DownloadToPathInput): Promise<DownloadToPathResult> {
+  const url = String(input?.url || '').trim()
+  if (!url) throw new Error('BAD_URL')
+  const filePath = String(input?.filePath || '').trim()
+  if (!filePath) throw new Error('BAD_PATH')
+  const idleTimeoutMs = input.idleTimeoutMs ?? IDLE_TIMEOUT_MS
+  const maxBytes = input.maxBytes ?? MAX_BYTES
+  const part = filePath + '.part'
+  try { if (existsSync(part)) unlinkSync(part) } catch { /* 旧半截文件清不掉也不影响后续覆盖写 */ }
+
+  const opened = input.useSession
+    ? await openViaSession(url, sessionHeaders(input))
+    : await openViaNode(url, await nodeHeaders(input))
+
+  let written: number
+  try {
+    written = await pipeToFile(opened.stream!, part, {
+      maxBytes,
+      idleTimeoutMs,
+      total: opened.total,
+      onProgress: input.onProgress,
+      signal: input.signal
+    })
+  } catch (e) {
+    try { if (existsSync(part)) unlinkSync(part) } catch { /* ignore */ }
+    throw e
+  }
+  try {
+    renameSync(part, filePath)
+  } catch (e: any) {
+    try { if (existsSync(part)) unlinkSync(part) } catch { /* ignore */ }
+    throw new Error('WRITE_FAILED: ' + (e?.message || e))
+  }
+  return { ok: true, size: written, finalUrl: opened.finalUrl }
 }
 
 /** 从 URL 推断文件名：优先 fileName= 参数，其次路径末段，兜底 download */
-function deriveName(url: string): string {
+export function deriveName(url: string): string {
   const m = /fileName=([^&]+)/i.exec(url || '')
   if (m) {
     try { return decodeURIComponent(m[1]) } catch { return m[1] }
@@ -176,7 +323,7 @@ function deriveName(url: string): string {
 }
 
 /** 清洗文件名：去掉路径分隔符与 Windows 非法字符、去首尾点、限长 */
-function safeFileName(name: string): string {
+export function safeFileName(name: string): string {
   let s = String(name || '').trim()
   s = s.replace(/[\\/:*?"<>|]/g, '_')
   s = s.replace(/^\.+/, '').trim()
@@ -209,7 +356,7 @@ export interface DownloadToDirInput {
   roots?: AIExtraRoot[]
   /** 需要显式 Referer 的站点（如鸿翼文件系统要求 preview.html） */
   referer?: string
-  /** 走 Chromium 会话下载（内网 https + 分区登录态），见 downloadBufferViaSession */
+  /** 走 Chromium 会话下载（内网 https + 分区登录态），见 downloadToPath 的 useSession */
   useSession?: boolean
   /** node 直连时显式指定 Cookie（不传则按 OA 域自动取分区 cookie） */
   cookie?: string
@@ -253,8 +400,9 @@ export function detectFileKind(buf: Buffer): string {
 }
 
 /**
- * 把 URL 下载到指定目录（AI 的 file_download 走这里）。
- * 流程：目录归属授权根并做越界校验 → 目录不存在则自动创建 → 下载 → 文件名清洗 + 同名自动重命名 → 写盘。
+ * 把 URL 下载到指定目录（AI 的 file_download / wjxt_download 走这里）。
+ * 流程：目录归属授权根并做越界校验 → 目录不存在则自动创建 → 文件名清洗 + 同名自动重命名
+ * → **流式下载**（边下边写 `xxx.part`，成功后改名，失败自动清理）→ 文件头校验。
  */
 export async function downloadToDir(input: DownloadToDirInput): Promise<DownloadToDirResult> {
   const url = String(input?.url || '').trim()
@@ -315,12 +463,22 @@ export async function downloadToDir(input: DownloadToDirInput): Promise<Download
     return { ok: false, error: 'MKDIR_FAILED', message: `目录创建失败：${e?.message || e}` }
   }
 
-  // 3) 下载（OA 域自动带登录态；鸿翼等内网站点走会话下载 + 显式 Referer）
-  let buf: Buffer
+  // 3) 文件名清洗 + 同名自动重命名 —— **先定好落盘路径**，才能边下边写
+  const base = safeFileName(input?.name || deriveName(url))
+  const finalPath = uniquePath(absDir, base)
+
+  // 4) 流式下载（OA 域自动带登录态；鸿翼等内网站点走会话通道 + 显式 Referer）：
+  //    直接往 `xxx.part` 写，走完再改名；失败 / 超限 / 登录失效都会自动清掉半截文件。
+  let size = 0
   try {
-    if (input.useSession) buf = await downloadBufferViaSession(url, input.referer)
-    else if (input.cookie) buf = await downloadBuffer(url, input.cookie, undefined, input.referer)
-    else buf = isOaUrl(url) ? await downloadOaBuffer(url) : await downloadBuffer(url)
+    const r = await downloadToPath({
+      url,
+      filePath: finalPath,
+      useSession: input.useSession,
+      cookie: input.cookie,
+      referer: input.referer
+    })
+    size = r.size
   } catch (e: any) {
     const msg = e?.message || String(e)
     if (msg === 'NEED_RELOGIN' || e?.code === 'NEED_RELOGIN') {
@@ -329,14 +487,17 @@ export async function downloadToDir(input: DownloadToDirInput): Promise<Download
     if (msg === 'TOO_LARGE') {
       return { ok: false, error: 'TOO_LARGE', message: '文件超过 200MB 上限，已中止下载' }
     }
+    if (msg === 'DOWNLOAD_CANCELED') return { ok: false, error: 'CANCELED', message: '下载已取消' }
     return { ok: false, error: 'DOWNLOAD_FAILED', message: `下载失败：${msg}` }
   }
 
-  // 3.5) 文件头校验（参考原技能包 download.ps1）：拿回 HTML 说明是登录页而不是文件
+  // 4.5) 文件头校验（参考原技能包 download.ps1）：拿回 HTML 说明是登录页而不是文件。
+  //      流式落盘后从文件里读前 8 个字节即可，不再为了校验把整份留在内存里。
   let kind: string | undefined
   if (input.validateFileHeader) {
-    kind = detectFileKind(buf)
+    kind = detectFileKind(readHeadSync(finalPath, 8))
     if (kind === 'HTML' || kind === 'EMPTY') {
+      try { unlinkSync(finalPath) } catch { /* 清不掉也只是留个坏文件，下面会明确报错 */ }
       return {
         ok: false,
         kind,
@@ -348,24 +509,15 @@ export async function downloadToDir(input: DownloadToDirInput): Promise<Download
     }
   }
 
-  // 4) 文件名清洗 + 同名自动重命名 + 写盘
-  const base = safeFileName(input?.name || deriveName(url))
-  const finalPath = uniquePath(absDir, base)
-  try {
-    writeFileSync(finalPath, buf)
-  } catch (e: any) {
-    return { ok: false, error: 'WRITE_FAILED', message: `写入失败：${e?.message || e}` }
-  }
-
   const name = basename(finalPath)
   const relative = rootPath ? join(basename(rootPath), String(absDir === rootPath ? name : join(absDir.slice(rootPath.length), name))) : finalPath
-  const sizeMatched = input.expectedSize ? buf.length === input.expectedSize : undefined
+  const sizeMatched = input.expectedSize ? size === input.expectedSize : undefined
   return {
     ok: true,
     savedPath: finalPath,
     relative,
     name,
-    size: buf.length,
+    size,
     ...(kind ? { kind } : {}),
     ...(sizeMatched !== undefined ? { sizeMatched } : {})
   }

@@ -201,7 +201,7 @@ export const FILE_DOWNLOAD_TOOL_DEFINITION = {
       'OA 域文件会自动复用当前 OA 登录态，未登录时返回 NEED_RELOGIN（此时提示用户先在应用内登录 OA）。' +
       'dir 不存在会自动创建；同名文件自动重命名为「名称(1).ext」「名称(2).ext」，不会覆盖已有文件。' +
       '可选 name 指定保存的文件名，省略则由链接推断（OA 规格文件取 fileName= 参数）。' +
-      '单次下载上限 200MB、超时 60 秒。若返回 PATH_OUTSIDE_ROOT 说明目录不在已授权工作区内，应引导用户用 open_folder 打开该目录后再下载。',
+      '单次下载上限 200MB；**边下边写**（先写 `xxx.part`，完成再改名，失败自动清理），只有「空闲 60 秒没有任何新数据」才判超时 —— 大文件不会像以前那样被整段超时掐断。若返回 PATH_OUTSIDE_ROOT 说明目录不在已授权工作区内，应引导用户用 open_folder 打开该目录后再下载。',
     parameters: {
       type: 'object',
       properties: {

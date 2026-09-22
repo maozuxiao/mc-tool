@@ -14,7 +14,7 @@ import { setWjxtLoginOpener, setWjxtBootstrap, setWjxtLoginCloser, wjxtResolveOr
 // 这是最可靠的方案：Electron 会为每个 persist:* partition 维护独立的
 // Cookie/Storage 目录，进程退出后依然保留，无需手动文件备份。
 // 定义收敛在 ai/fileDownload.ts（手动下载与 AI 下载共用同一份）。
-import { downloadOaBuffer, downloadBufferViaSession, PARTITION } from './ai/fileDownload'
+import { downloadToPath, deriveName, safeFileName, PARTITION } from './ai/fileDownload'
 import { getHolidayPlan } from './holidaySync'
 
 let mainWindow: BrowserWindow | null = null
@@ -2223,33 +2223,69 @@ ipcMain.handle(IPC.OA_FETCH, async (_e, url: string): Promise<any> => {
   }
 })
 
+/** 「另存为」的保存类型：按后缀给（别只留「所有文件 (*.*)」，用户看不出是什么类型） */
+function extensionFilters(fileName: string): Electron.FileFilter[] {
+  const ext = /\.([A-Za-z0-9]{1,8})$/.exec(fileName)?.[1]
+  return ext
+    ? [{ name: `${ext.toUpperCase()} 文件`, extensions: [ext] }, { name: '所有文件', extensions: ['*'] }]
+    : [{ name: '所有文件', extensions: ['*'] }]
+}
+
+/**
+ * 下载进度转发到渲染层（配合流式下载，链接上会显示「下载中 42%」）。
+ * 限流到 ~7 次/秒：大文件按块回调很密，全量转发会把 IPC 刷满。
+ */
+function makeDownloadProgress(id?: string): ((received: number, total: number) => void) | undefined {
+  if (!id) return undefined
+  let last = 0
+  return (received, total) => {
+    const now = Date.now()
+    const finished = total > 0 && received >= total
+    if (!finished && now - last < 140) return
+    last = now
+    mainWindow?.webContents.send('mc-download-progress', { id, received, total })
+  }
+}
+
+/** 下载结束/失败的一次性事件（渲染层据此收起「下载中…」状态） */
+function sendDownloadEvent(id: string | undefined, payload: Record<string, any>): void {
+  if (!id) return
+  mainWindow?.webContents.send('mc-download-progress', { id, ...payload })
+}
+
 // 在 app 内下载规格文件：复用 partition 已登录的 OA 会话 Cookie，避免跳浏览器
 // 后浏览器未登录 OA 无法下载的问题。返回 { ok, savedPath } 或 { ok:false, error }。
-ipcMain.handle(IPC.OA_FILE_DOWNLOAD, async (_e, payload: { url: string; filename?: string }): Promise<any> => {
-  const { url, filename } = payload || {}
+// 1.0.43：改成**先弹「另存为」、再流式写盘**（浏览器行为）。旧实现要先把整份读进内存，
+// 大文件时保存框迟迟不出现、内存占用还跟文件大小成正比；现在选完位置文件就开始长大。
+ipcMain.handle(IPC.OA_FILE_DOWNLOAD, async (_e, payload: { url: string; filename?: string; id?: string }): Promise<any> => {
+  const { url, filename, id } = payload || {}
   if (!url) return { ok: false, error: 'empty url' }
-  try {
-    // 复用与 AI file_download 相同的下载核心：自动带 OA 登录态、识别会话失效、跟随重定向
-    const buf: Buffer = await downloadOaBuffer(url)
+  if (!mainWindow) return { ok: false, error: 'no main window' }
+  // 默认文件名：优先链接里的 fileName=，其次调用方给的 filename，最后从 URL 末段推断
+  const fnMatch = url.match(/fileName=([^&]+)/i)
+  let defaultName = filename || ''
+  if (fnMatch) {
+    try { defaultName = decodeURIComponent(fnMatch[1]) } catch { /* 保持原样 */ }
+  }
+  if (!defaultName) defaultName = deriveName(url)
+  defaultName = safeFileName(defaultName)
 
-    // 让用户选择保存位置；默认文件名优先用链接里的 fileName=，其次 payload.filename
-    let defaultName = filename || 'specification-file'
-    const fnMatch = url.match(/fileName=([^&]+)/i)
-    if (fnMatch) {
-      try { defaultName = decodeURIComponent(fnMatch[1]) } catch { /* ignore */ }
-    }
-    if (!mainWindow) return { ok: false, error: 'no main window' }
-    const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
-      defaultPath: defaultName,
-      title: '保存规格文件'
-    })
-    if (canceled || !filePath) return { ok: true, canceled: true }
-    writeFileSync(filePath, buf)
-    queryLog(`[OA_FILE_DOWNLOAD] saved ${buf.length} bytes -> ${filePath}`)
-    return { ok: true, savedPath: filePath }
+  const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+    defaultPath: defaultName,
+    title: '保存规格文件',
+    filters: extensionFilters(defaultName)
+  })
+  if (canceled || !filePath) return { ok: true, canceled: true }
+
+  try {
+    const r = await downloadToPath({ url, filePath, onProgress: makeDownloadProgress(id) })
+    queryLog(`[OA_FILE_DOWNLOAD] saved ${r.size} bytes -> ${filePath}`)
+    sendDownloadEvent(id, { done: true, size: r.size })
+    return { ok: true, savedPath: filePath, size: r.size }
   } catch (e: any) {
     const msg = e?.message || String(e)
     queryLog(`[OA_FILE_DOWNLOAD] error: ${msg}`)
+    sendDownloadEvent(id, { error: msg })
     if (msg === 'NEED_RELOGIN') return { ok: false, error: 'NEED_RELOGIN' }
     return { ok: false, error: msg }
   }
@@ -2257,39 +2293,40 @@ ipcMain.handle(IPC.OA_FILE_DOWNLOAD, async (_e, payload: { url: string; filename
 
 // 鸿翼文件系统：按 fileGuid 弹「另存为」并下载**原始文件**（AI 回复里的「下载」链接走这里）。
 // 与「预览」的分工：预览 = openInternalUrl 在应用内窗口看站点预览页；下载 = 这里弹保存框。
-// 站点没有静态的原始文件直链，必须先用 fileGuid 换出带签名 token 的 GetOriginFile 地址
-//（见 ai/wjxtSkill.ts 的 wjxtResolveOriginUrl）。
-ipcMain.handle('mc-wjxt-download', async (_e, payload: { fileGuid?: string; name?: string }): Promise<any> => {
+// 同样是「先选位置、再边下边写」：站点没有静态的原始文件直链，落盘前才用 fileGuid 换一次
+// 带签名 token 的 GetOriginFile 地址（见 ai/wjxtSkill.ts 的 wjxtResolveOriginUrl）。
+ipcMain.handle('mc-wjxt-download', async (_e, payload: { fileGuid?: string; name?: string; id?: string }): Promise<any> => {
   const gid = String(payload?.fileGuid || '').trim()
   if (!gid) return { ok: false, error: 'empty fileGuid' }
+  if (!mainWindow) return { ok: false, error: 'no main window' }
+  const id = payload?.id
+  // 默认文件名用搜索结果里的原始文件名（含扩展名），顺手清掉非法字符
+  const name = safeFileName(String(payload?.name || '').trim() || 'download')
+
+  const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+    defaultPath: name,
+    title: '保存文件',
+    filters: extensionFilters(name)
+  })
+  if (canceled || !filePath) return { ok: true, canceled: true }
+
   try {
     const url = await wjxtResolveOriginUrl(gid)
-    // 走 Chromium 网络栈 + 分区登录态；「期望文件却收到 HTML 页面」会被判成 NEED_RELOGIN
-    const buf = await downloadBufferViaSession(url, `${WJXT_ORIGIN}/preview.html`)
-    // 保存对话框的默认名：用搜索结果里的原始文件名（含扩展名），顺手清掉非法字符
-    let name = String(payload?.name || '').trim()
-    try { name = decodeURIComponent(name) } catch { /* 保持原样 */ }
-    name = name.replace(/[\\/:*?"<>|]/g, '_').replace(/^\.+/, '').trim()
-    if (!name) name = 'download'
-    if (!mainWindow) return { ok: false, error: 'no main window' }
-    // 保存类型按后缀给：只留「所有文件 (*.*)」时，用户看到的对话框既没有类型信息、
-    // 也不方便按扩展名过滤（这正是 bug 报告截图里的样子）
-    const ext = /\.([A-Za-z0-9]{1,8})$/.exec(name)?.[1]
-    const filters = ext
-      ? [{ name: `${ext.toUpperCase()} 文件`, extensions: [ext] }, { name: '所有文件', extensions: ['*'] }]
-      : [{ name: '所有文件', extensions: ['*'] }]
-    const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
-      defaultPath: name,
-      title: '保存文件',
-      filters
+    const r = await downloadToPath({
+      url,
+      filePath,
+      // 走 Chromium 网络栈 + 分区登录态；「期望文件却收到 HTML 页面」会被判成 NEED_RELOGIN
+      useSession: true,
+      referer: `${WJXT_ORIGIN}/preview.html`,
+      onProgress: makeDownloadProgress(id)
     })
-    if (canceled || !filePath) return { ok: true, canceled: true }
-    writeFileSync(filePath, buf)
-    debugLog(`[wjxt-download] saved ${buf.length} bytes -> ${filePath}`)
-    return { ok: true, savedPath: filePath, size: buf.length }
+    debugLog(`[wjxt-download] saved ${r.size} bytes -> ${filePath}`)
+    sendDownloadEvent(id, { done: true, size: r.size })
+    return { ok: true, savedPath: filePath, size: r.size }
   } catch (e: any) {
     const msg = e?.message || String(e)
     debugLog('[wjxt-download] error: ' + msg)
+    sendDownloadEvent(id, { error: msg })
     if (msg === 'NEED_RELOGIN' || msg === 'WJXT_NO_SESSION') return { ok: false, error: 'NEED_RELOGIN' }
     return { ok: false, error: msg }
   }

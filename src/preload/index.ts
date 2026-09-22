@@ -32,8 +32,12 @@ const mcApi = {
   onLoginLanding: (cb: () => void) => subscribe(IPC.OA_LOGIN_LANDING, cb),
 
   fetchOA: (url: string): Promise<any> => ipcRenderer.invoke(IPC.OA_FETCH, url),
-  downloadFile: (payload: { url: string; filename?: string }): Promise<any> =>
+  // id 可选：带上它就订阅得到这次下载的进度（见 onDownloadProgress），用于链接上显示百分比
+  downloadFile: (payload: { url: string; filename?: string; id?: string }): Promise<any> =>
     ipcRenderer.invoke(IPC.OA_FILE_DOWNLOAD, payload),
+  // 流式下载进度：主进程边下边写，这里按块收到 { id, received, total }；结束/失败另有 done / error
+  onDownloadProgress: (cb: (p: { id: string; received?: number; total?: number; done?: boolean; size?: number; error?: string }) => void) =>
+    subscribe('mc-download-progress', cb),
   refreshOaSession: (): Promise<any> => ipcRenderer.invoke(IPC.OA_REFRESH_SESSION),
   startQrLogin: (forceQr?: boolean): Promise<any> => ipcRenderer.invoke(IPC.OA_QR_LOGIN_START, { forceQr: !!forceQr }),
   pollQrLogin: (payload: { qrToken: string; authChainCode: string; lck: string; entityId?: string }): Promise<any> =>
@@ -102,7 +106,7 @@ const mcApi = {
   openOaWindow: (url?: string): Promise<boolean> => ipcRenderer.invoke('mc-open-oa-window', url),
   // 鸿翼文件系统：按 fileGuid 弹「另存为」下载**原始文件**（AI 回复里的「下载」链接走这里）。
   // 与「预览」分开：预览用 openOaWindow 在应用内窗口看站点预览页，不触发下载。
-  wjxtDownload: (payload: { fileGuid: string; name?: string }): Promise<any> =>
+  wjxtDownload: (payload: { fileGuid: string; name?: string; id?: string }): Promise<any> =>
     ipcRenderer.invoke('mc-wjxt-download', payload),
   getZoom: (): Promise<number> => ipcRenderer.invoke('mc-get-zoom'),
   setZoom: (factor: number): Promise<void> => ipcRenderer.invoke('mc-set-zoom', factor),

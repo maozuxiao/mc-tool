@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { extractFileLink, escapeHtml } from '@shared/query'
 import { OA_ORIGIN } from '@shared/constants'
@@ -7,6 +7,18 @@ export function FileTable() {
   const t = useStore(s => s.t)
   const fileData = useStore(s => s.fileData)
   const [downloading, setDownloading] = useState<string | null>(null)
+  // 流式下载进度：主进程选完保存位置后边下边写，这里显示「下载中 42%」
+  const [progress, setProgress] = useState<{ received: number; total: number } | null>(null)
+  const dlIdRef = useRef('')
+
+  useEffect(() => {
+    const off = window.mcApi.onDownloadProgress?.(p => {
+      if (!p || p.id !== dlIdRef.current) return
+      if (p.error || p.done) { setProgress(null); return }
+      setProgress({ received: Number(p.received || 0), total: Number(p.total || 0) })
+    })
+    return () => { off?.() }
+  }, [])
 
   if (!fileData.length) {
     return <div className="empty-box" dangerouslySetInnerHTML={{ __html: t('emptyFile') }} />
@@ -15,10 +27,13 @@ export function FileTable() {
   const rows = fileData
 
   const handleDownload = async (url: string, text: string, key: string) => {
+    const id = `dl-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
+    dlIdRef.current = id
+    setProgress(null)
     setDownloading(key)
     try {
       const res: any = await (window as any).mcApi?.downloadFile
-        ? await (window as any).mcApi.downloadFile({ url, filename: text })
+        ? await (window as any).mcApi.downloadFile({ url, filename: text, id })
         : { ok: false, error: 'no ipc' }
       if (!res?.ok) {
         if (res?.error === 'NEED_RELOGIN') {
@@ -69,7 +84,11 @@ export function FileTable() {
                         className="file-link"
                         onClick={(e) => { e.preventDefault(); if (!isBusy) handleDownload(link.url, link.text, key) }}
                       >
-                        {isBusy ? t('downloading') : link.text}
+                        {isBusy
+                          ? (progress?.total
+                            ? t('downloadingPercent', { p: Math.min(99, Math.round((progress.received / progress.total) * 100)) })
+                            : t('downloading'))
+                          : link.text}
                       </a>
                     ) : (
                       <span className="no-file">{t('noAttachment')}</span>
