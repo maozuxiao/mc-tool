@@ -12,21 +12,21 @@
 
 ## 2. 修改版本号步骤
 
-以发布 `1.0.2` 为例：
+以发布 `1.0.44` 为例（仓库根即应用根，路径都以 `mc-tool/` 为基准）：
 
 ```text
-1. 打开 desktop-app/package.json
-   把 "version": "1.0.1" 改为 "version": "1.0.2"
+1. 打开 package.json
+   把 "version": "1.0.43" 改为 "version": "1.0.44"
 
-2. 打开 desktop-app/electron-builder.yml
-   把 buildVersion: 1.0.1.0 改为 buildVersion: 1.0.2.0
+2. 打开 electron-builder.yml
+   把 buildVersion: 1.0.43.0 改为 buildVersion: 1.0.44.0
 
 3. 不需要改 store.ts（已改为自动读取）
 ```
 
 ## 3. 打包命令
 
-在 `desktop-app/` 目录下执行：
+在**仓库根**（`mc-tool/`）执行：
 
 ```powershell
 # Windows 安装包 + 便携包
@@ -39,33 +39,41 @@ npm run pack:all
 输出目录：
 
 ```text
-desktop-app/dist/
-├── latest.yml              # 自动更新元数据
-├── MC物料查询 Setup 1.0.2.exe   # NSIS 安装包
-└── MC物料查询 1.0.2.exe         # 便携版
+dist/
+├── latest.yml                        # 自动更新元数据
+├── MC物料查询 Setup <版本>.exe         # NSIS 安装包
+├── MC物料查询 Setup <版本>.exe.blockmap# 增量更新块映射
+└── MC物料查询 <版本>.exe               # 便携版
 ```
 
-## 4. 更新包放置位置
+> 打包发布推荐用根目录的一键脚本 `.\build_now.ps1`（清旧产物 → 类型检查 → 打包；
+> 加 `-Publish` 还会上传到 GitHub Releases）——完整流程见 **PUBLISH.md**。
 
-自动更新源配置在 `src/shared/constants.ts`：
+## 4. 更新包放置位置（GitHub Releases）
 
-```ts
-export const UPDATE_BASE_URL = 'https://github.com/maozuxiao/Streamax/raw/main/assets/MC_Tool'
-```
+> 更新源是 **GitHub Releases 附件**——早期那几个版本用的静态目录（`UPDATE_BASE_URL` → `maozuxiao/Streamax` 仓库的 `assets/MC_Tool`）
+> 早已弃用；**≤ 1.0.23 的老客户端因把旧地址写死在 exe 里，检测不到新版本**，需手动覆盖安装一次（详见 PUBLISH.md 第三节）。
+> 客户端与打包端两处配置必须一致：
 
-发布新版本时，把 `dist/` 里的以下文件上传到该目录：
+| 位置 | 配置 |
+|---|---|
+| 打包端 | `electron-builder.yml` → `publish: [{ provider: github, owner: maozuxiao, repo: mc-tool }]` |
+| 客户端 | `src/main/updater.ts` → `autoUpdater.setFeedURL({ provider: 'github', owner: 'maozuxiao', repo: 'mc-tool' })` |
+
+发布时由 `.\build_now.ps1 -Publish`（需 `GH_TOKEN`）把 `dist/` 里的三个文件作为 Release 附件上传：
 
 ```text
-assets/MC_Tool/
-├── latest.yml                          # 更新元数据（关键，必须上传）
-├── MC物料查询 Setup 1.0.2.exe          # NSIS 安装包本体
-├── MC物料查询 Setup 1.0.2.exe.blockmap # 增量更新块映射（必须一起上传）
-└── MC物料查询 1.0.2.exe                # 便携版（可选，离线分发用）
+latest.yml                          # 更新元数据（关键，必须上传）
+MC物料查询 Setup <版本>.exe          # NSIS 安装包本体
+MC物料查询 Setup <版本>.exe.blockmap # 增量更新块映射（必须一起上传）
+MC物料查询 <版本>.exe                # 便携版（可选，离线分发用）
 ```
 
-> `latest.yml` + `*.exe` + `*.exe.blockmap` 三者必须一起上传，否则增量更新/完整更新会失败；客户端启动时会读取 `latest.yml` 判断是否需要更新。
+> `latest.yml` + `*.exe` + `*.exe.blockmap` 必须一起上传，否则增量更新/完整更新都会失败；客户端启动 3 秒后读取 `latest.yml` 判断是否需要更新。
 
-> **重要**：`latest.yml` 每次打包都会被重新生成并指向当前版本。若要同时保留多个版本供旧客户端升级，不要互相覆盖，并按需另存历史 `latest.yml`。
+> **重要**：`electron-builder` 默认创建的是 **draft（草稿）Release**，草稿状态下客户端**检测不到新版本**，必须手动改成 **Published**（网页或 API，见 PUBLISH.md 第 7 节）。
+
+> 每一版的 Release 各自带自己的 `latest.yml`，天然不会互相覆盖（客户端只读「最新一条已发布 Release」）。
 
 ## 5. 任务栏右键 App 名称修改
 
@@ -83,8 +91,8 @@ Windows 任务栏右键菜单第一项（窗口名称）由主窗口 `title` 与
 ### 当前基线版本
 
 ```text
-package.json version:     1.0.1
-electron-builder buildVersion: 1.0.1.0
+package.json version:          1.0.43
+electron-builder buildVersion: 1.0.43.0
 ```
 
 打包命令：
@@ -93,15 +101,15 @@ electron-builder buildVersion: 1.0.1.0
 npm run pack:win
 ```
 
-### 生成 1.0.2 更新安装包
+### 生成 1.0.44 更新安装包
 
-按常规发布流程，把产品版本与文件版本统一进一位即可。注意 `package.json` 的 `version` 必须为合法 SemVer（三段），不能写成 `1.0.2.0`；文件版本 `buildVersion` 才是四位。
+按常规发布流程，把产品版本与文件版本统一进一位即可。注意 `package.json` 的 `version` 必须为合法 SemVer（三段），不能写成 `1.0.44.0`；文件版本 `buildVersion` 才是四位。
 
 步骤：
 
 ```text
-1. package.json        -> "version": "1.0.2"
-2. electron-builder.yml -> buildVersion: 1.0.2.0
+1. package.json         -> "version": "1.0.44"
+2. electron-builder.yml -> buildVersion: 1.0.44.0
 3. npm run pack:win
 ```
 
@@ -110,11 +118,13 @@ npm run pack:win
 ```text
 dist/
 ├── latest.yml
-├── MC物料查询 Setup 1.0.2.exe
-└── MC物料查询 1.0.2.exe
+├── MC物料查询 Setup 1.0.44.exe
+├── MC物料查询 Setup 1.0.44.exe.blockmap
+└── MC物料查询 1.0.44.exe
 ```
 
-上传时把 `latest.yml` + 两个 exe 一起放到 `assets/MC_Tool/`。客户端（基线 1.0.1）会自动检测到 `1.0.2` 并提示更新。
+发布时用 `.\build_now.ps1 -Publish` 把 `latest.yml` + 两个 exe + blockmap 上传为该版本的 Release 附件，
+再把 draft 改为 **Published**；客户端（如 1.0.43）启动后即会检测到 `1.0.44` 并提示更新。
 
 ### 仅改文件版本号（四位）的测试包
 
@@ -130,12 +140,12 @@ nsis.artifactName: MC物料查询-${buildVersion}-Setup.${ext}
 
 为避免测试包污染正式 `dist/`，可将产物临时输出到独立子目录，打包后再还原输出目录。
 
-**以 1.0.4 升级测试包为例：**
+**以 1.0.44 升级测试包为例：**
 
 1. 升版本号：
    ```text
-   package.json          -> "version": "1.0.4"
-   electron-builder.yml  -> buildVersion: 1.0.4.0
+   package.json          -> "version": "1.0.44"
+   electron-builder.yml  -> buildVersion: 1.0.44.0
    ```
 
 2. 临时把输出目录改为独立文件夹（改完记得还原）：
@@ -152,18 +162,20 @@ nsis.artifactName: MC物料查询-${buildVersion}-Setup.${ext}
 
 4. 打包后把 `electron-builder.yml` 的 `output` 还原回 `dist`。
 
-产物位于 `desktop-app/dist/update test/`：
+产物位于 `dist/update test/`：
 
 ```text
 dist/update test/
-├── latest.yml                            # 指向 1.0.4
-├── MC物料查询 Setup 1.0.4.exe            # NSIS 安装包
-├── MC物料查询 Setup 1.0.4.exe.blockmap   # 增量更新块映射
-├── MC物料查询 1.0.4.exe                  # 便携版
+├── latest.yml                            # 指向 1.0.44
+├── MC物料查询 Setup 1.0.44.exe            # NSIS 安装包
+├── MC物料查询 Setup 1.0.44.exe.blockmap   # 增量更新块映射
+├── MC物料查询 1.0.44.exe                  # 便携版
 └── win-unpacked/                         # 免安装解压版
 ```
 
-测试方式：把该目录下的 `latest.yml` + `*.exe` + `*.exe.blockmap` 上传到更新服务器目录（`assets/MC_Tool/`），已安装的旧版本（如 1.0.2/1.0.3）客户端即可检测到 1.0.4 升级。
+测试方式：把该目录下的 `latest.yml` + `*.exe` + `*.exe.blockmap` 作为**草稿 Release** 的附件上传（`gh release create --draft`，
+或直接 `.\build_now.ps1 -Publish` 后先别发布），已安装的旧版本（如 1.0.42/1.0.43）客户端即可检测到 1.0.44 升级；
+验证完记得清理该草稿 Release（草稿不会被客户端看到，正式发布前不要把测试包设为 Published）。
 
 ### 更新进度优化（1.0.3 起）
 
