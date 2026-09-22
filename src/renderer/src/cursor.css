@@ -74,3 +74,28 @@
 /* 禁用态：库 <Button>/<Input> 大都用 disabled 属性，这里同时兜住 aria-disabled */
 .animal-cursor--force [disabled],
 .animal-cursor--force [aria-disabled='true'] { cursor: not-allowed !important; }
+
+/* ── 交互元素必须是手型（1.0.43 修）───────────────────────────────────────────
+   `--force` 模式原文只有一条「所有元素都用手绘箭头」，于是 a[href] / button /
+   可点击表格行上也是箭头，用户反馈「鼠标放在超链接上不变手型」。
+   这里把 `--scoped` 模式里的交互元素规则补齐到 `--force` 下：
+   自定义光标只留给非交互区域，交互元素统一手型。
+   注：禁用态（not-allowed）、下载中的 .busy（cursor:default + pointer-events:none）
+   选择器优先级更高，不受这条影响。
+   非原生可点元素（表格行、排序表头等）在 JSX 上标 `data-cursor="pointer"` 即可命中。 */
+.animal-cursor--force a[href],
+.animal-cursor--force button,
+.animal-cursor--force [role='button'],
+.animal-cursor--force [role='link'],
+.animal-cursor--force [role='tab'],
+.animal-cursor--force [role='menuitem'],
+.animal-cursor--force [role='option'],
+.animal-cursor--force label[for],
+.animal-cursor--force select,
+.animal-cursor--force summary,
+.animal-cursor--force input[type='button'],
+.animal-cursor--force input[type='submit'],
+.animal-cursor--force input[type='reset'],
+.animal-cursor--force input[type='checkbox'],
+.animal-cursor--force input[type='radio'],
+.animal-cursor--force [data-cursor='pointer'] { cursor: pointer !important; }

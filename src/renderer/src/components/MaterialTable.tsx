@@ -118,6 +118,7 @@ export const MaterialTable = memo(function MaterialTable() {
                   data-k={c.k === '#' ? undefined : c.k}
                   style={{ width: c.w }}
                   onClick={() => c.sort && matSortBy(c.k)}
+                  data-cursor={c.sort ? 'pointer' : undefined}
                 >
                   {c.label}
                   {c.sort && sortIcon(c.k)}
@@ -134,7 +135,7 @@ export const MaterialTable = memo(function MaterialTable() {
               const itemNo = String(r.ITEM_NUMBER ?? '')
               return (
                 <Fragment key={rowKey}>
-                  <tr className="data-row" onClick={() => toggleExpand(rowKey)}>
+                  <tr className="data-row" data-cursor="pointer" onClick={() => toggleExpand(rowKey)}>
                     {cols.map(c => {
                       if (c.k === '#') return <td key="#" className="td-num">{i + 1}</td>
                       if (c.k === 'ITEM_NUMBER') return <td key={c.k} className="td-item">{escapeHtml(itemNo)}</td>

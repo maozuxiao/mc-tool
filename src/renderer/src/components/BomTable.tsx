@@ -57,7 +57,7 @@ export const BomTable = memo(function BomTable() {
               return (
                 <Fragment key={key}>
                   {/* 点击只展开/收起本地详情，不发起查询、不切换 tab（对齐用户脚本 bomTog） */}
-                  <tr className="data-row" onClick={() => toggle(key)}>
+                  <tr className="data-row" data-cursor="pointer" onClick={() => toggle(key)}>
                     <td>{v(r.BOM_LEVEL)}</td>
                     <td className="td-item">{v(r.COMPONENT_ITEM)}</td>
                     <td className="td-desc" title={String(r.COMPONENT_ITEM_DESC ?? '')}>{v(r.COMPONENT_ITEM_DESC)}</td>
