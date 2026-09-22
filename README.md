@@ -212,6 +212,10 @@ mc-tool/
 │  │     ├─ providerStore.ts    # 服务商预设与 API Key 加密存储
 │  │     ├─ historyStore.ts     # 会话历史（JSON 持久化到 userData）
 │  │     ├─ promptStore.ts      # 快捷提示词增删改查（JSON 持久化到 userData/promptStore.json）
+│  │     ├─ skillRegistry.ts    # 技能注册表：内置(resources/skills) + 导入(userData/skills)，
+│  │     │                      #        启用状态按会话维护（默认全部不勾选）
+│  │     ├─ wjxtSkill.ts        # 内置技能「鸿翼文件查询下载」：隐藏窗口页面上下文检索 +
+│  │     │                      #        原始文件下载（含会话自愈与 wjxt.log 诊断日志）
 │  │     └─ mcSkill.ts          # 内置 MC 查询工具（调用 resources/skills 的脚本）
 │  ├─ preload/index.ts          # contextBridge 桥接，向渲染层暴露 window.mcApi
 │  └─ renderer/                 # 渲染进程（React）
@@ -246,11 +250,14 @@ mc-tool/
 │  ├─ ai-types.ts               # AI IPC 通道名 + 会话/消息/工具调用类型
 │  └─ i18n.ts                   # 中英文文案字典
 ├─ resources/skills/
-│  └─ mc-material-query-local/  # 内置 MC 查询 Skill（随安装包分发到 resources/）
-│     ├─ SKILL.md               # 工具说明，作为 system prompt 的一部分
-│     ├─ scripts/mc_query.js    # 查询脚本（search/item/batch/bom/spec）
-│     ├─ scripts/ensure_node.ps1# 准备 Node 22 运行时
-│     └─ data/                  # 摄像机机型表、IMX307 替代料映射
+│  ├─ mc-material-query-local/  # 内置 MC 查询 Skill（随安装包分发到 resources/）
+│  │  ├─ SKILL.md               # 工具说明，作为 system prompt 的一部分
+│  │  ├─ scripts/mc_query.js    # 查询脚本（search/item/batch/bom/spec）
+│  │  ├─ scripts/ensure_node.ps1# 准备 Node 22 运行时
+│  │  └─ data/                  # 摄像机机型表、IMX307 替代料映射
+│  └─ wjxt-file-download/       # 内置 Skill：鸿翼文件系统查询下载（edoc2）
+│     ├─ SKILL.md               # 工具说明（含「只在服务器检索」硬约束）
+│     └─ references/            # API 契约与实测排查笔记
 ├─ build/                       # 打包资源（图标：icon.png / icon-512.png / icon.svg）
 ├─ electron.vite.config.ts      # main / preload / renderer 三端构建配置
 ├─ electron-builder.yml         # 打包与发布配置

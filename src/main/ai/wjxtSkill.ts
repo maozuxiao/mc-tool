@@ -1,4 +1,4 @@
-import { app, session } from 'electron'
+import { app, BrowserWindow, session } from 'electron'
 import { appendFileSync } from 'fs'
 import { join } from 'path'
 import { PARTITION, downloadToDir, type DownloadToDirResult } from './fileDownload'
@@ -7,12 +7,18 @@ import type { AIExtraRoot } from '@shared/ai-types'
 /**
  * 鸿翼文件系统（edoc2 企业内容库）查询与下载 —— 应用内置技能的执行层（1.0.43）。
  *
- * 为什么不用原技能包的脚本：
- * 原包靠 `agent-browser`（外部 Chrome + CDP）打开 `wj.streamax.com:9443`、扫码登录后在页面上下文
- * eval fetch。两条都不适合本应用：① 应用启动即完成钉钉登录（会话就在 `persist:mc-query` 分区里），
- * 不该再让用户扫一次码；② 应用里没有 agent-browser 这个 CLI，也不该为了一个技能去分发它。
- * 因此这里改为**主进程直连**：用分区会话发请求（自动带上登录 cookie、走系统证书与代理），
- * Cookie 全程不出主进程 —— 与既有 file_download / mc_query 的鉴权哲学一致。
+ * 请求通道（1.0.43 定稿，**必须走页面上下文**）：
+ * 原技能包靠 `agent-browser`（外部 Chrome + CDP）打开 `wj.streamax.com:9443`、登录后在页面上下文
+ * eval fetch。它本身不适合本应用（不该再让用户扫一次码、也不该为一个技能去分发 CLI），
+ * 但它揭示了一个必须照做的关键点：**同一个登录态、同一个 WebCore 接口、同样的表单参数，
+ * 主进程 `session.fetch` 只能拿到「HTTP 200 + FilesInfo 恒为空」，而页面上下文 fetch 直接命中真实数据**
+ * （实测同一关键词：前者恒 0 条，后者 50 条，并能下载到原始文件）。差别在**请求的发起者** ——
+ * 站点把 WebClient 模块的会话上下文绑在页面里（SPA 跑完 GetSystemInitStatus → GetCurrentUser 之后才成立），
+ * 非浏览器上下文根本不参与这套绑定。
+ * 因此这里用**应用自己的隐藏窗口**（见 ensureCtxWin）当页面宿主：先把它导航到站点首页、让站点自己的 JS
+ * 完成握手，之后所有 WebCore 调用都用 `executeJavaScript` 在该页面的上下文里 `fetch(...)` ——
+ * 等于「用站点自己的 JS 去问它自己的后端」。Cookie 依然只存在于 `persist:mc-query` 分区，不出主进程，
+ * 与既有 file_download / mc_query 的鉴权哲学一致；页面上下文不可用时才降级到 `session.fetch`（见 mainFetch）。
  *
  * API 契约来自原技能包的 references/api_reference.md：
  * - 搜索：POST /WebCore（module=WebClient、fun=GetMapSearchResultList）
@@ -145,16 +151,192 @@ function isLoginUrl(u: string): boolean {
   return /goToLoginPage|\/sso\/|\/login\b/i.test(u)
 }
 
+/** 该 URL 在分区里的 cookie 名字清单（**只记名字、不记值**，仅用于日志定位） */
+async function cookieNamesFor(url: string): Promise<{ count: number; names: string }> {
+  try {
+    const cookies = await session.fromPartition(PARTITION).cookies.get({ url })
+    return { count: cookies.length, names: cookies.map(c => c.name).join(',') }
+  } catch {
+    return { count: 0, names: '' }
+  }
+}
+
+// ── 页面上下文（隐藏窗口）─────────────────────────────────────────────────────────────
 /**
- * 用应用分区会话发一次请求：显式带上该 URL 适用的登录 cookie，走 Chromium 网络栈（证书 / 代理）。
+ * 常驻的隐藏窗口：站点首页的宿主。所有 WebCore 请求都在它的页面上下文里发起。
  *
- * 为什么显式拼 Cookie 头而不只依赖 cookie store：
- * ① 应用内窗口（OA / 内网地址）也是靠显式补 Cookie 头才拿到会话的（见 index.ts ensureOaCookieInjector）；
- * ② `session.fetch` 是非浏览器上下文，对 SameSite=Strict/Lax 这类 cookie 不保证自动附加，
- *    表现为「分区里明明有这个域的 cookie，服务端却仍然 302 到登录页」。
- * 重定向改为手动接管：POST 的 3xx 一律视为会话/来源问题（不再把登录页 HTML 当成接口响应）。
+ * 生命周期：第一次用到时创建并导航到 `/index.html`（站点自己的 SPA 会跑
+ * GetSystemInitStatus → GetCurrentUser 完成会话绑定），之后**一直复用**；
+ * 窗口崩溃 / eval 报 `Failed to fetch` / 超时 → `destroyCtxWin()` 丢掉，下次自动重建。
+ * 登录成功后由 `reloadCtxWin()` 重新导航一次，让页面把新会话重新绑定（原技能包对 404 的处置
+ * 「重新导航一次首页」正是这个动作）。
  */
-async function wjxtRequest(
+let ctxWin: BrowserWindow | null = null
+let ctxLoading: Promise<void> | null = null
+
+function destroyCtxWin(): void {
+  const win = ctxWin
+  ctxWin = null
+  ctxLoading = null
+  if (win && !win.isDestroyed()) {
+    try { win.destroy() } catch { /* 已销毁则忽略 */ }
+  }
+}
+
+// 退出时收掉隐藏窗口，别留下游离的渲染进程
+app.on('will-quit', () => destroyCtxWin())
+
+/** 创建（或复用）隐藏窗口，并等站点首页加载完成。返回 false = 页面上下文不可用。 */
+async function ensureCtxWin(timeoutMs = 25000): Promise<boolean> {
+  if (ctxWin && !ctxWin.isDestroyed()) return true
+  if (!ctxLoading) {
+    ctxLoading = (async () => {
+      const win = new BrowserWindow({
+        show: false,
+        skipTaskbar: true,
+        width: 1280,
+        height: 800,
+        webPreferences: {
+          partition: PARTITION,
+          contextIsolation: true,
+          nodeIntegration: false,
+          sandbox: true,
+          // 关掉后台节流：窗口不可见时 Chromium 会降频定时器，站点的异步握手可能被拖慢
+          backgroundThrottling: false
+        }
+      })
+      ctxWin = win
+      win.on('closed', () => { if (ctxWin === win) { ctxWin = null; ctxLoading = null } })
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('load timeout')), timeoutMs)
+        win.webContents.once('did-finish-load', () => { clearTimeout(timer); resolve() })
+        win.webContents.once('did-fail-load', (_e, code, desc) => {
+          clearTimeout(timer)
+          reject(new Error(`did-fail-load ${code} ${desc}`))
+        })
+        // 与可见登录窗口同一个入口：/index.html（未登录时站点自己会跳 SSO）
+        void win.loadURL(WJXT_LOGIN_URL)
+      })
+      // 站点首页的握手（SystemManager/GetSystemInitStatus → WebClient/GetCurrentUser）是异步的，
+      // 给页面一点时间把它跑完；随后由 readJson 按站点判据复核登录态，这里只求「别抢跑」。
+      await new Promise(r => setTimeout(r, 1200))
+      wjxtLog(`[page] hidden context ready url=${win.webContents.getURL().slice(0, 160)}`)
+    })().catch((e: any) => {
+      wjxtLog('[page] hidden context load failed: ' + String(e?.message || e))
+      destroyCtxWin()
+    }).finally(() => { ctxLoading = null })
+  }
+  await ctxLoading
+  return !!ctxWin && !ctxWin.isDestroyed()
+}
+
+/** 重新导航隐藏窗口（登录成功 / 404 自愈时用：让页面用新会话重新绑定一次上下文） */
+async function reloadCtxWin(): Promise<void> {
+  const win = ctxWin
+  if (!win || win.isDestroyed()) { await ensureCtxWin(); return }
+  try {
+    await win.webContents.reload()
+    await new Promise(r => setTimeout(r, 1200))
+    wjxtLog('[page] hidden context reloaded')
+  } catch (e: any) {
+    wjxtLog('[page] reload failed: ' + String(e?.message || e) + ' -> rebuild')
+    destroyCtxWin()
+    await ensureCtxWin()
+  }
+}
+
+/**
+ * 在页面上下文里发一次请求（唯一被验证能拿到数据的通道）。
+ * 返回 null = 页面上下文不可用 / eval 失败 —— 调用方降级到 mainFetch，而不是把它当成业务结论。
+ */
+async function pageFetch(
+  path: string,
+  opts: { method?: string; form?: string; timeoutMs?: number } = {}
+): Promise<WjxtResponse | null> {
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
+  if (!(await ensureCtxWin(Math.min(timeoutMs, 25000)))) return null
+  const win = ctxWin
+  if (!win || win.isDestroyed()) return null
+
+  const url = new URL(path, WJXT_ORIGIN).toString()
+  const headers: Record<string, string> = {
+    // 站点自己的 jQuery ajax（dataType: json，同源 XHR）带的就是这些
+    'Accept': opts.form ? 'application/json, text/javascript, */*; q=0.01' : '*/*',
+    'X-Requested-With': 'XMLHttpRequest'
+  }
+  if (opts.form) headers['Content-Type'] = 'application/x-www-form-urlencoded; charset=UTF-8'
+
+  // 用页面里原生的 fetch（相对/绝对 URL 皆可，自动带分区 cookie、走 Chromium 网络栈，
+  // 并参与站点自己的会话上下文）。整个脚本自带 try/catch，失败时把错误当数据回传，
+  // 避免 executeJavaScript 直接 reject 而丢掉原因。
+  const script = `(async () => {
+  try {
+    const opt = { method: ${JSON.stringify(opts.method || 'GET')}, credentials: 'include', headers: ${JSON.stringify(headers)} };
+    ${opts.form ? `opt.body = ${JSON.stringify(opts.form)};` : ''}
+    const r = await fetch(${JSON.stringify(url)}, opt);
+    const t = await r.text();
+    return JSON.stringify({ status: r.status, url: r.url, ct: r.headers.get('content-type') || '', body: t });
+  } catch (e) {
+    return JSON.stringify({ error: String((e && e.message) || e) });
+  }
+})()`
+
+  let raw: any
+  // 自有超时（页面上下文卡住时不能拖住整次工具调用）；结束务必清掉定时器，别让主进程留着游离计时器
+  let timer: ReturnType<typeof setTimeout> | null = null
+  try {
+    raw = await Promise.race([
+      win.webContents.executeJavaScript(script, true),
+      new Promise((_res, rej) => { timer = setTimeout(() => rej(new Error('WJXT_PAGE_TIMEOUT')), timeoutMs) })
+    ])
+  } catch (e: any) {
+    // 超时与「页面崩了」都按「上下文不可用」处理：丢掉窗口，下次重建；本次交给降级通道
+    wjxtLog(`[page] executeJavaScript failed (${String(e?.message || e)}) -> drop hidden context`)
+    destroyCtxWin()
+    return null
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+  if (raw === undefined || raw === null) {
+    wjxtLog('[page] empty eval result -> drop hidden context')
+    destroyCtxWin()
+    return null
+  }
+  let parsed: any
+  try { parsed = JSON.parse(String(raw)) } catch {
+    wjxtLog('[page] eval result not JSON: ' + String(raw).slice(0, 200))
+    destroyCtxWin()
+    return null
+  }
+  if (parsed?.error) {
+    const msg = String(parsed.error)
+    wjxtLog(`[page] fetch ${path} failed: ${msg}`)
+    // 上下文坏了（Failed to fetch / Load failed）→ 丢窗口重建；这类失败不是业务结论，交给降级通道
+    if (/failed to fetch|networkerror|load failed|err_/i.test(msg)) { destroyCtxWin(); return null }
+    return null
+  }
+  const { count, names } = await cookieNamesFor(url)
+  wjxtLog(`[page] ${opts.method || 'GET'} ${url} status=${parsed.status} final=${String(parsed.url).slice(0, 200)} ct=${parsed.ct} len=${String(parsed.body).length} cookies=${count} names=${names}`)
+  return {
+    status: Number(parsed.status) || 0,
+    body: String(parsed.body ?? ''),
+    finalUrl: String(parsed.url || url),
+    contentType: String(parsed.ct || ''),
+    cookieCount: count
+  }
+}
+
+/**
+ * 降级通道：主进程 `session.fetch`（**拿不到搜索结果**，仅保证仍能给出明确的登录态/HTTP 结论）。
+ *
+ * 保留它的意义：页面上下文起不来（隐藏窗口加载失败、内网抖动）时，用户至少能得到
+ * 「要重新登录 / 服务端 404 / 超时」这类可执行结论，而不是一句「未知错误」。
+ * 注意它带的是**显式拼的 Cookie 头**：`session.fetch` 是非浏览器上下文，对 SameSite=Strict/Lax
+ * 的 cookie 不保证自动附加（与 index.ts 里 OA 窗口 ensureOaCookieInjector 同一套做法）。
+ * `redirect: 'manual'` 不能用 —— Chromium 会把 3xx 直接取消成 `Redirect was cancelled`，
+ * 因此跟随重定向，用 readJson 的「最终 URL + content-type」判据识别登录页。
+ */
+async function mainFetch(
   path: string,
   opts: { method?: string; form?: string; timeoutMs?: number } = {}
 ): Promise<WjxtResponse> {
@@ -163,26 +345,17 @@ async function wjxtRequest(
   const url = new URL(path, WJXT_ORIGIN).toString()
   const headers: Record<string, string> = {
     'User-Agent': UA,
-    // 站点自己的 jQuery ajax（dataType: json 同源 XHR）带的就是这两个头，照着写：
     'Accept': opts.form ? 'application/json, text/javascript, */*; q=0.01' : '*/*',
     'Referer': WJXT_REFERER,
     'X-Requested-With': 'XMLHttpRequest'
   }
   if (opts.form) headers['Content-Type'] = 'application/x-www-form-urlencoded; charset=UTF-8'
-  let cookieCount = 0
-  let cookieNames = ''
-  try {
+  const { count: cookieCount, names: cookieNames } = await cookieNamesFor(url)
+  if (cookieCount) {
     const cookies = await sess.cookies.get({ url })
-    cookieCount = cookies.length
-    // 只记名字（不记值）：排查「带的是哪几个 cookie」时足够用，且不泄露任何凭证
-    cookieNames = cookies.map(c => c.name).join(',')
-    if (cookies.length) headers['Cookie'] = cookies.map(c => `${c.name}=${c.value}`).join('; ')
-  } catch { /* cookie 读取失败不阻断请求（至少还能靠 store 自带的那份） */ }
+    headers['Cookie'] = cookies.map(c => `${c.name}=${c.value}`).join('; ')
+  }
 
-  // 必须走默认的「跟随重定向」：session.fetch 传 redirect:'manual' 会被 Chromium 直接取消成
-  // 请求错误（"Redirect was cancelled"），根本拿不到 3xx 响应 —— 是否落到登录页，
-  // 交给 readJson 用「最终 URL + content-type」判断。
-  // 跨域重定向时 Chromium 会自动剥掉我们显式带的 Cookie 头（标准行为），不会把它泄露给兄弟域。
   const res = await sess.fetch(url, {
     method: opts.method || 'GET',
     headers,
@@ -193,8 +366,26 @@ async function wjxtRequest(
   const body = await res.text()
   const finalUrl = String(res.url || url)
   const contentType = String(res.headers.get('content-type') || '')
-  wjxtLog(`${opts.method || 'GET'} ${url} status=${res.status} final=${finalUrl.slice(0, 200)} ct=${contentType} len=${body.length} cookies=${cookieCount} names=${cookieNames}`)
+  wjxtLog(`[main] ${opts.method || 'GET'} ${url} status=${res.status} final=${finalUrl.slice(0, 200)} ct=${contentType} len=${body.length} cookies=${cookieCount} names=${cookieNames}`)
   return { status: res.status, body, finalUrl, contentType, cookieCount }
+}
+
+/**
+ * 发一次 WebCore/Preview 请求：**优先页面上下文**，不可用时降级到主进程 fetch。
+ * 两条通道的返回结构一致，readJson 的判读逻辑对二者通用。
+ */
+async function wjxtRequest(
+  path: string,
+  opts: { method?: string; form?: string; timeoutMs?: number } = {}
+): Promise<WjxtResponse> {
+  const viaPage = await pageFetch(path, opts)
+  if (viaPage) return viaPage
+  const viaMain = await mainFetch(path, opts)
+  // 降级通道拿到空结果时特别标注一次：这正是「主进程 fetch 拿不到数据」的现场
+  if (/GetMapSearchResultList/.test(opts.form || '')) {
+    wjxtLog('[fallback] search went through main-process fetch —— 该通道实测恒为空结果，若返回 0 条属预期')
+  }
+  return viaMain
 }
 
 /** 进程内是否已做过一次会话预热 */
@@ -255,6 +446,8 @@ function watchLoginUntilDone(): void {
         wjxtLog(`[loginWatch] session established after ${tries} polls -> auto-close login window`)
         try { closeLoginWindow?.(WJXT_SSO_LOGIN_URL) } catch { /* ignore */ }
         warmedUp = false
+        // 隐藏窗口里的页面还是「登录前」那份上下文：重新导航一次让它用新会话重新绑定
+        void reloadCtxWin()
       } else if (tries >= 90) {
         if (loginWatchTimer) { clearInterval(loginWatchTimer); loginWatchTimer = null }
         wjxtLog('[loginWatch] give up after 3 minutes (still not logged in)')
@@ -280,11 +473,22 @@ function watchLoginUntilDone(): void {
 async function wjxtWarmUp(force = false): Promise<void> {
   if (warmedUp && !force) return
   warmedUp = true
-  try {
-    const page = await wjxtRequest('/index.html', { timeoutMs: 20000 })
-    wjxtLog(`[warmup] GET /index.html status=${page.status} ct=${page.contentType} len=${page.body.length}`)
-  } catch (e: any) {
-    wjxtLog('[warmup] GET /index.html failed: ' + String(e?.message || e))
+
+  // ① 页面上下文本身就是最好的预热：隐藏窗口加载站点首页时，SPA 自己就把启动序列跑完了
+  //    （SystemManager/GetSystemInitStatus → WebClient/GetCurrentUser）。
+  //    force=true（登录刚完成 / 遇到 404）时**重新导航一次**，让页面用新会话重新绑定上下文 ——
+  //    原技能包对这一形态的处置「重新导航一次首页」正是这个动作。
+  const ready = await ensureCtxWin(25000)
+  wjxtLog(`[warmup] hidden page context ready=${ready}`)
+  if (ready && force) await reloadCtxWin()
+  if (!ready) {
+    // 页面上下文起不来（窗口加载失败）：用降级通道至少把首页打一次，日志里留下证据
+    try {
+      const page = await mainFetch('/index.html', { timeoutMs: 20000 })
+      wjxtLog(`[warmup] fallback GET /index.html status=${page.status} ct=${page.contentType} len=${page.body.length}`)
+    } catch (e: any) {
+      wjxtLog('[warmup] fallback GET /index.html failed: ' + String(e?.message || e))
+    }
   }
 
   // 站点会从 URL query 或 `token` cookie 里取 token 传给 GetCurrentUser

@@ -1,7 +1,29 @@
 # edoc2 排查笔记（非可用 API，仅记录）
 
-> 从原技能包迁移，已删除「agent-browser / PowerShell 执行环境」那一段 —— 在 MC Tool 里这些请求
-> 由主进程直接发出，不再涉及浏览器自动化。
+> 从原技能包迁移，已删掉「agent-browser / PowerShell 执行环境」那一段（应用里不装这个 CLI）。
+> 但**保留的是它的做法本身**：请求必须由页面上下文发出 —— 主进程直连拿不到搜索结果，
+> 详见下面「请求通道」一节。
+
+## 请求通道：必须由页面上下文发起（2026-09-22 定案）
+
+同一个登录态、同一个 WebCore 接口、同一份表单参数，两条通道的结果**完全不同**：
+
+| 通道 | 实测结果 |
+|---|---|
+| 主进程 `session.fetch`（显式补 Cookie 头、`Referer: preview.html`） | HTTP 200，`FilesInfo` **恒为空** → 表现为「搜不到任何文件」 |
+| 页面上下文 `fetch('WebCore')`（等于用站点自己的 JS 去问它的后端） | 同一关键词**命中 50 条**，字段齐全（`name/path/mtime/ext/size/guid/id/pid`） |
+
+差别在**请求的发起者**：站点把 WebClient 模块的会话上下文绑在页面里 —— SPA 跑完
+`SystemManager/GetSystemInitStatus` → `WebClient/GetCurrentUser` 之后，这个上下文才成立；
+非浏览器上下文的 fetch 不参与这套绑定，而且返回码仍是 200，极难从响应上看出问题。
+
+因此 MC Tool 用**自己的隐藏窗口**当页面宿主（`src/main/ai/wjxtSkill.ts` 的 `ensureCtxWin`）：
+不显示、不进任务栏、`backgroundThrottling: false`，分区与可见窗口一致（`persist:mc-query`），
+加载 `/index.html` 让站点 SPA 自己完成握手；之后所有 WebCore 请求都用 `executeJavaScript`
+在**该页面里** `fetch(...)`。窗口常驻复用，崩溃 / 超时 / `Failed to fetch` 时丢弃重建；
+登录成功或遇到 404 时**重新导航一次**（正是上游对 404 的处置「重新导航首页」）。
+页面上下文不可用（窗口加载失败等）才降级到 `session.fetch` —— 降级通道只保证给出
+「要重新登录 / 404 / 超时」这类明确结论，**拿不到搜索结果属预期**，日志里会标 `[fallback]`。
 
 下面这些接口在排查过程中实测都不可用，记在这里避免下次重新踩。
 
@@ -83,14 +105,21 @@ POST https://wj.streamax.com:9443/WebCore
 有一半是这个原因（另一半是查询串带了范围前缀，见下文）。现已按 `errorCode` / `url` 判据识别为
 `WJXT_NO_SESSION`。
 
+**页面上下文复核（2026-09-22，用应用分区的只读副本 + 隐藏窗口探针）**：未登录时，
+在**页面上下文**里发同一个搜索同样拿到 **HTTP 200 + 同一份 `ErrorCode4` 信封**
+（不是 0 条、不是 404）。也就是说：**判定登录态只能看信封里的 `errorCode`**，
+看「条数」或「状态码」都会被骗 —— 尤其别把它当成「库里没这个文件」。
+
 同一时间抓到的分区 cookie 只有 `checkToken` + `LtpaToken`（应用给 OA/SSO 用的票），
 **没有 edoc2 自己的会话** —— 所以「应用已完成钉钉鉴权」并不等于 edoc2 已登录。
 
 登录自愈顺序（都不打扰用户，只有全部失败才弹可见窗口）：
 
-1. **静默 SSO**：主进程 GET `/sso/auth/goToLoginPage?returnUrl=/index.html` 并跟随重定向；
-2. **隐藏窗口预热**：开一个 `show: false`（`backgroundThrottling: false`）的窗口加载 `/index.html`，
-   让站点 SPA 自己完成握手 —— **会话仍有效时**这一步能悄悄恢复；
+1. **静默 SSO**：GET `/sso/auth/goToLoginPage?returnUrl=/index.html` 并跟随重定向；
+2. **隐藏窗口预热**：`show: false`（`backgroundThrottling: false`）的窗口加载 `/index.html`，
+   让站点 SPA 自己完成握手 —— **会话仍有效时**这一步能悄悄恢复。
+   注意这个窗口同时就是**搜索请求的宿主**（见「请求通道」一节），不再只是预热用完即弃；
+   登录成功后会让它重新导航一次，用新会话重新绑定页面上下文；
 3. 每步之后都用 `GetCurrentUser` 复查；仍失败才弹可见登录窗口。
 
 **重要实测结论（2026-09-22）**：edoc2 的登录页 `/sso/auth/goToLoginPage` **不会自动完成登录** ——
@@ -144,12 +173,14 @@ POST https://wj.streamax.com:9443/WebCore
    站点前端的启动序列是 `POST WebCore {SystemManager/GetSystemInitStatus}` →
    `POST WebCore {WebClient/GetCurrentUser}` → 业务请求（源码见 `/scripts/app/main.js`；
    它的 `$.ajaxSetup` 还专门把 404 静默掉），原技能包的处置「重新导航一次首页」本质就是补这两步。
-   MC Tool 已按此实现 `wjxtWarmUp`：首次搜索前预热一次，仍 404 时强制重做预热并只重试一次；
-   持续 404 才说明服务端/网关真的不可用。
+   MC Tool 现在的 `wjxtWarmUp` 就是「确保隐藏窗口已把首页跑完」，遇到 404 时 **强制重新导航一次**
+   再重试一次；持续 404 才说明服务端/网关真的不可用。
 6. `WJXT_NO_SESSION` / `NEED_RELOGIN` → 应用内登录窗口会自动弹出（与工具请求同一登录态分区），
    用户登录一次后重试即可；**不要把地址交给系统浏览器**（不共享登录态）。
-7. **无报错但 0 条** → 别急着下「文件不存在」或「服务端挂了」的结论。两种常见成因：
-   ① 首选查询里的范围前缀条件 `(filepath:(1) OR masterfilepath:(1))` 在当前部署/账号范围下是空集
-   （MC Tool 会自动去掉该条件再搜一次，见 `wjxtSearch` 的 relaxedQuery）；② 响应结构变化导致结果数组
-   取空（已做多路径兜底）。两种情况都会把服务端原始返回写进 `wjxt.log` 的 `[search] EMPTY:` 行，
+7. **无报错但 0 条** → 别急着下「文件不存在」或「服务端挂了」的结论。三种常见成因：
+   ① **请求通道不对**（主进程 fetch 恒空，见「请求通道」一节）—— 日志行前缀可区分：
+   `[page]` 才是页面上下文，`[main]` / `[fallback]` 说明走了降级通道，此时 0 条属预期；
+   ② 首选查询里的范围前缀条件 `(filepath:(1) OR masterfilepath:(1))` 在当前部署/账号范围下是空集
+   （MC Tool 会自动去掉该条件再搜一次，见 `wjxtSearch` 的 relaxedQuery）；③ 响应结构变化导致结果数组
+   取空（已做多路径兜底）。后两种都会把服务端原始返回写进 `wjxt.log` 的 `[search] EMPTY:` 行，
    据此区分「查询条件/权限」与「解析取空」。
