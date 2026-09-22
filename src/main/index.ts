@@ -2272,9 +2272,16 @@ ipcMain.handle('mc-wjxt-download', async (_e, payload: { fileGuid?: string; name
     name = name.replace(/[\\/:*?"<>|]/g, '_').replace(/^\.+/, '').trim()
     if (!name) name = 'download'
     if (!mainWindow) return { ok: false, error: 'no main window' }
+    // 保存类型按后缀给：只留「所有文件 (*.*)」时，用户看到的对话框既没有类型信息、
+    // 也不方便按扩展名过滤（这正是 bug 报告截图里的样子）
+    const ext = /\.([A-Za-z0-9]{1,8})$/.exec(name)?.[1]
+    const filters = ext
+      ? [{ name: `${ext.toUpperCase()} 文件`, extensions: [ext] }, { name: '所有文件', extensions: ['*'] }]
+      : [{ name: '所有文件', extensions: ['*'] }]
     const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
       defaultPath: name,
-      title: '保存文件'
+      title: '保存文件',
+      filters
     })
     if (canceled || !filePath) return { ok: true, canceled: true }
     writeFileSync(filePath, buf)
