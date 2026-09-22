@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { AI_IPC } from '@shared/ai-types'
 import { IPC } from '@shared/types'
 import type { HolidayPlan } from '@shared/types'
@@ -87,6 +87,15 @@ const mcApi = {
   appVersion: (): string => ipcRenderer.sendSync(IPC.APP_VERSION),
 
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke('mc-open-external', url),
+
+  /**
+   * 取拖拽/粘贴进来的 File 的本机绝对路径（1.0.43，附件用）。
+   * Electron 32+ 移除了 File.path，官方推荐用 webUtils.getPathForFile；
+   * 取不到时返回空串，调用方按「不支持的附件」处理。
+   */
+  getPathForFile: (file: File): string => {
+    try { return webUtils.getPathForFile(file) } catch { return '' }
+  },
   // 应用内打开内网地址（新窗口共用登录 partition，因此免登录）。
   // 不传 url = OA 工作台首页；传 url = 在应用内窗口打开该 streamax 内网地址（外部地址会退回系统浏览器）。
   // 系统浏览器不共享本应用登录态，所以内网链接一律走这里，绝不能交给 openExternal。
@@ -120,6 +129,14 @@ const mcApi = {
     updatePrompt: (input: { id: string; text: string; title?: string }): Promise<any> =>
       ipcRenderer.invoke(AI_IPC.UPDATE_PROMPT, input),
     deletePrompt: (id: string): Promise<any> => ipcRenderer.invoke(AI_IPC.DELETE_PROMPT, id),
+    // 技能（1.0.43）：列表 / 导入（zip 或文件夹）/ 删除
+    // 勾选状态不落主进程：按会话存在渲染层，随消息用 enabledSkills 下发
+    listSkills: (): Promise<any> => ipcRenderer.invoke(AI_IPC.SKILLS_LIST),
+    importSkill: (kind: 'zip' | 'dir'): Promise<any> => ipcRenderer.invoke(AI_IPC.SKILL_IMPORT, kind),
+    removeSkill: (id: string): Promise<any> => ipcRenderer.invoke(AI_IPC.SKILL_REMOVE, id),
+    // 增强提示词：用当前供应商把草稿改写成更明确的提示词
+    optimizePrompt: (input: { providerId: string; modelId?: string; text: string; lang?: string }): Promise<any> =>
+      ipcRenderer.invoke(AI_IPC.OPTIMIZE_PROMPT, input),
     onEvent: (cb: (event: any) => void) => {
       const listener = (_e: any, event: any) => cb(event)
       ipcRenderer.on(AI_IPC.EVENT, listener)

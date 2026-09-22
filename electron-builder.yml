@@ -2,7 +2,7 @@ appId: com.streamax.mcquery
 productName: MC物料查询
 copyright: Copyright © 2026 Sean Mao
 # 应用/文件版本号（四位，区别于 package.json 三段产品版本）
-buildVersion: 1.0.42.0
+buildVersion: 1.0.43.0
 
 directories:
   output: dist
@@ -23,6 +23,10 @@ extraResources:
     to: icon.png
   - from: resources/skills/mc-material-query-local
     to: skills/mc-material-query-local
+  # 内置技能：鸿翼文件系统查询与原始文件下载（1.0.43）。只有 SKILL.md + references，
+  # 执行层在主进程（src/main/ai/wjxtSkill.ts），不随包分发脚本或运行时。
+  - from: resources/skills/wjxt-file-download
+    to: skills/wjxt-file-download
   # 文件读写技能（AI Build 模式）：随包分发，含自带的 node_modules。
   # 依赖全部为纯 JS（已验证 0 个 .node），因此不需要 asarUnpack。
   # filter 用于瘦身：source map 与 TS 类型定义运行时用不到，合计约 34MB。

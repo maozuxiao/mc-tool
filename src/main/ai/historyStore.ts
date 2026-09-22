@@ -115,6 +115,8 @@ export function appendMessage(input: {
   modelId?: string
   inputTokens?: number
   outputTokens?: number
+  /** 随消息发出的附件（1.0.43）：落库后后续追问才能继续引用同一张图 / 同一份文本 */
+  attachments?: AIMessage['attachments']
 }): AIMessage {
   const data = load()
   const now = Date.now()
@@ -124,6 +126,8 @@ export function appendMessage(input: {
     role: input.role,
     content: input.content,
     reasoning: input.reasoning,
+    // 附件里可能带 base64 图片，体积在「导入时压缩 + 单附件上限」两侧已受控
+    attachments: input.attachments?.length ? input.attachments : undefined,
     providerId: input.providerId,
     modelId: input.modelId,
     inputTokens: input.inputTokens,

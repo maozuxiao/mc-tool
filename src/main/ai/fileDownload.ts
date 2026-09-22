@@ -95,7 +95,7 @@ function requestOnce(url: string, headers: Record<string, string>, timeoutMs: nu
  * - 4xx/5xx、超时、超体积都会抛错，由调用方转成结构化结果。
  * 手动点击下载（IPC.OA_FILE_DOWNLOAD）与 AI 的 file_download 共用此函数。
  */
-export async function downloadBuffer(url: string, cookie?: string, timeoutMs: number = TIMEOUT_MS): Promise<Buffer> {
+export async function downloadBuffer(url: string, cookie?: string, timeoutMs: number = TIMEOUT_MS, referer?: string): Promise<Buffer> {
   let target = String(url || '').trim()
   if (!target) throw new Error('BAD_URL')
   for (let hop = 0; ; hop++) {
@@ -104,7 +104,9 @@ export async function downloadBuffer(url: string, cookie?: string, timeoutMs: nu
       'Accept': '*/*'
     }
     if (cookie) headers['Cookie'] = cookie
+    // OA 域固定补 OA_ORIGIN；其它站点（如鸿翼文件系统）可显式传 referer
     if (isOaUrl(target)) headers['Referer'] = OA_ORIGIN
+    else if (referer) headers['Referer'] = referer
 
     const res = await requestOnce(target, headers, timeoutMs)
     const loc = res.headers?.location ? String(res.headers.location) : ''
@@ -127,6 +129,35 @@ export async function downloadBuffer(url: string, cookie?: string, timeoutMs: nu
 export async function downloadOaBuffer(url: string, timeoutMs: number = 30000): Promise<Buffer> {
   const cookie = await getOaCookieString()
   return downloadBuffer(url, cookie, timeoutMs)
+}
+
+/**
+ * 用应用分区会话下载（1.0.43，鸿翼文件系统这类内网 https 站点用）。
+ *
+ * 与 downloadBuffer 的区别：
+ * - 走 Chromium 网络栈：用系统证书库（内网自签/内部 CA 时 node https 会验签失败）、走系统代理、自动跟随重定向；
+ * - 自动带上分区里该域名的登录 cookie（调用方只需给 Referer）。
+ */
+export async function downloadBufferViaSession(url: string, referer?: string, timeoutMs: number = TIMEOUT_MS): Promise<Buffer> {
+  const target = String(url || '').trim()
+  if (!target) throw new Error('BAD_URL')
+  const headers: Record<string, string> = { 'User-Agent': UA, 'Accept': '*/*' }
+  if (referer) headers['Referer'] = referer
+  const sess = session.fromPartition(PARTITION)
+  const res = await sess.fetch(target, { headers, signal: AbortSignal.timeout(timeoutMs) } as any)
+  if (res.status === 401 || res.status === 403) throw new Error('NEED_RELOGIN')
+  // 落到认证页 / 登录页 = 会话失效：此时响应码往往仍是 200，只能看最终落点。
+  // OA/IAM 是 iam.streamax.com，鸿翼文件系统（edoc2）未登录时 302 到 /sso/auth/goToLoginPage。
+  if (/iam\.streamax\.com|goToLoginPage|\/sso\//i.test(String(res.url || ''))) throw new Error('NEED_RELOGIN')
+  if (res.status >= 400) throw new Error('HTTP ' + res.status)
+  const len = Number(res.headers.get('content-length') || 0)
+  if (len && len > MAX_BYTES) throw new Error('TOO_LARGE')
+  const buf = Buffer.from(await res.arrayBuffer())
+  // 期望的是文件却收到 HTML 页面（且不是 .html 文件本身）：说明拿回来的是登录页，不是文件
+  const ct = String(res.headers.get('content-type') || '')
+  if (/text\/html/i.test(ct) && !/\.html?($|\?)/i.test(target)) throw new Error('NEED_RELOGIN')
+  if (buf.length > MAX_BYTES) throw new Error('TOO_LARGE')
+  return buf
 }
 
 /** 从 URL 推断文件名：优先 fileName= 参数，其次路径末段，兜底 download */
@@ -176,6 +207,19 @@ export interface DownloadToDirInput {
   name?: string
   /** Build 模式已授权目录白名单（多根）；为空表示不限制目录 */
   roots?: AIExtraRoot[]
+  /** 需要显式 Referer 的站点（如鸿翼文件系统要求 preview.html） */
+  referer?: string
+  /** 走 Chromium 会话下载（内网 https + 分区登录态），见 downloadBufferViaSession */
+  useSession?: boolean
+  /** node 直连时显式指定 Cookie（不传则按 OA 域自动取分区 cookie） */
+  cookie?: string
+  /**
+   * 校验下载内容是不是「真文件」（1.0.43，参考原技能包 download.ps1 的文件头校验）：
+   * 拿到 HTML 页面（登录页 / request invalid!）时直接判为登录态失效，避免把登录页当文件写盘。
+   */
+  validateFileHeader?: boolean
+  /** 期望字节数（搜索结果里的 size）：给了就在返回里给出 sizeMatched */
+  expectedSize?: number
 }
 
 export interface DownloadToDirResult {
@@ -185,8 +229,27 @@ export interface DownloadToDirResult {
   relative?: string
   name?: string
   size?: number
+  /** 按文件头识别出的类型（DOCX/XLSX(PK)、PDF、DOC/XLS(OLE2)、HTML、未知(hex)） */
+  kind?: string
+  /** 提供 expectedSize 时：实际字节数与期望是否一致 */
+  sizeMatched?: boolean
   error?: string
   message?: string
+}
+
+/**
+ * 按文件头（magic bytes）判断类型 —— 与原技能包 download.ps1 同一套判据：
+ * DOCX/XLSX=504b0304(PK)、PDF=25504446(%PDF)、DOC/XLS=d0cf11e0(OLE2)。
+ * HTML（3c）说明拿回来的是登录页而不是文件。
+ */
+export function detectFileKind(buf: Buffer): string {
+  if (!buf || buf.length < 4) return 'EMPTY'
+  const hex = buf.subarray(0, 4).toString('hex')
+  if (hex.startsWith('504b0304')) return 'DOCX/XLSX(PK)'
+  if (hex.startsWith('25504446')) return 'PDF'
+  if (hex.startsWith('d0cf11e0')) return 'DOC/XLS(OLE2)'
+  if (buf[0] === 0x3c) return 'HTML'
+  return '未知(' + hex + ')'
 }
 
 /**
@@ -252,19 +315,37 @@ export async function downloadToDir(input: DownloadToDirInput): Promise<Download
     return { ok: false, error: 'MKDIR_FAILED', message: `目录创建失败：${e?.message || e}` }
   }
 
-  // 3) 下载（OA 域自动带登录态）
+  // 3) 下载（OA 域自动带登录态；鸿翼等内网站点走会话下载 + 显式 Referer）
   let buf: Buffer
   try {
-    buf = isOaUrl(url) ? await downloadOaBuffer(url) : await downloadBuffer(url)
+    if (input.useSession) buf = await downloadBufferViaSession(url, input.referer)
+    else if (input.cookie) buf = await downloadBuffer(url, input.cookie, undefined, input.referer)
+    else buf = isOaUrl(url) ? await downloadOaBuffer(url) : await downloadBuffer(url)
   } catch (e: any) {
     const msg = e?.message || String(e)
     if (msg === 'NEED_RELOGIN' || e?.code === 'NEED_RELOGIN') {
-      return { ok: false, error: 'NEED_RELOGIN', message: 'OA 登录态已失效，请先在应用内登录 OA 后再下载' }
+      return { ok: false, error: 'NEED_RELOGIN', message: '登录态已失效（OA 或内网文件系统），请先在应用内登录后再下载' }
     }
     if (msg === 'TOO_LARGE') {
       return { ok: false, error: 'TOO_LARGE', message: '文件超过 200MB 上限，已中止下载' }
     }
     return { ok: false, error: 'DOWNLOAD_FAILED', message: `下载失败：${msg}` }
+  }
+
+  // 3.5) 文件头校验（参考原技能包 download.ps1）：拿回 HTML 说明是登录页而不是文件
+  let kind: string | undefined
+  if (input.validateFileHeader) {
+    kind = detectFileKind(buf)
+    if (kind === 'HTML' || kind === 'EMPTY') {
+      return {
+        ok: false,
+        kind,
+        error: 'NEED_RELOGIN',
+        message: kind === 'HTML'
+          ? '服务端返回的是登录页 HTML 而不是文件（登录态已失效），请重新登录后再下载'
+          : '下载内容为空，可能是签名链接已过期，请重新发起下载'
+      }
+    }
   }
 
   // 4) 文件名清洗 + 同名自动重命名 + 写盘
@@ -278,5 +359,14 @@ export async function downloadToDir(input: DownloadToDirInput): Promise<Download
 
   const name = basename(finalPath)
   const relative = rootPath ? join(basename(rootPath), String(absDir === rootPath ? name : join(absDir.slice(rootPath.length), name))) : finalPath
-  return { ok: true, savedPath: finalPath, relative, name, size: buf.length }
+  const sizeMatched = input.expectedSize ? buf.length === input.expectedSize : undefined
+  return {
+    ok: true,
+    savedPath: finalPath,
+    relative,
+    name,
+    size: buf.length,
+    ...(kind ? { kind } : {}),
+    ...(sizeMatched !== undefined ? { sizeMatched } : {})
+  }
 }

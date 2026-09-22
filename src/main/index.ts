@@ -9,6 +9,7 @@ import { OA_LOGIN_URL, OA_ORIGIN } from '@shared/constants'
 import { IPC } from '@shared/types'
 import { initAutoUpdater, isUpdateDownloaded, startUpdateDownload } from './updater'
 import { registerAIIPC } from './ai/aiIpc'
+import { setWjxtLoginOpener, setWjxtBootstrap, setWjxtLoginCloser } from './ai/wjxtSkill'
 // 使用持久化 partition，让 OA 登录 Cookie 自动写入磁盘并跨启动保留。
 // 这是最可靠的方案：Electron 会为每个 persist:* partition 维护独立的
 // Cookie/Storage 目录，进程退出后依然保留，无需手动文件备份。
@@ -617,6 +618,72 @@ function createWindow() {
     }
     return true
   }
+
+  // 鸿翼文件系统技能在「分区里没有可用登录态」时会调用它弹出应用内登录窗口
+  // （见 ai/wjxtSkill.ts：窗口与工具请求共用 persist:mc-query，登录一次即可复用）
+  setWjxtLoginOpener((target) => { void openInternalUrl(target) })
+
+  // ── 鸿翼文件系统的「隐藏窗口预热」────────────────────────────────────
+  // 该站点的 SSO 换票依赖 **SPA 自己的 JS 流程**：实测应用内窗口一加载就自动登录成功，
+  // 而主进程裸 fetch（即便带上分区里的 SSO 票）换不到 edoc2 会话。
+  // 所以这里开一个 **不显示** 的窗口把首页跑一遍，让站点自己完成握手：
+  // 成功则用户完全看不到窗口，失败才由上层弹可见的登录窗（避免每次调用都多余弹窗）。
+  let wjxtBootstrapWin: BrowserWindow | null = null
+  const bootstrapWjxtSession = async (url: string, settleMs = 2500): Promise<boolean> => {
+    const sess = session.fromPartition(PARTITION)
+    ensureOaCookieInjector(sess)
+    void keepIamSessionAlive(sess)
+    if (wjxtBootstrapWin && !wjxtBootstrapWin.isDestroyed()) {
+      try { wjxtBootstrapWin.destroy() } catch { /* ignore */ }
+    }
+    const win = new BrowserWindow({
+      width: 1100,
+      height: 800,
+      show: false,
+      autoHideMenuBar: true,
+      backgroundColor: '#f7f3df',
+      webPreferences: {
+        partition: PARTITION,
+        nodeIntegration: false,
+        contextIsolation: true,
+        // 隐藏窗口会被 Chromium 当成「被遮挡」而节流定时器/请求，
+        // 这里显式关掉节流，让站点 SPA 的握手能正常跑
+        backgroundThrottling: false
+      }
+    })
+    wjxtBootstrapWin = win
+    // 与可见窗口同一套登记：补 Cookie + 接管它可能弹出的子窗口
+    registerOaWindow(win)
+    const settled = new Promise<boolean>((resolve) => {
+      let done = false
+      const finish = (ok: boolean) => { if (!done) { done = true; resolve(ok) } }
+      // SPA 的握手是「页面加载完之后」才发的异步请求，等 did-finish-load 后再留一点时间
+      win.webContents.once('did-finish-load', () => setTimeout(() => finish(true), settleMs))
+      win.webContents.once('did-fail-load', () => finish(false))
+      setTimeout(() => finish(false), 15000)
+    })
+    try {
+      await win.loadURL(url)
+    } catch (e: any) {
+      // 站内跳转会中断 loadURL（ERR_ABORTED），不代表失败 —— 以 settled 的结论为准
+      debugLog('[wjxtBootstrap] loadURL rejected: ' + e?.message)
+    }
+    const ok = await settled
+    try { if (!win.isDestroyed()) win.destroy() } catch { /* ignore */ }
+    if (wjxtBootstrapWin === win) wjxtBootstrapWin = null
+    debugLog(`[wjxtBootstrap] hidden window done ok=${ok}`)
+    return ok
+  }
+  setWjxtBootstrap((url, settleMs) => bootstrapWjxtSession(url, settleMs))
+  // 登录成功后由技能侧调用它自动关掉登录窗口（用户扫完码不用自己找关闭按钮）
+  setWjxtLoginCloser((target) => {
+    const win = internalUrlWindows.get(target)
+    if (win && !win.isDestroyed()) {
+      try { win.close() } catch { /* ignore */ }
+    }
+    internalUrlWindows.delete(target)
+    debugLog('[wjxt] login window auto-closed (session established): ' + target)
+  })
 
   ipcMain.handle('mc-open-oa-window', async (_e, url?: string) => {
     // 传了内网地址：走通用内网开窗（AI 回复里的 OA 链接、外部入口等）

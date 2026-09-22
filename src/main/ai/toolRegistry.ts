@@ -1,3 +1,4 @@
+import { bareSkillId } from '@shared/ai-types'
 import type { AIAgentMode, AIExtraRoot } from '@shared/ai-types'
 import { MC_QUERY_TOOL_DEFINITION, runMcQuery, type McRunSink } from './mcSkill'
 import {
@@ -5,6 +6,10 @@ import {
   FILE_READ_BATCH_TOOL_DEFINITION, FILE_OPEN_FOLDER_TOOL_DEFINITION,
   FILE_DOWNLOAD_TOOL_DEFINITION, fileSkillDownload
 } from './fileSkill'
+import {
+  WJXT_SEARCH_TOOL_DEFINITION, WJXT_DOWNLOAD_TOOL_DEFINITION,
+  runWjxtSearch, runWjxtDownload
+} from './wjxtSkill'
 
 export interface OpenFolderResult {
   ok: boolean
@@ -40,6 +45,15 @@ const REGISTRY: Record<string, ToolEntry> = {
   mc_query: {
     definition: MC_QUERY_TOOL_DEFINITION,
     run: (input, ctx) => runMcQuery(input, ctx.onRun, ctx.signal)
+  },
+  // ── 内置技能「鸿翼文件查询下载」提供的工具（仅 build 模式 + 已启用该技能时下发）──
+  wjxt_search: {
+    definition: WJXT_SEARCH_TOOL_DEFINITION,
+    run: (input) => runWjxtSearch(input)
+  },
+  wjxt_download: {
+    definition: WJXT_DOWNLOAD_TOOL_DEFINITION,
+    run: (input, ctx) => runWjxtDownload(input, ctx.allowedRoots)
   },
   file_read: {
     definition: FILE_TOOL_DEFINITIONS[0],
@@ -127,25 +141,52 @@ const REGISTRY: Record<string, ToolEntry> = {
   }
 }
 
+/**
+ * 技能 id → 该技能提供的工具名（1.0.43）。
+ * 只有「该会话启用了此技能」且处于 build 模式时，这些工具才下发给模型；
+ * 提示词侧由 skillRegistry 注入对应 SKILL.md（见 skillsPromptBlock）。新增内置技能时在这里登记一行。
+ */
+const SKILL_TOOLS: Record<string, string[]> = {
+  'wjxt-file-download': ['wjxt_search', 'wjxt_download']
+}
+
+/**
+ * 已启用技能带来的工具名集合。
+ * 技能键是「来源:id」（内置与导入可能同名），这里按裸 id 查表并**去重** ——
+ * 同名技能的内置版与导入版同时启用时，工具只能下发一份（重复的 function name 会被接口拒绝）。
+ */
+function skillToolNames(enabledSkills?: string[]): string[] {
+  const set = new Set<string>()
+  for (const key of enabledSkills || []) {
+    for (const name of SKILL_TOOLS[bareSkillId(key)] || []) set.add(name)
+  }
+  return [...set]
+}
+
+/** 已启用技能带来的工具定义（顺序与 skillToolNames 一致） */
+function skillToolDefinitions(enabledSkills?: string[]): any[] {
+  return skillToolNames(enabledSkills).map(name => REGISTRY[name]?.definition).filter(Boolean)
+}
+
 /** 该模式下允许调用的工具名，用于兜底拦截模型臆造的工具调用 */
-export function toolNamesForMode(mode: AIAgentMode, hasWorkspace: boolean): string[] {
+export function toolNamesForMode(mode: AIAgentMode, hasWorkspace: boolean, enabledSkills?: string[]): string[] {
   if (mode === 'ask') return []
   if (mode === 'mc') return ['mc_query']
   // build：文件工具 + 打开目录 + mc_query 全量下发；未授权目录时文件工具会引导用 open_folder
   void hasWorkspace
-  return [...FILE_TOOL_DEFINITIONS.map(t => t.function.name), 'mc_query']
+  return [...FILE_TOOL_DEFINITIONS.map(t => t.function.name), 'mc_query', ...skillToolNames(enabledSkills)]
 }
 
 /**
  * 按模式生成下发给大模型的 tools 数组。
  * ask 模式必须返回空数组：不下发工具定义，模型才不会去「调用」不存在的工具。
  */
-export function toolsForMode(mode: AIAgentMode, hasWorkspace: boolean): any[] {
+export function toolsForMode(mode: AIAgentMode, hasWorkspace: boolean, enabledSkills?: string[]): any[] {
   if (mode === 'ask') return []
   if (mode === 'mc') return [MC_QUERY_TOOL_DEFINITION]
-  // build：文件工具 + 打开目录 + mc_query 全量下发（不再强制先选工作区）
+  // build：文件工具 + 打开目录 + mc_query 全量下发（不再强制先选工作区）+ 已启用技能带来的工具
   void hasWorkspace
-  return [...FILE_TOOL_DEFINITIONS, MC_QUERY_TOOL_DEFINITION]
+  return [...FILE_TOOL_DEFINITIONS, MC_QUERY_TOOL_DEFINITION, ...skillToolDefinitions(enabledSkills)]
 }
 
 // 非 mc_query 工具没有 runMcQuery 那种「内部回调 onRun」机制，
@@ -153,6 +194,8 @@ export function toolsForMode(mode: AIAgentMode, hasWorkspace: boolean): any[] {
 function buildFileSummary(name: string, result: any): string {
   if (!result || result.ok === false) return `失败：${result?.error || '未知错误'}`
   switch (name) {
+    case 'wjxt_search': return result?.ok ? `找到 ${result.count ?? 0} 个文件` : `失败：${result?.error || '未知错误'}`
+    case 'wjxt_download': return result?.ok ? `已下载 ${result.items?.length ?? 0} 个文件` : `失败：${result?.error || '未知错误'}`
     case 'file_read': return `已读取 ${result.relative || result.path}`
     case 'file_list': return `已列出 ${result.count ?? 0} 项`
     case 'file_search': return `找到 ${result.count ?? 0} 个匹配`

@@ -2,7 +2,8 @@ import { ipcMain, BrowserWindow, dialog } from 'electron'
 import { homedir } from 'os'
 import { resolve } from 'path'
 import { AI_IPC } from '@shared/ai-types'
-import { listModels, testProvider } from './providerApi'
+import { listModels, testProvider, optimizePrompt } from './providerApi'
+import { listSkills, importSkillZip, importSkillDir, removeSkill } from './skillRegistry'
 import { listProviders, saveProvider, getSuggestedModels, getPreferences, savePreferences, addCustomProvider, deleteCustomProvider, resetProvider } from './providerStore'
 import { dirBlockReason, makeAlias } from './rootGuard'
 import {
@@ -160,4 +161,32 @@ export function registerAIIPC(): void {
     return updatePrompt(input?.id || '', input?.text || '', input?.title)
   })
   ipcMain.handle(AI_IPC.DELETE_PROMPT, (_e, id: string) => deletePrompt(id))
+
+  // ── 技能（1.0.43）────────────────────────────────────────────
+  // 列表 / 删除；导入支持 zip 与文件夹两种入口（都由主进程弹系统选择框）。
+  // 注意没有「启用停用」通道：勾选是按会话存在渲染层的（见 skillRegistry 文件头说明）
+  ipcMain.handle(AI_IPC.SKILLS_LIST, () => listSkills())
+  ipcMain.handle(AI_IPC.SKILL_REMOVE, (_e, id: string) => removeSkill(String(id || '')))
+  ipcMain.handle(AI_IPC.SKILL_IMPORT, async (e, kind: 'zip' | 'dir') => {
+    const win = BrowserWindow.fromWebContents(e.sender) || undefined
+    if (kind === 'dir') {
+      const picked = await dialog.showOpenDialog(win as any, {
+        title: '选择技能文件夹（需包含 SKILL.md）',
+        properties: ['openDirectory']
+      })
+      if (picked.canceled || !picked.filePaths.length) return { ok: false, canceled: true }
+      return importSkillDir(picked.filePaths[0])
+    }
+    const picked = await dialog.showOpenDialog(win as any, {
+      title: '选择技能压缩包（内含 SKILL.md）',
+      properties: ['openFile'],
+      filters: [{ name: '技能包', extensions: ['zip'] }]
+    })
+    if (picked.canceled || !picked.filePaths.length) return { ok: false, canceled: true }
+    return importSkillZip(picked.filePaths[0])
+  })
+
+  // 增强提示词：一次性请求当前供应商改写草稿，不落历史
+  ipcMain.handle(AI_IPC.OPTIMIZE_PROMPT, (_e, input: { providerId: string; modelId?: string; text: string; lang?: string }) =>
+    optimizePrompt(input))
 }

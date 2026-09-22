@@ -2,11 +2,12 @@ import { BrowserWindow, net, dialog } from 'electron'
 import { randomUUID } from 'crypto'
 import { existsSync, statSync } from 'fs'
 import { dirname, resolve } from 'path'
-import type { AISendPayload, AIExtraRoot as AllowedRoot } from '@shared/ai-types'
+import type { AISendPayload, AIAttachment, AIExtraRoot as AllowedRoot } from '@shared/ai-types'
 import { resolveMode } from '@shared/ai-types'
 import { getProvider, savePreferences } from './providerStore'
 import { opencodeSessionHeaders } from './providerApi'
 import { mcSkillSystemPrompt } from './mcSkill'
+import { skillsPromptBlock } from './skillRegistry'
 import { dispatchTool, toolsForMode, type OpenFolderResult } from './toolRegistry'
 import { isInside, dirBlockReason, makeAlias, systemRoots } from './rootGuard'
 import {
@@ -161,6 +162,41 @@ function openAIToolResponse(toolCallId: string, content: unknown): any {
   return { role: 'tool', tool_call_id: toolCallId, content: JSON.stringify(content) }
 }
 
+/**
+ * 把「提问文本 + 附件」组装成 OpenAI 兼容的 content（1.0.43）。
+ *
+ * - 没有附件时返回纯字符串：与旧行为完全一致，任何模型都能吃；
+ * - 图片 → `image_url`（dataURL），因此需要所选模型支持视觉，否则由服务端报错，前端原样提示；
+ * - 文本附件 → 追加成一段带文件名的代码块（内联给模型，避免多一次工具往返）；
+ * - 其他文件（xlsx/docx/pdf…）→ 只给本机路径并提示用 file_read 读取（仅 build 模式有该工具）。
+ */
+function buildUserContent(input: { content: string; attachments?: AIAttachment[] }): any {
+  const atts = (input.attachments || []).filter(Boolean)
+  if (!atts.length) return input.content
+  const parts: any[] = [{ type: 'text', text: input.content }]
+
+  const texts = atts.filter(a => a.kind === 'text' && a.text)
+  if (texts.length) {
+    const block = texts
+      .map(a => `【附件：${a.name}${a.truncated ? '（内容过长，已截断）' : ''}】\n\`\`\`\n${a.text}\n\`\`\``)
+      .join('\n\n')
+    parts.push({ type: 'text', text: `\n\n${block}` })
+  }
+
+  const files = atts.filter(a => a.kind === 'file' && a.path)
+  if (files.length) {
+    parts.push({
+      type: 'text',
+      text: `\n\n【随消息提供的本机文件（请用 file_read 读取后再回答）】\n${files.map(f => `- ${f.name} → ${f.path}`).join('\n')}`
+    })
+  }
+
+  for (const img of atts.filter(a => a.kind === 'image' && a.dataUrl)) {
+    parts.push({ type: 'image_url', image_url: { url: img.dataUrl } })
+  }
+  return parts
+}
+
 async function streamOpenAICompatible(input: {
   payload: AISendPayload
   conversationId: string
@@ -192,18 +228,25 @@ async function streamOpenAICompatible(input: {
       messages: [
         {
           role: 'system',
-          content: mcSkillSystemPrompt(mode, payload.lang === 'en' ? 'en' : 'zh', allowedRoots)
+          content:
+            mcSkillSystemPrompt(mode, payload.lang === 'en' ? 'en' : 'zh', allowedRoots) +
+            // 技能说明只在 build 模式注入（Skills 面板也只在 build 模式出现）
+            skillsPromptBlock(mode === 'build' ? (payload.enabledSkills || []) : [], mode === 'build')
         },
         ...conversation.map(m => {
           if (m.role === 'tool') return { role: 'tool', tool_call_id: m.tool_call_id, content: m.content }
           if (m.tool_calls) return { role: 'assistant', content: m.content || '', tool_calls: m.tool_calls }
+          // 历史里的用户消息若带附件，同样还原成 content 数组：图片继续可见、文本继续内联
+          if (m.role === 'user' && m.attachments?.length) {
+            return { role: 'user', content: buildUserContent({ content: m.content, attachments: m.attachments }) }
+          }
           return { role: m.role, content: m.content }
         })
       ]
     }
     // ask 模式返回空数组，不下发 tools——否则模型会去调用并不存在的工具。
     // 最后一轮强制不带 tools，让模型基于已收集的信息直接总结，而非再发起第 N+1 次工具调用。
-    const tools = isLastRound ? [] : toolsForMode(mode, hasWorkspace)
+    const tools = isLastRound ? [] : toolsForMode(mode, hasWorkspace, payload.enabledSkills)
     if (tools.length) body.tools = tools
 
     // 本次请求独立取消器：用户 stop + 60s 超时都能中断
@@ -374,7 +417,7 @@ export async function sendMessage(payload: AISendPayload): Promise<void> {
   const existing = getConversation(conversationId)
   // 用 UI 选择的工作区 / 额外目录初始化本会话白名单（运行时 open_folder 可再追加）
   sessionRoots.set(conversationId, mergeRoots(sessionRoots.get(conversationId) || [], payload))
-  appendMessage({ conversationId, role: 'user', content: payload.content })
+  appendMessage({ conversationId, role: 'user', content: payload.content, attachments: payload.attachments })
   const assistant = appendMessage({
     conversationId,
     role: 'assistant',
@@ -397,7 +440,7 @@ export async function sendMessage(payload: AISendPayload): Promise<void> {
     if (provider.config.protocol === 'openai-compatible') {
       await streamOpenAICompatible({
         payload, conversationId,
-        messages: [...messages, { role: 'user', content: payload.content }],
+        messages: [...messages, { role: 'user', content: buildUserContent(payload) }],
         assistantMessageId: assistant.id,
         controller
       })

@@ -3,8 +3,8 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeSanitize from 'rehype-sanitize'
 import rehypeHighlight from 'rehype-highlight'
-import type { AIAgentMode, AIConversation, AIMessage, AIProviderConfig, AIToolRun, SavedPrompt, AIProtocol } from '@shared/ai-types'
-import { AI_PROTOCOL_LABELS } from '@shared/ai-types'
+import type { AIAgentMode, AIAttachment, AIConversation, AIMessage, AIProviderConfig, AISkillInfo, AIToolRun, SavedPrompt, AIProtocol } from '@shared/ai-types'
+import { AI_PROTOCOL_LABELS, skillKey } from '@shared/ai-types'
 import { OA_ORIGIN } from '@shared/constants'
 import { useStore } from '../../store'
 import { Button, CodeBlock, Collapse, Icon, Tooltip } from 'animal-island-ui'
@@ -49,6 +49,128 @@ function useIsNarrow(): boolean {
 
 interface Props {
   disabled: boolean
+}
+
+/** 待发队列项（1.0.43）：排队时把附件一起快照下来，避免输入区被清空后丢附件 */
+interface QueueItem {
+  id: string
+  text: string
+  attachments?: AIAttachment[]
+}
+
+/**
+ * 三种模式的图标与说明文案（1.0.43 改为 CodeBuddy 式下拉）。
+ * 注意：名称文案仍沿用原来的 对话 / 物料 / Build，`setMode` 的语义与行为完全不变。
+ */
+const MODE_META: Record<AIAgentMode, { icon: string; labelKey: string; descKey: string }> = {
+  ask: { icon: 'Chat', labelKey: 'aiModeAsk', descKey: 'aiModeAskDesc' },
+  mc: { icon: 'Search', labelKey: 'aiModeMc', descKey: 'aiModeMcDesc' },
+  build: { icon: 'Code', labelKey: 'aiModeBuild', descKey: 'aiModeBuildDesc' }
+}
+
+// ── 附件处理（1.0.43）──────────────────────────────────────────────
+
+/** 图片内联上限：最长边缩到 1568px、dataURL 控制在 ~1.2MB（token 与请求体都要留余地） */
+const IMG_MAX_EDGE = 1568
+const IMG_MAX_BYTES = 1_200_000
+/** 文本类附件内联上限（超出截断并在消息里标注） */
+const TEXT_MAX_BYTES = 200_000
+/** 按扩展名识别的文本类文件（拖进来的 File 常常没有 mime） */
+const TEXT_EXT = new Set([
+  'txt', 'md', 'markdown', 'csv', 'tsv', 'json', 'jsonl', 'yml', 'yaml', 'xml', 'html', 'htm', 'log', 'ini', 'conf',
+  'js', 'jsx', 'ts', 'tsx', 'py', 'java', 'c', 'h', 'cpp', 'cs', 'go', 'rs', 'php', 'rb', 'sh', 'ps1', 'sql', 'bat', 'gradle', 'properties'
+])
+
+function humanSize(n?: number): string {
+  const v = Number(n || 0)
+  if (!v) return ''
+  if (v < 1024) return `${v} B`
+  if (v < 1024 * 1024) return `${(v / 1024).toFixed(1)} KB`
+  return `${(v / 1024 / 1024).toFixed(1)} MB`
+}
+
+function extOf(name: string): string {
+  const i = name.lastIndexOf('.')
+  return i > 0 ? name.slice(i + 1).toLowerCase() : ''
+}
+
+function readAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader()
+    r.onload = () => resolve(String(r.result || ''))
+    r.onerror = () => reject(new Error('读取失败'))
+    r.readAsDataURL(file)
+  })
+}
+
+/**
+ * 图片预处理：按最长边缩放再内联，避免把十几 MB 的原图直接塞进请求体。
+ * 透明 PNG 保持 PNG（转 JPEG 会把透明区域填黑），其余统一 JPEG。
+ */
+async function shrinkImage(file: File): Promise<{ dataUrl: string; size: number }> {
+  const src = await readAsDataUrl(file)
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const el = new Image()
+    el.onload = () => resolve(el)
+    el.onerror = () => reject(new Error('图片解析失败'))
+    el.src = src
+  })
+  const scale = Math.min(1, IMG_MAX_EDGE / Math.max(img.width, img.height))
+  if (scale === 1 && src.length <= IMG_MAX_BYTES) return { dataUrl: src, size: file.size }
+  const w = Math.max(1, Math.round(img.width * scale))
+  const h = Math.max(1, Math.round(img.height * scale))
+  const canvas = document.createElement('canvas')
+  canvas.width = w
+  canvas.height = h
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return { dataUrl: src, size: file.size }
+  ctx.drawImage(img, 0, 0, w, h)
+  const isPng = /image\/png/i.test(file.type)
+  let out = canvas.toDataURL(isPng ? 'image/png' : 'image/jpeg', 0.85)
+  if (!isPng && out.length > IMG_MAX_BYTES) out = canvas.toDataURL('image/jpeg', 0.6)
+  return { dataUrl: out, size: Math.round(out.length * 0.75) }
+}
+
+/**
+ * 把 File 列表转成附件：
+ * - 图片 → 缩放后内联（视觉模型直接读）；
+ * - 文本类 → 读成文本内联（超上限截断）；
+ * - 其它（xlsx/docx/pdf…）→ 只记本机路径，Build 模式下由模型用 file_read 读取。
+ */
+async function filesToAttachments(files: File[]): Promise<{ list: AIAttachment[]; skipped: string[] }> {
+  const list: AIAttachment[] = []
+  const skipped: string[] = []
+  let seq = 0
+  for (const f of files) {
+    const name = f.name || '未命名'
+    const id = `att_${Date.now().toString(36)}_${seq++}`
+    try {
+      if (f.type.startsWith('image/')) {
+        const { dataUrl, size } = await shrinkImage(f)
+        list.push({ id, name, kind: 'image', mime: f.type, size, dataUrl })
+        continue
+      }
+      const ext = extOf(name)
+      if (f.type.startsWith('text/') || TEXT_EXT.has(ext)) {
+        const raw = await f.text()
+        const truncated = raw.length > TEXT_MAX_BYTES
+        list.push({
+          id, name, kind: 'text',
+          mime: f.type || `text/${ext || 'plain'}`,
+          size: f.size,
+          text: truncated ? raw.slice(0, TEXT_MAX_BYTES) : raw,
+          truncated
+        })
+        continue
+      }
+      const path = window.mcApi.getPathForFile?.(f) || ''
+      if (!path) { skipped.push(name); continue }
+      list.push({ id, name, kind: 'file', mime: f.type, size: f.size, path })
+    } catch {
+      skipped.push(name)
+    }
+  }
+  return { list, skipped }
 }
 
 export function ChatPanel({ disabled }: Props) {
@@ -110,7 +232,26 @@ export function ChatPanel({ disabled }: Props) {
     setDrafts(prev => ({ ...prev, [draftKey]: v }))
   }, [draftKey])
   // 回复中用户继续提问时，把问题排队，待本轮结束后依次发送（序列式追问）
-  const [queue, setQueue] = useState<string[]>([])
+  const [queue, setQueue] = useState<QueueItem[]>([])
+
+  // ── 模式下拉（1.0.43，参考 CodeBuddy：触发器显示当前模式，菜单里带图标/说明/勾选）──
+  const [modePanelOpen, setModePanelOpen] = useState(false)
+  const modePanelRef = useRef<HTMLDivElement | null>(null)
+  // ── 技能面板（仅 build 模式出现）──
+  const [skills, setSkills] = useState<AISkillInfo[]>([])
+  const [skillPanelOpen, setSkillPanelOpen] = useState(false)
+  const [skillBusy, setSkillBusy] = useState(false)
+  const skillPanelRef = useRef<HTMLDivElement | null>(null)
+  // ── 附件（粘贴 / 拖拽 / 选择文件）──
+  const [attachments, setAttachments] = useState<AIAttachment[]>([])
+  const [attachBusy, setAttachBusy] = useState(false)
+  // ── 待发队列的拖动排序状态（1.0.43）──
+  const [queueDrag, setQueueDrag] = useState<number | null>(null)
+  const [queueOver, setQueueOver] = useState<number | null>(null)
+  // ── 增强提示词 ──
+  const [enhancing, setEnhancing] = useState(false)
+  // 增强前的原文，用于「撤销」；null 表示当前没有可撤销的增强结果
+  const [enhanceBackup, setEnhanceBackup] = useState<string | null>(null)
   // 正在生成的会话 id 列表：支持多个会话并发，各会话独立流式推进
   const [streamingIds, setStreamingIds] = useState<string[]>([])
   // 新会话在 conversation-created 回来之前还没有 id，单独记一个生成态
@@ -150,6 +291,23 @@ export function ChatPanel({ disabled }: Props) {
   useEffect(() => {
     window.mcApi.ai.listPrompts().then((r: SavedPrompt[]) => setSavedPrompts(r || [])).catch(() => {})
   }, [])
+  // 技能列表（内置 + 导入）：启动读一次，导入/启停后由对应操作回写
+  // 这里直接调 IPC 而不再经过 refreshSkills：那个 useCallback 定义在下方，
+  // 写进依赖数组会触发「使用先于声明」的类型错误（TDZ）
+  useEffect(() => {
+    window.mcApi.ai.listSkills().then((r: AISkillInfo[]) => setSkills(r || [])).catch(() => { /* 读不到就当没有技能 */ })
+  }, [])
+  // 模式下拉与技能面板：点击面板外收起（与提示词面板同一套交互）
+  useEffect(() => {
+    if (!modePanelOpen && !skillPanelOpen) return
+    const onDocClick = (e: MouseEvent) => {
+      const t2 = e.target as Node
+      if (modePanelRef.current && !modePanelRef.current.contains(t2)) setModePanelOpen(false)
+      if (skillPanelRef.current && !skillPanelRef.current.contains(t2)) setSkillPanelOpen(false)
+    }
+    document.addEventListener('mousedown', onDocClick)
+    return () => document.removeEventListener('mousedown', onDocClick)
+  }, [modePanelOpen, skillPanelOpen])
   useEffect(() => {
     if (!promptPanelOpen) return
     const onDocClick = (e: MouseEvent) => {
@@ -225,6 +383,24 @@ export function ChatPanel({ disabled }: Props) {
   // 切换会话时保存/恢复滚动位置，避免每次切回来都强制滚到最底部
   const scrollPositionsRef = useRef<Map<string, number>>(new Map())
   const pendingScrollRef = useRef<{ id: string | null }>({ id: null })
+
+  // 1.0.43：AI 输出时若已滚离底部，输入区上沿浮出「回到最新输出」按钮（参考 CodeBuddy）。
+  // atBottom 用 state 驱动按钮显隐；阈值与下面的滚动跟随保持一致（80px），
+  // 否则会出现「刚跟随到底部、按钮却还亮着」的抖动。
+  const [atBottom, setAtBottom] = useState(true)
+  /** 用户主动发送时置 true：这一帧强制跟随到底部（哪怕他正翻着历史） */
+  const forceFollowRef = useRef(false)
+  const syncAtBottom = useCallback(() => {
+    const el = messagesRef.current
+    if (!el) return
+    setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 80)
+  }, [])
+  const jumpToLatest = useCallback(() => {
+    const el = messagesRef.current
+    if (!el) return
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+    setAtBottom(true)
+  }, [])
   // 是否已完成「按上次配置初始化」：AI 配置是全局的，只恢复一次，
   // 之后切换会话不再改动 provider / model。
   const initializedRef = useRef(false)
@@ -389,6 +565,7 @@ export function ChatPanel({ disabled }: Props) {
       const saved = scrollPositionsRef.current.get(pendingScrollRef.current.id)
       el.scrollTop = saved ?? 0
       pendingScrollRef.current.id = null
+      syncAtBottom()
       return
     }
     // 1.0.42 性能优化：流式期间 messages 每帧都在变，此前每次都重新触发一次
@@ -399,11 +576,21 @@ export function ChatPanel({ disabled }: Props) {
     // 平滑滚动，把正在上翻历史的用户拽回底部。
     if (el && (streamingIdsRef.current.length > 0 || pendingNewStreamRef.current)) {
       const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80
-      if (nearBottom) el.scrollTop = el.scrollHeight
+      // 主动发送（forceFollow）时无条件跟随；纯流式增量只在你本来就贴底时跟随，
+      // 这样上翻历史不会被强行拽回底部，改为由「回到最新输出」按钮兜住。
+      if (nearBottom || forceFollowRef.current) {
+        el.scrollTop = el.scrollHeight
+        forceFollowRef.current = false
+        setAtBottom(true)
+      } else {
+        setAtBottom(false)
+      }
       return
     }
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
+    forceFollowRef.current = false
+    setAtBottom(true)
+  }, [messages, syncAtBottom])
 
   // 切到物料查询时本页被 display:none 隐藏，浏览器的滚动位置会丢；
   // 重新显示时回到最新一条，避免用户每次切回来都停在会话开头。
@@ -413,19 +600,22 @@ export function ChatPanel({ disabled }: Props) {
     let wasVisible = el.offsetParent !== null
     const ro = new ResizeObserver(() => {
       const visible = el.offsetParent !== null
-      if (visible && !wasVisible) el.scrollTop = el.scrollHeight
+      if (visible && !wasVisible) {
+        el.scrollTop = el.scrollHeight
+        setAtBottom(true)
+      }
       wasVisible = visible
     })
     ro.observe(el)
     return () => ro.disconnect()
   }, [])
 
-  // 本轮回复结束后，依次把排队的问题发出去
+  // 本轮回复结束后，依次把排队的问题发出去（连带该条排队项的附件快照）
   useEffect(() => {
     if (!streaming && !disabled && queue.length > 0) {
       const [next, ...rest] = queue
       setQueue(rest)
-      void send(next)
+      void send(next.text, next.attachments)
     }
     // eslint-disable-line react-hooks/exhaustive-deps
   }, [streaming, disabled, queue])
@@ -531,15 +721,24 @@ export function ChatPanel({ disabled }: Props) {
     }
   }
 
-  const send = async (override?: string) => {
+  const send = async (override?: string, overrideAtts?: AIAttachment[]) => {
     const content = (override ?? input).trim()
     if (!content || streaming || disabled) return
+    // 主动发送：无论此刻滚到哪儿都跟着新消息回到底部（按钮兜住的是「被动流式」那段）
+    forceFollowRef.current = true
     if (!selectedProvider?.hasApiKey && providerId !== 'ollama') {
       setShowSettings(true)
       setNotice(t('aiNeedApiKey'))
       return
     }
-    if (override === undefined) setInput('')
+    // 附件：排队项自带的优先（overrideAtts），否则用输入区当前的
+    const atts = (overrideAtts && overrideAtts.length ? overrideAtts : attachments)
+    const sendAtts = atts.length ? atts : undefined
+    // 「本机文件路径」这类附件只有 Build 模式能读，其它模式先提示（图片/文本仍照常发送）
+    if (mode !== 'build' && sendAtts?.some(a => a.kind === 'file')) {
+      setNotice(t('aiAttachFileNeedsBuild'))
+    }
+    if (override === undefined) { setInput(''); setAttachments([]); setEnhanceBackup(null) }
     // 只标记「当前会话」进入生成态：别的会话仍可继续提问（并发）
     if (conversationId) markStreaming(conversationId, true)
     else setPendingNewStream(true)
@@ -550,6 +749,7 @@ export function ChatPanel({ disabled }: Props) {
       conversationId: conversationId || '',
       role: 'user',
       content,
+      attachments: sendAtts,
       createdAt: Date.now()
     }])
     // 生成 requestId：新会话落地前 conversationId 还是 null，
@@ -569,7 +769,10 @@ export function ChatPanel({ disabled }: Props) {
         modelId,
         content,
         mode,
-        lang
+        lang,
+        attachments: sendAtts,
+        // 技能只在 build 模式生效（Skills 面板也只在 build 模式出现）
+        enabledSkills: mode === 'build' ? enabledSkills : undefined
       })
       // 请求在发出事件之前就失败（如 API Key 缺失），事件不会来，这里兜底清理
       if (!res.ok) { setNotice(res.error); clearStreaming() }
@@ -582,15 +785,166 @@ export function ChatPanel({ disabled }: Props) {
     }
   }
 
-  // 提交：回复中按 Enter 时把问题排队，空闲时直接发送
+  // 提交：回复中按 Enter 时把问题排队（连带附件一起快照），空闲时直接发送
   const submit = () => {
     const content = input.trim()
     if (!content || disabled) return
     if (streaming) {
-      setQueue(q => [...q, content])
+      setQueue(q => [...q, {
+        id: `q_${Date.now().toString(36)}_${q.length}`,
+        text: content,
+        attachments: attachments.length ? attachments : undefined
+      }])
       setInput('')
+      setAttachments([])
+      setEnhanceBackup(null)
     } else {
       void send()
+    }
+  }
+
+  // ── 附件 ──────────────────────────────────────────────────────
+  const attachFromFiles = useCallback(async (files: FileList | File[] | null) => {
+    const arr = files ? Array.from(files as File[]) : []
+    if (!arr.length) return
+    setAttachBusy(true)
+    try {
+      const { list, skipped } = await filesToAttachments(arr)
+      if (list.length) setAttachments(prev => [...prev, ...list])
+      if (skipped.length) setNotice(t('aiAttachSkipped', { names: skipped.join('、') }))
+    } finally {
+      setAttachBusy(false)
+    }
+  }, [t])
+
+  const pickFiles = () => {
+    const el = document.createElement('input')
+    el.type = 'file'
+    el.multiple = true
+    el.onchange = () => { void attachFromFiles(el.files) }
+    el.click()
+  }
+
+  // ── 待发队列操作（1.0.43）：拖动排序 / 立即发送 / 载回输入框编辑 ──
+  const moveQueueItem = (from: number | null, to: number) => {
+    if (from === null || from === to) return
+    setQueue(prev => {
+      const next = prev.slice()
+      const [item] = next.splice(from, 1)
+      next.splice(to, 0, item)
+      return next
+    })
+  }
+  const sendQueueItemNow = (id: string) => {
+    const item = queue.find(q => q.id === id)
+    if (!item) return
+    if (streaming) {
+      // 正在生成：插到队首（本轮结束后第一个发出）
+      setQueue(prev => [item, ...prev.filter(q => q.id !== id)])
+      setNotice(t('aiQueueMovedFirst'))
+      return
+    }
+    setQueue(prev => prev.filter(q => q.id !== id))
+    void send(item.text, item.attachments)
+  }
+  const editQueueItem = (id: string) => {
+    const item = queue.find(q => q.id === id)
+    if (!item) return
+    setQueue(prev => prev.filter(q => q.id !== id))
+    setInput(item.text)
+    if (item.attachments?.length) setAttachments(item.attachments)
+  }
+
+  // ── 增强提示词 ────────────────────────────────────────────────
+  const enhancePrompt = async () => {
+    const text = input.trim()
+    if (!text || enhancing || !providerId) return
+    setEnhancing(true)
+    setNotice('')
+    try {
+      const res = await window.mcApi.ai.optimizePrompt({ providerId, modelId, text, lang })
+      if (!res?.ok) { setNotice(res?.message || t('aiEnhanceFailed')); return }
+      setEnhanceBackup(text)
+      setInput(String(res.text || ''))
+    } catch (e: any) {
+      setNotice(e.message)
+    } finally {
+      setEnhancing(false)
+    }
+  }
+  const undoEnhance = () => {
+    if (enhanceBackup === null) return
+    setInput(enhanceBackup)
+    setEnhanceBackup(null)
+  }
+
+  // ── 技能（仅 build 模式）──────────────────────────────────────
+  // 勾选**按会话独立**（1.0.43 修复）：键是会话 id，未落库的新会话用 '__new__'。
+  // 早先勾选是全局持久化的，于是「上一个会话勾了，新建会话照样勾着」。
+  // 现在：新建会话从零开始；切回旧会话仍是原样；进程重启后全部不勾选。
+  const [skillSel, setSkillSel] = useState<Record<string, string[]>>({})
+  const convKey = conversationId ?? '__new__'
+  const selectedSkillKeys = skillSel[convKey] || []
+  const refreshSkills = useCallback(async () => {
+    try { setSkills(await window.mcApi.ai.listSkills() as AISkillInfo[]) } catch { /* 读不到就当没有技能 */ }
+  }, [])
+  const enabledSkillInfos = useMemo(
+    () => skills.filter(s => selectedSkillKeys.includes(skillKey(s))),
+    [skills, selectedSkillKeys]
+  )
+  // 下发给主进程的是「来源:id」（内置与导入同名时靠它区分注入哪一份）
+  const enabledSkills = useMemo(() => enabledSkillInfos.map(s => skillKey(s)), [enabledSkillInfos])
+  const toggleSkill = (key: string, enabled: boolean) => {
+    setSkillSel(prev => {
+      const cur = new Set(prev[convKey] || [])
+      if (enabled) cur.add(key)
+      else cur.delete(key)
+      return { ...prev, [convKey]: [...cur] }
+    })
+  }
+  // 新会话第一次拿到 id 时，把 '__new__' 槽的勾选迁到这条会话上（否则发送后技能会被悄悄丢掉），
+  // 并清空 '__new__' —— 这样「下一条新会话」又是从零开始，正是本次要修的行为
+  const prevConvIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    const prev = prevConvIdRef.current
+    prevConvIdRef.current = conversationId
+    if (!prev && conversationId) {
+      setSkillSel(s => {
+        const pending = s['__new__'] || []
+        if (!pending.length) return s
+        return { ...s, [conversationId]: pending, __new__: [] }
+      })
+    }
+  }, [conversationId])
+  const importSkill = async (kind: 'zip' | 'dir') => {
+    setSkillBusy(true)
+    try {
+      const res = await window.mcApi.ai.importSkill(kind) as any
+      if (res?.canceled) return
+      if (!res?.ok) { setNotice(res?.message || t('aiSkillImportFailed')); return }
+      setSkills(res.skills as AISkillInfo[])
+      // 导入是明确动作 → 直接把刚导入的（user 来源那份，与内置同名也不冲突）勾到当前会话上
+      if (res.id) toggleSkill(skillKey({ source: 'user', id: String(res.id) }), true)
+      setNotice(t(res.overwritten ? 'aiSkillUpdated' : 'aiSkillImported', { name: res.name || res.id || '' }))
+    } finally {
+      setSkillBusy(false)
+    }
+  }
+  const removeSkillById = async (id: string) => {
+    setSkillBusy(true)
+    try {
+      const res = await window.mcApi.ai.removeSkill(id) as any
+      if (!res?.ok) { setNotice(res?.message || t('aiSkillImportFailed')); return }
+      setSkills(res.skills as AISkillInfo[])
+      // 同步把各会话里对它的勾选清掉，避免留下悬空键（只可能删掉 user 来源那份）
+      const dead = skillKey({ source: 'user', id })
+      setSkillSel(prev => {
+        const next: Record<string, string[]> = {}
+        for (const [k, v] of Object.entries(prev)) next[k] = v.filter(x => x !== dead)
+        return next
+      })
+    } finally {
+      setSkillBusy(false)
     }
   }
 
@@ -676,6 +1030,12 @@ export function ChatPanel({ disabled }: Props) {
             <div key={c.id} className={`ai-history-item${c.id === conversationId ? ' active' : ''}`}>
               {/* 窄窗口下点会话后自动收起抽屉，避免浮层挡住对话区 */}
               <button className="ai-history-title" onClick={() => { void openConversation(c.id); setDrawerOpen(false) }}>{c.title}</button>
+              {/* 该会话正在生成时给个标记：并发生成时才能一眼看出哪条在跑（1.0.43） */}
+              {streamingIds.includes(c.id) && (
+                <span className="ai-history-running" title={t('aiStreamingBadge')}>
+                  <span className="ai-history-running__dot" />
+                </span>
+              )}
               <button className="ai-history-delete" title={t('delete')} onClick={() => removeConversation(c.id)}>
                 <Icon name="Close" size={13} />
               </button>
@@ -746,18 +1106,43 @@ export function ChatPanel({ disabled }: Props) {
             )}
           </div>
           <Button onClick={loadModels}>{t('aiFetchModels')}</Button>
-          <div className="ai-mode-switch" role="group" aria-label={t('aiMode')}>
-            {(['ask', 'mc', 'build'] as AIAgentMode[]).map(m => (
-              <button
-                key={m}
-                type="button"
-                className={`ai-mode-btn${mode === m ? ' active' : ''}`}
-                onClick={() => setMode(m)}
-                title={m === 'build' ? t('aiWorkspaceTip') : undefined}
-              >
-                {m === 'ask' ? t('aiModeAsk') : m === 'mc' ? t('aiModeMc') : t('aiModeBuild')}
-              </button>
-            ))}
+          {/* 模式选择（1.0.43 参考 CodeBuddy）：触发器展示当前模式，菜单项带图标 / 名称 / 说明 / 勾选。
+              名称与行为完全不变——仍是 对话 / 物料 / Build 三种模式，setMode 语义不变。 */}
+          <div className="ai-mode-picker" ref={modePanelRef}>
+            <button
+              type="button"
+              className={`ai-mode-trigger${modePanelOpen ? ' open' : ''}`}
+              aria-haspopup="listbox"
+              aria-expanded={modePanelOpen}
+              aria-label={t('aiMode')}
+              title={mode === 'build' ? t('aiWorkspaceTip') : t('aiMode')}
+              onClick={() => setModePanelOpen(v => !v)}
+            >
+              <Icon name={MODE_META[mode].icon as any} size={14} />
+              <span className="ai-mode-trigger__text">{t(MODE_META[mode].labelKey)}</span>
+              <span className="ai-mode-caret"><Icon name="Play" size={10} /></span>
+            </button>
+            {modePanelOpen && (
+              <div className="ai-mode-panel" role="listbox" aria-label={t('aiMode')}>
+                {(['ask', 'mc', 'build'] as AIAgentMode[]).map(m => (
+                  <button
+                    key={m}
+                    type="button"
+                    role="option"
+                    aria-selected={mode === m}
+                    className={`ai-mode-option${mode === m ? ' on' : ''}`}
+                    onClick={() => { setMode(m); setModePanelOpen(false) }}
+                  >
+                    <span className="ai-mode-option__icon"><Icon name={MODE_META[m].icon as any} size={16} /></span>
+                    <span className="ai-mode-option__body">
+                      <span className="ai-mode-option__name">{t(MODE_META[m].labelKey)}</span>
+                      <span className="ai-mode-option__desc">{t(MODE_META[m].descKey)}</span>
+                    </span>
+                    {mode === m && <span className="ai-mode-option__check"><Icon name="Check" size={14} /></span>}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           <Button type="primary" onClick={() => setShowSettings(v => !v)}>
             {showSettings ? t('aiCollapseSettings') : t('aiSettings')}
@@ -806,7 +1191,7 @@ export function ChatPanel({ disabled }: Props) {
           </div>
         )}
 
-        <div className="ai-messages" ref={messagesRef}>
+        <div className="ai-messages" ref={messagesRef} onScroll={syncAtBottom}>
           {messages.length === 0 && (
             <div className="ai-empty">
               <div className="ai-empty-icon">AI</div>
@@ -825,23 +1210,98 @@ export function ChatPanel({ disabled }: Props) {
         </div>
 
         <div className="ai-composer">
+          {/* 滚离底部时浮出「回到最新输出」（1.0.43，参考 CodeBuddy）：
+              点击平滑回到底部；生成中额外带一个呼吸点，提示「上面还有新内容」 */}
+          {!atBottom && (
+            <button
+              type="button"
+              className={`ai-jump-btn${streaming ? ' is-live' : ''}`}
+              title={t('aiJumpLatest')}
+              aria-label={t('aiJumpLatest')}
+              onClick={jumpToLatest}
+            ><Icon name="Play" size={14} /></button>
+          )}
           {notice && <div className="ai-notice">{notice}</div>}
+          {/* 增强提示词后给一次「撤销」机会：把原文还回来，避免误点后要重新敲 */}
+          {enhanceBackup !== null && (
+            <div className="ai-notice ai-notice--ok">
+              <span>{t('aiEnhanced')}</span>
+              <button type="button" className="ai-notice-action" onClick={undoEnhance}>{t('aiUndo')}</button>
+            </div>
+          )}
           {queue.length > 0 && (
             <div className="ai-queue">
               <span className="ai-queue-label">{t('aiQueued', { n: queue.length })}</span>
-              {queue.map((q, i) => (
-                <span key={i} className="ai-queue-item" title={q}>
-                  {q.length > 24 ? q.slice(0, 24) + '…' : q}
+              <div className="ai-queue-list">
+                {queue.map((q, i) => (
+                  <div
+                    key={q.id}
+                    className={`ai-queue-item${queueOver === i && queueDrag !== null && queueDrag !== i ? ' dragover' : ''}`}
+                    draggable
+                    onDragStart={() => { setQueueDrag(i); setQueueOver(null) }}
+                    onDragOver={e => { e.preventDefault(); if (queueDrag !== null && queueDrag !== i) setQueueOver(i) }}
+                    onDragLeave={() => setQueueOver(v => (v === i ? null : v))}
+                    onDrop={e => { e.preventDefault(); moveQueueItem(queueDrag, i); setQueueDrag(null); setQueueOver(null) }}
+                    onDragEnd={() => { setQueueDrag(null); setQueueOver(null) }}
+                    title={q.text}
+                  >
+                    <span className="ai-queue-item__text">{q.text.length > 40 ? q.text.slice(0, 40) + '…' : q.text}</span>
+                    {q.attachments?.length ? (
+                      <span className="ai-queue-item__att" title={t('aiAttachCount', { n: q.attachments.length })}>
+                        <Icon name="File" size={11} />{q.attachments.length}
+                      </span>
+                    ) : null}
+                    <span className="ai-queue-item__ops">
+                      <button type="button" className="ai-queue-op" title={t('aiQueueSendNow')}
+                        onClick={() => sendQueueItemNow(q.id)}><Icon name="Play" size={11} /></button>
+                      <button type="button" className="ai-queue-op" title={t('aiQueueEdit')}
+                        onClick={() => editQueueItem(q.id)}><Icon name="Pencil" size={11} /></button>
+                      <button type="button" className="ai-queue-op danger" title={t('aiQueueRemove')}
+                        onClick={() => setQueue(prev => prev.filter(x => x.id !== q.id))}><Icon name="Close" size={11} /></button>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {/* 已启用技能的 chip（1.0.43，参考 CodeBuddy：选中的技能在输入框上方成一行 chip）：
+              点 chip 打开 Skills 面板继续管理，点 × 直接停用该技能 */}
+          {mode === 'build' && enabledSkillInfos.length > 0 && (
+            <div className="ai-skill-chip-list">
+              {enabledSkillInfos.map(s => (
+                <span key={skillKey(s)} className="ai-skill-chip" title={s.description || s.id}>
+                  <button type="button" className="ai-skill-chip__main" onClick={() => setSkillPanelOpen(true)}>
+                    <Icon name="Rocket" size={12} />
+                    <span className="ai-skill-chip__name">{s.name}</span>
+                  </button>
                   <button
                     type="button"
-                    className="ai-queue-remove"
-                    title={t('aiQueueRemove')}
-                    onClick={() => setQueue(prev => prev.filter((_, j) => j !== i))}
+                    className="ai-skill-chip__remove"
+                    title={t('aiSkillDisable')}
+                    onClick={() => toggleSkill(skillKey(s), false)}
                   ><Icon name="Close" size={11} /></button>
                 </span>
               ))}
             </div>
           )}
+          {/* 附件 chips：粘贴截图 / 拖拽文件 / 选择文件都会落到这里，发送时随消息一起带走 */}
+          {attachments.length > 0 && (
+            <div className="ai-attach-list">
+              {attachments.map(a => (
+                <AttachChip
+                  key={a.id}
+                  a={a}
+                  onRemove={id => setAttachments(prev => prev.filter(x => x.id !== id))}
+                />
+              ))}
+              <button type="button" className="ai-attach-clear" onClick={() => setAttachments([])}>{t('aiAttachClear')}</button>
+            </div>
+          )}
+          <div
+            className="ai-composer-drop"
+            onDragOver={e => { e.preventDefault() }}
+            onDrop={e => { e.preventDefault(); void attachFromFiles(e.dataTransfer?.files || null) }}
+          >
           <div className="ai-composer-input-wrap">
             <button
               type="button"
@@ -900,10 +1360,97 @@ export function ChatPanel({ disabled }: Props) {
               onKeyDown={e => {
                 if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit() }
               }}
+              // 粘贴：剪贴板里的截图，以及从资源管理器复制的文件，都直接变成附件
+              onPaste={e => {
+                const files = e.clipboardData?.files
+                if (files && files.length) { e.preventDefault(); void attachFromFiles(files) }
+              }}
             />
+          </div>
           </div>
           <div className="ai-composer-actions">
             <span className="ai-title">{title}</span>
+            <div className="ai-composer-tools">
+              {/* 增强提示词：调用当前供应商把草稿改写成更明确的提示词（不自动发送，可撤销） */}
+              <Button
+                onClick={enhancePrompt}
+                disabled={disabled || !input.trim() || enhancing}
+                title={t('aiEnhanceTip')}
+              >
+                <Icon name="Star" size={13} />
+                <span>{enhancing ? t('aiEnhancing') : t('aiEnhance')}</span>
+              </Button>
+              {/* 附件：图片 / 文本 / 其他文件（其他格式在 Build 模式下交给 file_read） */}
+              <Button onClick={pickFiles} disabled={disabled || attachBusy} title={t('aiAttachTip')}>
+                <Icon name="File" size={13} />
+                <span>{attachBusy ? t('aiAttachBusy') : t('aiAttach')}</span>
+              </Button>
+              {/* 技能：仅 Build 模式（Skills 面板 + 导入） */}
+              {mode === 'build' && (
+                <div className="ai-skill-picker" ref={skillPanelRef}>
+                  <Button
+                    onClick={() => setSkillPanelOpen(v => !v)}
+                    disabled={disabled}
+                    title={t('aiSkillsTip')}
+                  >
+                    <Icon name="Rocket" size={13} />
+                    <span>{t('aiSkills')}{enabledSkills.length ? ` (${enabledSkills.length})` : ''}</span>
+                  </Button>
+                  {skillPanelOpen && (
+                    <div className="ai-skill-panel">
+                      <div className="ai-skill-panel__head">{t('aiSkillsTitle')}</div>
+                      {/* 技能默认全部不勾选（含内置技能），且勾选只对当前会话生效：给一句明示 */}
+                      {skills.length > 0 && selectedSkillKeys.length === 0 && (
+                        <div className="ai-skill-none">{t('aiSkillNoneOn')}</div>
+                      )}
+                      {skills.length === 0 && <div className="ai-skill-empty">{t('aiSkillEmpty')}</div>}
+                      {skills.map(s => {
+                        const on = selectedSkillKeys.includes(skillKey(s))
+                        return (
+                        <div key={skillKey(s)} className={`ai-skill-item${on ? ' on' : ''}`}>
+                          <button
+                            type="button"
+                            className="ai-skill-item__main"
+                            title={s.description}
+                            onClick={() => toggleSkill(skillKey(s), !on)}
+                          >
+                            {/* 勾选框：启用=实心主题色方块 + 白色对勾；停用=只有描边的空框。
+                                此前写成「永远渲染对勾、只把颜色调淡」，取消勾选后看起来没有任何变化 */}
+                            <span className={`ai-skill-item__check${on ? ' on' : ''}`}>
+                              {on && <Icon name="Check" size={11} />}
+                            </span>
+                            <span className="ai-skill-item__text">
+                              <span className="ai-skill-item__name">
+                                {s.name}
+                                {/* 来源标签：同 id 时导入版会遮蔽内置版，标出来才知道当前生效的是哪一份 */}
+                                <span className={`ai-skill-item__tag${s.source === 'user' ? ' is-user' : ''}`}>
+                                  {s.source === 'user' ? t('aiSkillUser') : t('aiSkillBuiltin')}
+                                </span>
+                              </span>
+                              <span className="ai-skill-item__desc">{s.description || s.id}</span>
+                            </span>
+                          </button>
+                          {s.source === 'user' && (
+                            <button
+                              type="button"
+                              className="ai-skill-item__del"
+                              title={t('delete')}
+                              onClick={() => void removeSkillById(s.id)}
+                            ><Icon name="Trash" size={12} /></button>
+                          )}
+                        </div>
+                        )
+                      })}
+                      <div className="ai-skill-panel__foot">
+                        <Button ghost onClick={() => void importSkill('zip')} disabled={skillBusy}>{t('aiSkillImportZip')}</Button>
+                        <Button ghost onClick={() => void importSkill('dir')} disabled={skillBusy}>{t('aiSkillImportDir')}</Button>
+                      </div>
+                      <div className="ai-skill-panel__hint">{t('aiSkillHint')}</div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
             {streaming
               ? <Button onClick={stopGenerating} disabled={stopping}>
                   {stopping ? t('aiStopping') : t('aiStop')}
@@ -1009,6 +1556,46 @@ export function ChatPanel({ disabled }: Props) {
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * 附件 chip（输入区待发列表与消息气泡回显共用，1.0.43）。
+ *
+ * 图片类型**鼠标悬停（或键盘聚焦）时在 chip 上方浮出原图预览** ——
+ * 此前只有一个 20px 缩略图，两张截图放一起根本分不清哪张是哪张；
+ * 发送之后的回显同样可以悬停查看。
+ * 预览层 `pointer-events: none`：鼠标移上去不会被它抢走 hover 导致闪烁。
+ */
+function AttachChip({ a, onRemove }: { a: AIAttachment; onRemove?: (id: string) => void }) {
+  const t = useStore(s => s.t)
+  const isImg = a.kind === 'image' && !!a.dataUrl
+  return (
+    <span className={`ai-attach-chip ${a.kind}`} title={a.path || a.name}>
+      {isImg
+        ? <img className="ai-attach-chip__thumb" src={a.dataUrl} alt="" />
+        : <Icon name={a.kind === 'text' ? 'Pencil' : 'File'} size={12} />}
+      <span className="ai-attach-chip__name">{a.name}</span>
+      {a.size ? <span className="ai-attach-chip__size">{humanSize(a.size)}</span> : null}
+      {a.truncated ? <span className="ai-attach-chip__warn">…</span> : null}
+      {onRemove && (
+        <button
+          type="button"
+          className="ai-attach-chip__remove"
+          title={t('delete')}
+          onClick={() => onRemove(a.id)}
+        ><Icon name="Close" size={11} /></button>
+      )}
+      {isImg && (
+        <span className="ai-attach-preview">
+          <img src={a.dataUrl} alt={a.name} />
+          <span className="ai-attach-preview__meta">
+            <span className="ai-attach-preview__name">{a.name}</span>
+            {a.size ? <span className="ai-attach-preview__size">{humanSize(a.size)}</span> : null}
+          </span>
+        </span>
+      )}
+    </span>
   )
 }
 
@@ -1147,6 +1734,12 @@ const MessageItem = memo(function MessageItem({ message, thinking }: { message: 
     <div className={`ai-message ${message.role}`}>
       <div className="ai-avatar">{message.role === 'user' ? t('aiRoleUser') : 'AI'}</div>
       <div className="ai-message-body">
+        {/* 附件回显（1.0.43）：历史里也保留，追问时能对上「你说的是哪张图/哪个文件」 */}
+        {!!message.attachments?.length && (
+          <div className="ai-msg-attach-list">
+            {message.attachments.map(a => <AttachChip key={a.id} a={a} />)}
+          </div>
+        )}
         <div className="ai-bubble">
           {(message.toolRuns || []).map(run => <ToolRunCard key={run.id} run={run} />)}
           {message.role === 'assistant'

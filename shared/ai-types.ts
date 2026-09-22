@@ -84,11 +84,72 @@ export interface AIMessage {
   content: string
   reasoning?: string
   toolRuns?: AIToolRun[]
+  /** 随消息发出的附件（1.0.43）：历史里保留下 payload，便于后续追问仍能引用 */
+  attachments?: AIAttachment[]
   providerId?: string
   modelId?: string
   inputTokens?: number
   outputTokens?: number
   createdAt: number
+}
+
+/**
+ * 随消息发出的附件（1.0.43）。
+ *
+ * 三类处理方式不同：
+ * - image：内联成 dataUrl，作为视觉消息发给模型（要求所选模型支持图片）；
+ * - text ：读成文本内联进用户消息（限大小，超出会被截断）；
+ * - file ：只带本机路径，交给模型用 file_read 工具读取（仅 Build 模式可用）。
+ */
+export interface AIAttachment {
+  id: string
+  name: string
+  kind: 'image' | 'text' | 'file'
+  mime?: string
+  /** 原始字节数 */
+  size?: number
+  /** kind=image：data:image/...;base64,... */
+  dataUrl?: string
+  /** kind=text：文件文本内容（可能被截断） */
+  text?: string
+  /** kind=file：本机绝对路径 */
+  path?: string
+  /** 文本附件是否被截断（UI 提示用） */
+  truncated?: boolean
+}
+
+/**
+ * 技能（内置 + 导入），供 Skills 面板展示与勾选。
+ *
+ * 注意：**启用状态不在这里** —— 技能是**按会话独立**选择的（1.0.43 调整：早先是全局持久化，
+ * 结果新会话会继承上一个会话的勾选），选择存在渲染层当前会话的内存状态里，
+ * 下发时通过 `enabledSkills` 随消息带给主进程。
+ */
+export interface AISkillInfo {
+  id: string
+  name: string
+  description: string
+  source: 'builtin' | 'user'
+  /** 技能目录（内置在 resources/skills，导入在 userData/skills） */
+  dir: string
+}
+
+/**
+ * 技能的唯一键 = `来源:id`。
+ *
+ * 内置技能与导入技能**可能同名**（例如用户把内置的 `wjxt-file-download` 又导入了一份），
+ * 两者在面板里要各自成行、勾选状态互相独立，因此凡是「按技能标识」的地方
+ * （勾选、注入提示词、下发工具）都用这个键，而不是裸 id。
+ */
+export function skillKey(s: Pick<AISkillInfo, 'source' | 'id'>): string {
+  return `${s.source}:${s.id}`
+}
+
+/** 从技能键里取回裸 id（兼容直接传裸 id 的旧调用） */
+export function bareSkillId(key: string): string {
+  const k = String(key || '')
+  const i = k.indexOf(':')
+  return (i >= 0 ? k.slice(i + 1) : k).trim()
 }
 
 /**
@@ -130,6 +191,11 @@ export interface AISendPayload {
   extraRoots?: AIExtraRoot[]
   // 应用界面语言（zh / en），仅作为「提问语言无法判断时」的兜底
   lang?: string
+  // 随消息发出的附件（图片 / 文本 / 其他文件），见 AIAttachment
+  attachments?: AIAttachment[]
+  // 本会话启用的技能 id（内置 + 导入）。build 模式下会把它们的 SKILL.md 注入系统提示，
+  // 并按其声明下发对应工具（如鸿翼文件查询）。
+  enabledSkills?: string[]
 }
 
 /** 由 mode / 旧字段推导出实际模式，保证新旧渲染层都能正确工作 */
@@ -172,5 +238,12 @@ export const AI_IPC = {
   SAVE_PROMPT: 'ai:save-prompt',
   UPDATE_PROMPT: 'ai:update-prompt',
   DELETE_PROMPT: 'ai:delete-prompt',
+  // 技能（1.0.43）：列表 / 导入（zip 或文件夹）/ 删除
+  // 注：没有「启用停用」通道 —— 勾选是按会话存在渲染层的（见 AISkillInfo 注释）
+  SKILLS_LIST: 'ai:skills-list',
+  SKILL_IMPORT: 'ai:skill-import',
+  SKILL_REMOVE: 'ai:skill-remove',
+  // 增强提示词：用当前供应商把草稿改写成更明确的提示词（一次性请求，不落历史）
+  OPTIMIZE_PROMPT: 'ai:optimize-prompt',
   EVENT: 'ai:event'
 } as const

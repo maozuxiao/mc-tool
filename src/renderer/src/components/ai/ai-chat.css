@@ -208,31 +208,84 @@
 
 /* 已删除：.ai-skill-toggle（MC Skill 开关）—— 该功能已从工具栏移除，全工程无引用 */
 
-/* 模式切换（对话 / 物料 / Build）：胶囊分段控件 */
-.ai-mode-switch {
+/* 已删除：.ai-mode-switch / .ai-mode-btn —— 三段胶囊已改为下面这套「CodeBuddy 式下拉」
+   （1.0.43：触发器显示当前模式，菜单项带图标 / 名称 / 说明 / 勾选；文案仍是 对话 / 物料 / Build） */
+
+/* 模式下拉：触发器沿用工具栏控件的 34px 高度，面板与 .ai-model-panel 同一套纸感规格 */
+.ai-mode-picker { position: relative; display: inline-flex; }
+.ai-mode-trigger {
   display: inline-flex;
-  padding: 3px;
-  border-radius: var(--mc-radius-pill);
-  background: color-mix(in srgb, var(--mc-ink) 6%, transparent);
-}
-.ai-mode-btn {
-  border: none;
-  background: transparent;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--mc-line);
+  border-radius: var(--mc-radius-sm);
+  background: var(--mc-surface);
   color: var(--mc-ink);
+  font-family: inherit;
   font-size: var(--mc-font-base);
   font-weight: 700;
-  padding: 6px 14px;
-  border-radius: var(--mc-radius-pill);
   cursor: pointer;
-  transition: background .12s, color .12s;
+  transition: border-color .12s, box-shadow .12s;
+}
+.ai-mode-trigger:hover,
+.ai-mode-trigger.open { border-color: var(--mc-accent-soft); box-shadow: var(--mc-shadow-soft); }
+.ai-mode-trigger__text { white-space: nowrap; }
+/* 光标同款做法：Play 实心三角转 90° 得 ▼ */
+.ai-mode-caret { display: inline-flex; transition: transform .15s ease; }
+.ai-mode-trigger.open .ai-mode-caret { transform: rotate(90deg); }
+.ai-mode-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 40;
+  width: 300px;
+  padding: 6px;
+  background: var(--mc-surface);
+  border: 1px solid var(--mc-line);
+  border-radius: 14px;
+  box-shadow: var(--mc-shadow);
+}
+.ai-mode-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--mc-ink);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background .12s ease;
+}
+.ai-mode-option:hover { background: color-mix(in srgb, var(--mc-accent) 12%, transparent); }
+.ai-mode-option.on { background: var(--mc-accent-tint); }
+.ai-mode-option__icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: var(--mc-surface-2);
+  color: var(--mc-accent);
+}
+.ai-mode-option__body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ai-mode-option__name { font-size: var(--mc-font-base); font-weight: 700; }
+.ai-mode-option__desc {
+  font-size: 11.5px;
+  color: var(--mc-ink-soft);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
-.ai-mode-btn:hover { background: color-mix(in srgb, var(--mc-ink) 4%, transparent); }
-.ai-mode-btn.active {
-  background: var(--mc-accent);
-  color: #fff;
-  box-shadow: 0 2px 6px color-mix(in srgb, var(--mc-accent) 35%, transparent);
-}
+.ai-mode-option__check { flex: none; color: var(--mc-accent); display: inline-flex; }
 /* 已删除：.ai-workspace / .ai-workspace .mq-btn* —— 工作区按钮改由设置面板的
    .ai-field 承载（库 <Button> + 目录选择），该工具栏样式全工程无引用 */
 
@@ -449,6 +502,8 @@
   border-top: 1px solid var(--mc-line);
   padding: 12px 16px 16px;
   background: var(--mc-surface);
+  /* 「回到最新输出」按钮的定位基准（绝对定位贴在本容器的上沿外侧） */
+  position: relative;
   /* 布局隔离（1.0.42 二轮性能优化）：输入框的行为改动不再把整篇文档标脏，
      打字引发的重排被限制在这块输入区里。
      安全性：+ 按钮与提示词面板虽然都是 position: absolute，但它们的包含块
@@ -638,11 +693,11 @@
    提示词的删除按钮用库 <Button danger> + .ai-prompt-item-action.danger 表达危险语义。 */
 .ai-prompt-save-row { display: flex; justify-content: flex-end; margin-bottom: 8px; }
 
-/* 回复中排队的问题列表 */
+/* 待发队列（1.0.43）：从「一排药丸」升级为可操作的列表 ——
+   拖动排序 / 立刻发送（插到队首）/ 取回输入框编辑 / 删除，附件数量一并显示 */
 .ai-queue {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
+  flex-direction: column;
   gap: 6px;
   margin-bottom: 8px;
   padding: 8px 10px;
@@ -650,21 +705,120 @@
   border: 1px dashed var(--mc-accent);
   border-radius: 10px;
 }
-.ai-queue-label { font-size: 12px; color: var(--mc-ink-soft); margin-right: 2px; }
+.ai-queue-label { font-size: 12px; color: var(--mc-ink-soft); }
+.ai-queue-list { display: flex; flex-direction: column; gap: 6px; }
 .ai-queue-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px 5px 9px;
+  background: var(--mc-surface);
+  border: 1px solid var(--mc-line);
+  border-radius: 10px;
+  font-size: 12px;
+  color: var(--mc-ink);
+  cursor: grab;
+}
+.ai-queue-item.dragover { border-color: var(--mc-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--mc-accent) 22%, transparent); }
+.ai-queue-item__text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-queue-item__att {
+  flex: none;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  max-width: 240px;
-  padding: 3px 6px 3px 9px;
+  gap: 2px;
+  padding: 1px 6px;
+  border-radius: var(--mc-radius-pill);
+  background: var(--mc-surface-2);
+  color: var(--mc-ink-soft);
+  font-size: 11px;
+}
+.ai-queue-item__ops { flex: none; display: inline-flex; align-items: center; gap: 2px; }
+.ai-queue-op {
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--mc-ink-soft);
+  cursor: pointer;
+}
+.ai-queue-op:hover { background: color-mix(in srgb, var(--mc-ink) 6%, transparent); color: var(--mc-ink); }
+.ai-queue-op.danger:hover { color: var(--mc-red-deep); }
+
+/* ── 附件（1.0.43）：粘贴截图 / 拖入文件 / 选择文件，统一变成 chip ── */
+.ai-composer-drop { display: block; }
+.ai-attach-list { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 8px; }
+.ai-attach-chip {
+  position: relative; /* 悬停预览层的定位基准 */
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 260px;
+  padding: 3px 6px 3px 8px;
   background: var(--mc-surface);
   border: 1px solid var(--mc-line);
   border-radius: var(--mc-radius-pill);
   font-size: 12px;
   color: var(--mc-ink);
 }
-.ai-queue-item > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ai-queue-remove {
+
+/* ── 图片附件的悬停预览（1.0.43）──
+   默认隐藏，鼠标移到 chip（或键盘 Tab 聚焦到 chip 内）时在**上方**浮出原图 + 文件名/大小。
+   上方而不是下方：输入区贴在窗口底部，下面没有空间。
+   `pointer-events: none` 避免预览层自己截走 hover 造成闪烁；
+   过渡只做透明度/位移，不做尺寸动画（大图缩放会掉帧）。 */
+.ai-attach-preview {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  background: var(--mc-surface);
+  border: 1px solid var(--mc-line);
+  border-radius: 12px;
+  box-shadow: var(--mc-shadow);
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity .12s ease, transform .12s ease;
+}
+.ai-attach-chip:hover .ai-attach-preview,
+.ai-attach-chip:focus-within .ai-attach-preview {
+  opacity: 1;
+  transform: none;
+}
+.ai-attach-preview img {
+  display: block;
+  max-width: 280px;
+  max-height: 280px;
+  border-radius: 8px;
+  /* 图片预览层是「贴图本身」，用 contain 保证长图/宽图都完整可见 */
+  object-fit: contain;
+  background: color-mix(in srgb, var(--mc-ink) 6%, transparent);
+}
+.ai-attach-preview__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 280px;
+  font-size: 11px;
+  color: var(--mc-ink-soft);
+}
+.ai-attach-preview__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-attach-preview__size { flex: none; }
+.ai-attach-chip.image { border-color: var(--mc-accent-soft); }
+.ai-attach-chip__thumb { width: 20px; height: 20px; object-fit: cover; border-radius: 6px; flex: none; }
+.ai-attach-chip__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-attach-chip__size { flex: none; font-size: 11px; color: var(--mc-ink-soft); }
+.ai-attach-chip__warn { flex: none; color: var(--mc-red-deep); }
+.ai-attach-chip__remove {
   flex: none;
   width: 16px;
   height: 16px;
@@ -677,10 +831,241 @@
   background: transparent;
   color: var(--mc-ink-soft);
   cursor: pointer;
-  font-size: var(--mc-font-base);
-  line-height: 1;
 }
-.ai-queue-remove:hover { background: color-mix(in srgb, var(--mc-ink) 6%, transparent); color: var(--mc-red-deep); }
+.ai-attach-chip__remove:hover { background: color-mix(in srgb, var(--mc-ink) 6%, transparent); color: var(--mc-red-deep); }
+.ai-attach-clear { border: 0; background: transparent; color: var(--mc-ink-soft); font-size: 11.5px; cursor: pointer; text-decoration: underline; }
+/* 消息气泡上方的附件回显（历史里也保留） */
+.ai-msg-attach-list { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+/* 回显在对话流里（列表本身 overflow: auto 会裁剪），预览改朝**下方**展开：
+   上面的第一条消息贴顶时向上弹会被裁掉，向下则不会 */
+.ai-msg-attach-list .ai-attach-preview {
+  top: calc(100% + 8px);
+  bottom: auto;
+  transform: translateY(-4px);
+}
+
+/* ── 已启用技能的 chip（1.0.43，参考 CodeBuddy：选中的技能在输入框上方成一行）──
+   与附件 chip 同一套尺寸语言，但用主题色底以区分「能力」与「素材」。
+   点名称打开 Skills 面板继续管理，点 × 直接停用。 */
+.ai-skill-chip-list { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 8px; }
+.ai-skill-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 260px;
+  padding: 2px 4px 2px 8px;
+  background: var(--mc-accent-tint);
+  border: 1px solid var(--mc-accent-soft);
+  border-radius: var(--mc-radius-pill);
+  color: var(--mc-accent-deep);
+  font-size: 12px;
+  font-weight: 700;
+}
+.ai-skill-chip__main {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.ai-skill-chip__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-skill-chip__remove {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-left: 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.ai-skill-chip__remove:hover { background: color-mix(in srgb, var(--mc-accent) 22%, transparent); }
+
+/* ── 「回到最新输出」（1.0.43，参考 CodeBuddy）：滚离底部时浮出 ──
+   贴在输入区上沿外侧（top: -22px 让它跨在消息区与输入区的分界线上），
+   定位基准是 .ai-composer（position: relative，且它本就带 contain: layout，
+   天然是绝对定位后代的包含块）。生成中多一个呼吸小点，暗示「上面还有新内容」。 */
+.ai-jump-btn {
+  position: absolute;
+  top: -22px;
+  right: 20px;
+  z-index: 5;
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--mc-line);
+  border-radius: 50%;
+  background: var(--mc-surface);
+  color: var(--mc-ink);
+  box-shadow: var(--mc-shadow);
+  cursor: pointer;
+  transition: transform .12s ease, border-color .12s ease, color .12s ease;
+}
+/* 库没有向下箭头图标：把 Play 三角形旋转 90° 得到 ▼（与 .lifecycle-arrow 同一套做法） */
+.ai-jump-btn svg { transform: rotate(90deg); }
+.ai-jump-btn:hover {
+  transform: translateY(-2px);
+  border-color: var(--mc-accent-soft);
+  color: var(--mc-accent-deep);
+}
+.ai-jump-btn.is-live { border-color: var(--mc-accent-soft); }
+.ai-jump-btn.is-live::after {
+  content: '';
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--mc-accent);
+  animation: ai-jump-pulse 1.4s ease-in-out infinite;
+}
+@keyframes ai-jump-pulse {
+  0%, 100% { opacity: .35; transform: scale(.75); }
+  50% { opacity: 1; transform: scale(1); }
+}
+/* 窗口失焦 / 最小化时（html.win-idle，见 styles.css）暂停这个装饰性动画 */
+html.win-idle .ai-jump-btn.is-live::after { animation-play-state: paused; }
+
+/* ── 输入行右侧工具条：增强提示词 / 附件 / 技能 ── */
+.ai-composer-tools { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
+.ai-skill-picker { position: relative; display: inline-flex; }
+.ai-skill-panel {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 50;
+  width: 360px;
+  max-height: 360px;
+  overflow-y: auto;
+  padding: 8px;
+  background: var(--mc-surface);
+  border: 1px solid var(--mc-line);
+  border-radius: 14px;
+  box-shadow: var(--mc-shadow);
+}
+.ai-skill-panel__head { padding: 2px 4px 8px; font-size: var(--mc-font-sm); font-weight: 700; color: var(--mc-ink); }
+.ai-skill-empty { padding: 10px 6px; font-size: 12px; color: var(--mc-ink-soft); }
+/* 「技能默认不启用」明示（1.0.43）：只在一条都没勾选时出现，避免用户以为技能会自动生效 */
+.ai-skill-none {
+  margin: 0 2px 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--mc-accent) 10%, transparent);
+  color: var(--mc-ink-soft);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+/* 来源标签（内置 / 导入）：同 id 时导入版遮蔽内置版，标出来才知道当前生效的是哪一份 */
+.ai-skill-item__tag {
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--mc-ink) 10%, transparent);
+  color: var(--mc-ink-soft);
+  font-size: 10.5px;
+  font-weight: 500;
+  vertical-align: 1px;
+}
+.ai-skill-item__tag.is-user { background: color-mix(in srgb, var(--mc-accent) 18%, transparent); color: var(--mc-accent-deep); }
+.ai-skill-item { display: flex; align-items: center; gap: 4px; border-radius: 10px; }
+.ai-skill-item:hover { background: color-mix(in srgb, var(--mc-accent) 10%, transparent); }
+.ai-skill-item.on { background: var(--mc-accent-tint); }
+.ai-skill-item__main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px;
+  border: 0;
+  background: transparent;
+  font-family: inherit;
+  text-align: left;
+  color: var(--mc-ink);
+  cursor: pointer;
+}
+/* 勾选框：启用 = 实心主题色圆角方块 + 白色对勾；停用 = 只剩描边的空框。
+   此前写成「永远渲染对勾、只把颜色调淡」，取消勾选后肉眼几乎看不出变化（用户反馈「图标状态没变」）。 */
+.ai-skill-item__check {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  border-radius: 5px;
+  border: 1.5px solid color-mix(in srgb, var(--mc-ink) 28%, transparent);
+  background: transparent;
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background .12s ease, border-color .12s ease;
+}
+.ai-skill-item__check.on { border-color: var(--mc-accent); background: var(--mc-accent); }
+.ai-skill-item__text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ai-skill-item__name { font-size: var(--mc-font-sm); font-weight: 700; }
+.ai-skill-item__desc {
+  font-size: 11.5px;
+  color: var(--mc-ink-soft);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.ai-skill-item__del {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin-right: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--mc-ink-soft);
+  cursor: pointer;
+}
+.ai-skill-item__del:hover { color: var(--mc-red-deep); background: color-mix(in srgb, var(--mc-red) 12%, transparent); }
+.ai-skill-panel__foot { display: flex; gap: 6px; padding: 8px 4px 2px; }
+.ai-skill-panel__hint { padding: 4px; font-size: 11px; color: var(--mc-ink-soft); line-height: 1.5; }
+
+/* ── 增强提示词后的「已增强 / 撤销」提示条 ── */
+.ai-notice--ok { display: flex; align-items: center; gap: 8px; color: var(--mc-accent-deep); }
+.ai-notice-action {
+  border: 0;
+  background: transparent;
+  color: var(--mc-accent);
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0;
+}
+
+/* ── 会话列表的「正在生成」标记（并发生成时一眼看出哪条在跑）── */
+.ai-history-running { flex: none; display: inline-flex; align-items: center; }
+.ai-history-running__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--mc-accent);
+  animation: ai-running-pulse 1.2s ease-in-out infinite;
+}
+@keyframes ai-running-pulse {
+  0%, 100% { opacity: .35; transform: scale(.85); }
+  50% { opacity: 1; transform: scale(1); }
+}
 
 /* 小窗口优化：会话栏改为左侧抽屉浮层（不占布局高度，避免横向滚动条） */
 @media (max-width: 760px) {
