@@ -193,6 +193,11 @@ POST https://wj.streamax.com:9443/WebCore
    再重试一次；持续 404 才说明服务端/网关真的不可用。
 6. `WJXT_NO_SESSION` / `NEED_RELOGIN` → 应用内登录窗口会自动弹出（与工具请求同一登录态分区），
    用户登录一次后重试即可；**不要把地址交给系统浏览器**（不共享登录态）。
+6.5 `WJXT_NO_FILE_URL` → `GetPreviewPara` 回了 200 但**没有 `data.fileUrl`**：这是「会话半建立」的形态 ——
+   分区里少了站点自己种的 `token` / `browserPlatform` 等 cookie（日志里 `cookies=` 数量会明显偏少，
+   实测一次是 4、正常是 7~8），此时该接口会回一个约 400 字节的小信封。MC Tool 会自动**重新导航
+   隐藏窗口再取一次**（实测第二次就成功）；日志里会留下 `[preview] no fileUrl: … body=…` 与
+   `no fileUrl -> reload page context then retry once`。
 7. **无报错但 0 条** → 别急着下「文件不存在」或「服务端挂了」的结论。三种常见成因：
    ① **请求通道不对**（主进程 fetch 恒空，见「请求通道」一节）—— 日志行前缀可区分：
    `[page]` 才是页面上下文，`[main]` / `[fallback]` 说明走了降级通道，此时 0 条属预期；

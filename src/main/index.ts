@@ -2303,15 +2303,16 @@ ipcMain.handle('mc-wjxt-download', async (_e, payload: { fileGuid?: string; name
   // 默认文件名用搜索结果里的原始文件名（含扩展名），顺手清掉非法字符
   const name = safeFileName(String(payload?.name || '').trim() || 'download')
 
-  const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
-    defaultPath: name,
-    title: '保存文件',
-    filters: extensionFilters(name)
-  })
-  if (canceled || !filePath) return { ok: true, canceled: true }
-
   try {
+    // **先换直链再弹框**：取不到下载地址（会话半建立 / 文件已移动）时直接报错，
+    // 别让用户先白选一次保存位置。取地址只有一个很小的 JSON 请求，很快。
     const url = await wjxtResolveOriginUrl(gid)
+    const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+      defaultPath: name,
+      title: '保存文件',
+      filters: extensionFilters(name)
+    })
+    if (canceled || !filePath) return { ok: true, canceled: true }
     const r = await downloadToPath({
       url,
       filePath,

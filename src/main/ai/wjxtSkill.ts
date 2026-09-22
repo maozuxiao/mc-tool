@@ -907,16 +907,36 @@ export async function wjxtSearch(
 export async function wjxtResolveOriginUrl(fileGuid: string): Promise<string> {
   const gid = String(fileGuid || '').trim()
   if (!gid) throw new Error('MISSING_ARG')
-  const qs = new URLSearchParams({
-    t: String(Date.now()),
-    fileId: gid,
-    byid: 'true',
-    clientTypeName: 'pc',
-    deviceTypeName: 'pc',
-    browserPlatform: '1'
-  }).toString()
-  const json = readJson(await wjxtRequest(`/Preview/GetPreviewPara?${qs}`), 'preview')
-  const raw = String(json?.data?.fileUrl || '')
+
+  /** 取一次预览参数；拿不到 fileUrl 时把响应形态记进日志（便于区分「会话半建立」与「真异常」） */
+  const fetchPara = async (): Promise<string> => {
+    const qs = new URLSearchParams({
+      t: String(Date.now()),
+      fileId: gid,
+      byid: 'true',
+      clientTypeName: 'pc',
+      deviceTypeName: 'pc',
+      browserPlatform: '1'
+    }).toString()
+    const res = await wjxtRequest(`/Preview/GetPreviewPara?${qs}`)
+    const json = readJson(res, 'preview')
+    const url = String(json?.data?.fileUrl || '')
+    if (!url) {
+      // 实测形态：会话「半建立」时（分区里少了站点自己种的 token / browserPlatform 等 cookie），
+      // 该接口会回一个 HTTP 200、约 400 字节、**没有 data.fileUrl** 的小信封；
+      // 重新导航一次隐藏窗口后，同一请求就正常了（日志里 12:49 失败、12:50 重试成功即此形态）。
+      wjxtLog(`[preview] no fileUrl: status=${res.status} len=${res.body.length} cookies=${res.cookieCount} body=${JSON.stringify(res.body.slice(0, 300))}`)
+    }
+    return url
+  }
+
+  let raw = await fetchPara()
+  if (!raw) {
+    // 自愈一次：让隐藏窗口用当前会话重新绑定，再取一遍（多数情况下第二次就成功）
+    wjxtLog('[preview] no fileUrl -> reload page context then retry once')
+    await reloadCtxWin()
+    raw = await fetchPara()
+  }
   if (!raw) throw new Error('WJXT_NO_FILE_URL')
 
   let url: URL

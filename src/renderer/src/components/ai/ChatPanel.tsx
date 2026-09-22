@@ -1677,7 +1677,9 @@ function MarkdownLink({ href, children }: { href?: string; children?: React.Reac
             type: 'error',
             message: res?.error === 'NEED_RELOGIN'
               ? t('fileNeedLogin')
-              : t('fileDownloadFail', { m: res?.error || 'unknown' })
+              : res?.error === 'WJXT_NO_FILE_URL'
+                ? t('aiFileNoUrl')
+                : t('aiFileDownloadFail', { m: res?.error || 'unknown' })
           })
         }
       } catch (err: any) {
@@ -1738,7 +1740,10 @@ function MarkdownLink({ href, children }: { href?: string; children?: React.Reac
       href={href}
       className={`ai-md-link${downloading ? ' busy' : ''}`}
       onClick={handleClick}
-      aria-disabled={downloading}
+      /* 用 aria-busy 而不是 aria-disabled：项目的自定义光标（cursor.css 引 animal-island-ui 规则）
+         对 [aria-disabled='true'] 会强制 `cursor: not-allowed`，下载中光标会变成「圆圈禁行」，
+         看起来像卡住/转圈（用户反馈过）。busy 态本身已用 .busy 的 pointer-events:none 防重复点击。 */
+      aria-busy={downloading}
     >
       {downloading
         ? (progress?.total
