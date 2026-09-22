@@ -3,7 +3,7 @@
 企业 OA 物料查询的独立桌面应用。把原来只能在 OA 网页里做的「料号 / BOM / 规格文件查询」搬到本地客户端，支持批量查询、二次筛选排序去重与 CSV 导出，启动即用，不必反复打开浏览器跳转。
 
 - 仓库：https://github.com/maozuxiao/mc-tool
-- 技术栈：Electron 33 + electron-vite + React 18 + TypeScript + Zustand，UI 组件库 [`animal-island-ui`](https://www.npmjs.com/package/animal-island-ui)
+- 技术栈：Electron 33 + electron-vite + React 18 + TypeScript + Zustand，UI 组件库 [`animal-island-ui`](https://www.npmjs.com/package/animal-island-ui)；AI 面板里的操作类小图标用 [`naive-icons`](https://www.npmjs.com/package/naive-icons)（同为手绘 naive 风，按需引 `svg/*.svg?raw` 并改色跟随主题，见 `src/renderer/src/components/NaiveIcon.tsx`）
 - 当前版本：`1.0.43`（`package.json` 的 `version` 为准）
 
 ---
@@ -240,6 +240,7 @@ mc-tool/
 │        │  ├─ UpdateBar.tsx        # 顶部更新条（检查/下载/安装）
 │        │  ├─ ai/ChatPanel.tsx     # AI 对话页（会话列表、模型选择、Markdown 渲染）
 │        │  ├─ ai/ai-chat.css
+│        │  ├─ NaiveIcon.tsx        # naive-icons 小图标封装（按需引 SVG + 改色跟随主题）
 │        │  └─ nookIcon.ts          # NOOK 图标
 │        └─ assets/nook.svg + icon-leaf.png   # NOOK 图标 / 选中 Tab 的小叶子
 ├─ shared/                      # 主进程 / 渲染进程共享（纯逻辑，无副作用）

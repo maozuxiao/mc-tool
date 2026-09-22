@@ -32,3 +32,9 @@ declare module '*.svg' {
   const src: string
   export default src
 }
+
+// Vite 的 `?raw` 后缀：把文件内容当字符串导入（图标内联用，见 components/NaiveIcon.tsx）
+declare module '*?raw' {
+  const src: string
+  export default src
+}

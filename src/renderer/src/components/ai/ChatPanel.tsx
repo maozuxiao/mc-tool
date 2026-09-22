@@ -8,6 +8,10 @@ import { AI_PROTOCOL_LABELS, skillKey } from '@shared/ai-types'
 import { OA_ORIGIN } from '@shared/constants'
 import { useStore } from '../../store'
 import { Button, CodeBlock, Collapse, Icon, Tooltip } from 'animal-island-ui'
+// naive-icons（手绘 naive 风，MIT，1.1.0）：AI 面板里这几枚「操作类」图标改用它 ——
+// 库内置图标是**固定 9 色填充**的手绘风，塞进主题色药丸/小按钮里会显得花。
+// 封装见 components/NaiveIcon.tsx（按需引原始 SVG 资源 + 改色跟随主题，见该文件顶部说明）。
+import { NaiveIcon } from '../NaiveIcon'
 import { McSelect } from '../McSelect'
 
 interface ProviderBundle {
@@ -1036,8 +1040,8 @@ export function ChatPanel({ disabled }: Props) {
                   <span className="ai-history-running__dot" />
                 </span>
               )}
-              <button className="ai-history-delete" title={t('delete')} onClick={() => removeConversation(c.id)}>
-                <Icon name="Close" size={13} />
+              <button className="ai-history-delete" title={t('delete')} onClick={() => removeConversation(c.id)} data-cursor="pointer">
+                <NaiveIcon name="close" size={13} />
               </button>
             </div>
           ))}
@@ -1253,11 +1257,11 @@ export function ChatPanel({ disabled }: Props) {
                     ) : null}
                     <span className="ai-queue-item__ops">
                       <button type="button" className="ai-queue-op" title={t('aiQueueSendNow')}
-                        onClick={() => sendQueueItemNow(q.id)}><Icon name="Play" size={11} /></button>
+                        onClick={() => sendQueueItemNow(q.id)}><NaiveIcon name="play" size={11} /></button>
                       <button type="button" className="ai-queue-op" title={t('aiQueueEdit')}
-                        onClick={() => editQueueItem(q.id)}><Icon name="Pencil" size={11} /></button>
+                        onClick={() => editQueueItem(q.id)}><NaiveIcon name="pencil" size={11} /></button>
                       <button type="button" className="ai-queue-op danger" title={t('aiQueueRemove')}
-                        onClick={() => setQueue(prev => prev.filter(x => x.id !== q.id))}><Icon name="Close" size={11} /></button>
+                        onClick={() => setQueue(prev => prev.filter(x => x.id !== q.id))}><NaiveIcon name="close" size={11} /></button>
                     </span>
                   </div>
                 ))}
@@ -1271,7 +1275,7 @@ export function ChatPanel({ disabled }: Props) {
               {enabledSkillInfos.map(s => (
                 <span key={skillKey(s)} className="ai-skill-chip" title={s.description || s.id}>
                   <button type="button" className="ai-skill-chip__main" onClick={() => setSkillPanelOpen(true)}>
-                    <Icon name="Rocket" size={12} />
+                    <NaiveIcon name="rocket" size={12} />
                     <span className="ai-skill-chip__name">{s.name}</span>
                   </button>
                   <button
@@ -1279,7 +1283,7 @@ export function ChatPanel({ disabled }: Props) {
                     className="ai-skill-chip__remove"
                     title={t('aiSkillDisable')}
                     onClick={() => toggleSkill(skillKey(s), false)}
-                  ><Icon name="Close" size={11} /></button>
+                  ><NaiveIcon name="close" size={11} /></button>
                 </span>
               ))}
             </div>
@@ -1393,7 +1397,7 @@ export function ChatPanel({ disabled }: Props) {
                     disabled={disabled}
                     title={t('aiSkillsTip')}
                   >
-                    <Icon name="Rocket" size={13} />
+                    <NaiveIcon name="rocket" size={13} />
                     <span>{t('aiSkills')}{enabledSkills.length ? ` (${enabledSkills.length})` : ''}</span>
                   </Button>
                   {skillPanelOpen && (
@@ -1436,7 +1440,7 @@ export function ChatPanel({ disabled }: Props) {
                               className="ai-skill-item__del"
                               title={t('delete')}
                               onClick={() => void removeSkillById(s.id)}
-                            ><Icon name="Trash" size={12} /></button>
+                            ><NaiveIcon name="trash" size={12} /></button>
                           )}
                         </div>
                         )
