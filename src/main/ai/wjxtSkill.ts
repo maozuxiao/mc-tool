@@ -984,9 +984,14 @@ export const WJXT_SEARCH_TOOL_DEFINITION = {
       '返回里的 strategy 是命中的那条、note 会说明「原查询没命中、已自动改用 X 命中 N 条」——' +
       '看到 note 就直接用结果，**不要自己再换关键词重试**；' +
       '每个结果都带 folderPath（**真实目录路径名**，如 企业文档库/AD PLUS 2.0/版本发布）、' +
-      'folderUrl（点开可在应用内浏览该目录）与 previewUrl（点开可在应用内预览/下载该文件）：' +
-      '表格里的「目录」列请把 **folderPath 作为链接文字**、folderUrl 作为 href，' +
-      '文件名用 previewUrl 做链接 —— 不要把 path（数字 id 串）或「浏览该目录」当显示文字。' +
+      'folderUrl（点开可在应用内浏览该目录）、previewUrl（**预览**：点开在应用内窗口查看文件）与 ' +
+      'downloadUrl（**下载**：点开弹「另存为」把原始文件存到本机）。' +
+      '**结果固定用一张表回给用户**，列固定为：编号 | 文件名 | 大小 | 修改时间 | 目录 | 创建人 | 预览/下载。' +
+      '其中「文件名」用文件名做链接文字、previewUrl 做 href；「目录」把 folderPath 做链接文字、folderUrl 做 href' +
+      '（不要把 path 那个数字 id 串当显示文字）；「大小」把 size 转成 KB/MB、「修改时间」用 modifyTime、' +
+      '「创建人」用 creatorName；最后一列固定写成 `[预览](previewUrl) / [下载](downloadUrl)` ——' +
+      '**两个链接都要给，不要只写一个「预览/下载」**：「预览」是在应用内窗口打开查看、「下载」是弹保存对话框' +
+      '下载原始文件，二者不能混用同一个链接。' +
       '**本工具只检索服务器上的文件系统**：不要用本地文件工具（file_search / list_dir / file_read）去「补充检索」' +
       '同一个文件，也不要提议「把本地目录发我」这类绕开文件系统的方案；结论只能来自本工具的返回值。' +
       '登录态由应用提供，无需任何扫码或口令。用户要「找文件/查资料/下载某个文档」时先用本工具列出候选，' +
@@ -1227,8 +1232,15 @@ export async function runWjxtSearch(input: {
         folderUrl: f.parentFolderId
           ? `${WJXT_ORIGIN}/index.html#doc/enterprise/${f.parentFolderId}`
           : undefined,
-        // 文件预览页（站点原生预览，可再下载）：文件名做成这个链接，点开就能看/下
-        previewUrl: `${WJXT_ORIGIN}/preview.html?fileid=${encodeURIComponent(f.fileGuid)}`
+        // 文件预览页（站点原生预览）：文件名与「预览」链接都用它 —— 渲染层会在**应用内窗口**打开，
+        // 同一登录分区免登录，不会触发任何下载。
+        previewUrl: `${WJXT_ORIGIN}/preview.html?fileid=${encodeURIComponent(f.fileGuid)}`,
+        // 下载链接（**本应用识别的专用形式**）：站点没有「一个 URL 直接下原始文件」的静态入口
+        //（GetOriginFile 必须先换签名 token），所以给 preview.html 挂两个由应用自己解析的参数：
+        //   mcdl=1 → 渲染层判定为「下载」而不是「预览」
+        //   name=  → 保存对话框的默认文件名（含扩展名，取自搜索结果）
+        // 主进程收到后按 fileid 换出原始文件直链再下载；万一用户把链接粘到别处，它仍是合法的预览页地址。
+        downloadUrl: `${WJXT_ORIGIN}/preview.html?fileid=${encodeURIComponent(f.fileGuid)}&mcdl=1&name=${encodeURIComponent(f.name)}`
       }))
     }
   } catch (e: any) {

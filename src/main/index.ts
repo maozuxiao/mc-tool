@@ -9,12 +9,12 @@ import { OA_LOGIN_URL, OA_ORIGIN } from '@shared/constants'
 import { IPC } from '@shared/types'
 import { initAutoUpdater, isUpdateDownloaded, startUpdateDownload } from './updater'
 import { registerAIIPC } from './ai/aiIpc'
-import { setWjxtLoginOpener, setWjxtBootstrap, setWjxtLoginCloser } from './ai/wjxtSkill'
+import { setWjxtLoginOpener, setWjxtBootstrap, setWjxtLoginCloser, wjxtResolveOriginUrl, WJXT_ORIGIN } from './ai/wjxtSkill'
 // 使用持久化 partition，让 OA 登录 Cookie 自动写入磁盘并跨启动保留。
 // 这是最可靠的方案：Electron 会为每个 persist:* partition 维护独立的
 // Cookie/Storage 目录，进程退出后依然保留，无需手动文件备份。
 // 定义收敛在 ai/fileDownload.ts（手动下载与 AI 下载共用同一份）。
-import { downloadOaBuffer, PARTITION } from './ai/fileDownload'
+import { downloadOaBuffer, downloadBufferViaSession, PARTITION } from './ai/fileDownload'
 import { getHolidayPlan } from './holidaySync'
 
 let mainWindow: BrowserWindow | null = null
@@ -2251,6 +2251,39 @@ ipcMain.handle(IPC.OA_FILE_DOWNLOAD, async (_e, payload: { url: string; filename
     const msg = e?.message || String(e)
     queryLog(`[OA_FILE_DOWNLOAD] error: ${msg}`)
     if (msg === 'NEED_RELOGIN') return { ok: false, error: 'NEED_RELOGIN' }
+    return { ok: false, error: msg }
+  }
+})
+
+// 鸿翼文件系统：按 fileGuid 弹「另存为」并下载**原始文件**（AI 回复里的「下载」链接走这里）。
+// 与「预览」的分工：预览 = openInternalUrl 在应用内窗口看站点预览页；下载 = 这里弹保存框。
+// 站点没有静态的原始文件直链，必须先用 fileGuid 换出带签名 token 的 GetOriginFile 地址
+//（见 ai/wjxtSkill.ts 的 wjxtResolveOriginUrl）。
+ipcMain.handle('mc-wjxt-download', async (_e, payload: { fileGuid?: string; name?: string }): Promise<any> => {
+  const gid = String(payload?.fileGuid || '').trim()
+  if (!gid) return { ok: false, error: 'empty fileGuid' }
+  try {
+    const url = await wjxtResolveOriginUrl(gid)
+    // 走 Chromium 网络栈 + 分区登录态；「期望文件却收到 HTML 页面」会被判成 NEED_RELOGIN
+    const buf = await downloadBufferViaSession(url, `${WJXT_ORIGIN}/preview.html`)
+    // 保存对话框的默认名：用搜索结果里的原始文件名（含扩展名），顺手清掉非法字符
+    let name = String(payload?.name || '').trim()
+    try { name = decodeURIComponent(name) } catch { /* 保持原样 */ }
+    name = name.replace(/[\\/:*?"<>|]/g, '_').replace(/^\.+/, '').trim()
+    if (!name) name = 'download'
+    if (!mainWindow) return { ok: false, error: 'no main window' }
+    const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+      defaultPath: name,
+      title: '保存文件'
+    })
+    if (canceled || !filePath) return { ok: true, canceled: true }
+    writeFileSync(filePath, buf)
+    debugLog(`[wjxt-download] saved ${buf.length} bytes -> ${filePath}`)
+    return { ok: true, savedPath: filePath, size: buf.length }
+  } catch (e: any) {
+    const msg = e?.message || String(e)
+    debugLog('[wjxt-download] error: ' + msg)
+    if (msg === 'NEED_RELOGIN' || msg === 'WJXT_NO_SESSION') return { ok: false, error: 'NEED_RELOGIN' }
     return { ok: false, error: msg }
   }
 })

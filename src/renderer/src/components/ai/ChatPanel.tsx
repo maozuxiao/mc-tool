@@ -1599,6 +1599,30 @@ function AttachChip({ a, onRemove }: { a: AIAttachment; onRemove?: (id: string) 
   )
 }
 
+/**
+ * 解析鸿翼文件系统（wjxt 技能）产出的链接，把「预览」与「下载」分开：
+ * - 预览：`…/preview.html?fileid=<guid>`（技能返回的 previewUrl，文件名列也用这个）
+ * - 下载：同一地址 + `mcdl=1&name=<原始文件名>`（技能返回的 downloadUrl）
+ * 返回 null = 不是这类链接（限定 streamax 域 + preview.html + fileid，避免误伤其它内网地址）。
+ *
+ * 为什么必须单独解析：下面「规格文件下载」的旧判据 `/[?&]fileId=/i` 是**大小写不敏感**的，
+ * 会把 `fileid=` 认成 `fileId=` —— 于是点「预览」直接弹保存框，文件名还用了链接文案（「下载」），
+ * 保存类型变成「所有文件」，得到一个没有后缀的文件（1.0.43 报的 bug）。
+ */
+function parseWjxtLink(raw: string): { fileGuid: string; download: boolean; name: string } | null {
+  try {
+    const u = new URL(raw)
+    if (!/(^|\.)streamax\.com$/i.test(u.hostname)) return null
+    if (!/\/preview\.html$/i.test(u.pathname)) return null
+    const gid = u.searchParams.get('fileid') || u.searchParams.get('fileId') || ''
+    if (!gid) return null
+    // searchParams 已经解过码，不要再 decode 一次（否则名字里带 % 的会被二次解码弄坏）
+    return { fileGuid: gid, download: u.searchParams.get('mcdl') === '1', name: u.searchParams.get('name') || '' }
+  } catch {
+    return null
+  }
+}
+
 function MarkdownLink({ href, children }: { href?: string; children?: React.ReactNode }) {
   const t = useStore(s => s.t)
   const display = typeof children === 'string' ? children : ''
@@ -1613,9 +1637,38 @@ function MarkdownLink({ href, children }: { href?: string; children?: React.Reac
     if (url.startsWith('/')) url = OA_ORIGIN + url
     if (!/^https?:\/\//i.test(url)) return
 
-    // 判断是不是规格文件下载链接
+    // 鸿翼文件系统（wjxt 技能）的链接单独分流，必须排在「规格文件下载」判据之前（见 parseWjxtLink 注释）
+    const wjxt = parseWjxtLink(url)
+    if (wjxt) {
+      if (!wjxt.download) {
+        // 预览 = 在应用内窗口打开站点预览页：同一登录分区免登录，**不触发下载**
+        void window.mcApi.openOaWindow?.(url)
+        return
+      }
+      // 下载 = 弹「另存为」：主进程先按 fileGuid 换出原始文件直链，再落盘到用户选的路径
+      setDownloading(true)
+      try {
+        const res: any = await window.mcApi.wjxtDownload({ fileGuid: wjxt.fileGuid, name: wjxt.name })
+        if (!res?.ok && !res?.canceled) {
+          void window.mcApi.showMessage({
+            type: 'error',
+            message: res?.error === 'NEED_RELOGIN'
+              ? t('fileNeedLogin')
+              : t('fileDownloadFail', { m: res?.error || 'unknown' })
+          })
+        }
+      } catch (err: any) {
+        void window.mcApi.showMessage({ type: 'error', message: t('fileDownloadFail', { m: err?.message || String(err) }) })
+      } finally {
+        setDownloading(false)
+      }
+      return
+    }
+
+    // 判断是不是规格文件下载链接（OA / MC 规格文件：`fileId=` **大小写敏感**，
+    // 别再写成 /i —— 那会把上面已拦下的 `fileid=` 预览链接又拉回下载分支）
     const isSpec = /\/specificationFileDownload\b/i.test(url) ||
-      /[?&]fileId=/i.test(url) ||
+      /[?&]fileId=/.test(url) ||
       /[?&]fileName=/i.test(url)
 
     if (isSpec) {

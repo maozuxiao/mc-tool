@@ -89,6 +89,19 @@ POST https://wj.streamax.com:9443/WebCore
 | 字段表 `FIELD_DEFS` | 可用 ES 字段：`filename / filecontent / extName / creatorName / modifyTime / filepath` | 写进 `query` 参数说明 |
 | `modifyTime:[a TO b]` | 时间区间查询语法 | 写进 `query` 参数说明 |
 
+## 预览 / 下载两条链接（应用侧约定，2026-09-22）
+
+技能返回的 `previewUrl` / `downloadUrl` 是**由应用自己解释**的地址：
+
+- `previewUrl` = `…/preview.html?fileid=<guid>` → 渲染层在**应用内窗口**打开站点原生预览页，**不下载**；
+- `downloadUrl` = 同一个地址 + `mcdl=1&name=<原始文件名>` → 渲染层判定为「下载」，走主进程
+  `mc-wjxt-download`（按 `fileGuid` 换 `GetOriginFile` 直链 → 弹「另存为」→ 写盘）。
+
+**踩过的坑**：渲染层那条「规格文件下载」判据里 `/[?&]fileId=/i` 是**大小写不敏感**的，
+把 `fileid=` 也当成了 `fileId=` —— 于是点「预览」直接弹「保存规格文件」对话框，
+默认文件名取自**链接文案**（「下载」）、保存类型「所有文件」，落盘得到一个**没有后缀**的文件。
+现在：判据改大小写敏感，且 wjxt 链接在更前面单独分流。
+
 ## 「未登录」的真实形态（2026-09-22 实测，最容易被误判的一条）
 
 服务端**未登录时返回的是 HTTP 200 + 合法 JSON**，不是 401/302/HTML：

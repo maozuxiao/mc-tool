@@ -100,6 +100,10 @@ const mcApi = {
   // 不传 url = OA 工作台首页；传 url = 在应用内窗口打开该 streamax 内网地址（外部地址会退回系统浏览器）。
   // 系统浏览器不共享本应用登录态，所以内网链接一律走这里，绝不能交给 openExternal。
   openOaWindow: (url?: string): Promise<boolean> => ipcRenderer.invoke('mc-open-oa-window', url),
+  // 鸿翼文件系统：按 fileGuid 弹「另存为」下载**原始文件**（AI 回复里的「下载」链接走这里）。
+  // 与「预览」分开：预览用 openOaWindow 在应用内窗口看站点预览页，不触发下载。
+  wjxtDownload: (payload: { fileGuid: string; name?: string }): Promise<any> =>
+    ipcRenderer.invoke('mc-wjxt-download', payload),
   getZoom: (): Promise<number> => ipcRenderer.invoke('mc-get-zoom'),
   setZoom: (factor: number): Promise<void> => ipcRenderer.invoke('mc-set-zoom', factor),
   resetZoom: (): Promise<void> => ipcRenderer.invoke('mc-reset-zoom'),
