@@ -22,7 +22,7 @@
 
 ---
 
-## 一、发布一个新版本（以 1.0.44 为例）
+## 一、发布一个新版本（以 1.0.45 为例）
 
 ### 1. 同步代码并提交
 
@@ -47,17 +47,17 @@ git push origin master
 
 | 文件 | 字段 | 格式 | 示例 |
 |---|---|---|---|
-| `package.json` | `version` | SemVer **三段** | `"1.0.44"` |
-| `electron-builder.yml` | `buildVersion` | **四位**文件版本 | `1.0.44.0` |
+| `package.json` | `version` | SemVer **三段** | `"1.0.45"` |
+| `electron-builder.yml` | `buildVersion` | **四位**文件版本 | `1.0.45.0` |
 
 ```jsonc
 // package.json
-{ "version": "1.0.44" }
+{ "version": "1.0.45" }
 ```
 
 ```yaml
 # electron-builder.yml
-buildVersion: 1.0.44.0
+buildVersion: 1.0.45.0
 ```
 
 > **两处必须同步**。
@@ -72,14 +72,14 @@ buildVersion: 1.0.44.0
 在 `MC Tool Release Notes.md` 的表格末尾追加一行：
 
 ```markdown
-| 1.0.44 | 1.0.44.0 | 本次改动说明 |
+| 1.0.45 | 1.0.45.0 | 本次改动说明 |
 ```
 
 提交版本号与 notes：
 
 ```bash
 git add -A
-git commit -m "chore: bump to 1.0.44"
+git commit -m "chore: bump to 1.0.45"
 git push origin master
 ```
 
@@ -107,9 +107,9 @@ npm run pack:win   # = electron-vite build && electron-builder --win --config el
 ```text
 dist/
 ├─ latest.yml                            # 自动更新元数据（关键）
-├─ MC物料查询 Setup 1.0.44.exe            # NSIS 安装包
-├─ MC物料查询 Setup 1.0.44.exe.blockmap  # 增量更新块映射
-└─ MC物料查询 1.0.44.exe                  # 便携版
+├─ MC物料查询 Setup 1.0.45.exe            # NSIS 安装包
+├─ MC物料查询 Setup 1.0.45.exe.blockmap  # 增量更新块映射
+└─ MC物料查询 1.0.45.exe                  # 便携版
 ```
 
 > `dist/` 已被 `.gitignore` 忽略，**不要 commit**。
@@ -153,7 +153,7 @@ npx electron-builder --win --config electron-builder.yml --publish=always
 该命令会：
 
 1. 重新构建并打包到 `dist/`；
-2. 自动创建 git tag `v1.0.44`；
+2. 自动创建 git tag `v1.0.45`；
 3. 创建 GitHub Release；
 4. 上传 `latest.yml`、安装包、`.blockmap`。
 
@@ -169,7 +169,7 @@ npx electron-builder --win --config electron-builder.yml --publish=always
 $token = '你的token'
 $h = @{Authorization="Bearer $token"; "Content-Type"="application/json"}
 $rel = Invoke-RestMethod -Uri 'https://api.github.com/repos/maozuxiao/mc-tool/releases' -Headers $h
-$v = $rel | Where-Object { $_.tag_name -eq 'v1.0.44' }
+$v = $rel | Where-Object { $_.tag_name -eq 'v1.0.45' }
 $body = @{draft=$false} | ConvertTo-Json
 Invoke-RestMethod -Method PATCH -Uri "https://api.github.com/repos/maozuxiao/mc-tool/releases/$($v.id)" -Headers $h -Body $body
 ```
@@ -266,7 +266,7 @@ nsis:
   artifactName: MC物料查询-${buildVersion}-Setup.${ext}
 ```
 
-产物为 `MC物料查询-1.0.44.0-Setup.exe`，但 `latest.yml` 里产品版本仍是 `1.0.44`。仅用于测试，正式发布请改回统一命名。
+产物为 `MC物料查询-1.0.45.0-Setup.exe`，但 `latest.yml` 里产品版本仍是 `1.0.45`。仅用于测试，正式发布请改回统一命名。
 
 ---
 
@@ -276,7 +276,7 @@ nsis:
 npm run pack:mac
 ```
 
-- 产物：`dist/MC物料查询-1.0.44-<arch>.dmg`（命名来自 `mac.artifactName`）。
+- 产物：`dist/MC物料查询-1.0.45-<arch>.dmg`（命名来自 `mac.artifactName`）。
 - **签名与公证**：当前 `electron-builder.yml` 未配置 `identity` / `notarize`，打出的 DMG 未签名，macOS 会拦截（Gatekeeper）。若要正式分发 macOS 版，需补 Apple Developer 证书与公证配置。
 - **不建议在 Windows 上交叉编译 DMG**，请在 macOS 上执行。
 

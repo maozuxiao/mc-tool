@@ -260,6 +260,10 @@ export function ChatPanel({ disabled }: Props) {
   const [enhanceBackup, setEnhanceBackup] = useState<string | null>(null)
   // 正在生成的会话 id 列表：支持多个会话并发，各会话独立流式推进
   const [streamingIds, setStreamingIds] = useState<string[]>([])
+  // 「停止 / 超时」时模型一句都没输出 → 气泡会是空的。按 messageId 记下原因，
+  // 让空气泡显示一句说明（用户反馈：空消息看起来像「AI 没反应」）。
+  // 只影响渲染、不写进历史；历史里的空气泡退化为通用文案。
+  const [emptyMsgHints, setEmptyMsgHints] = useState<Record<string, 'stopped' | 'timeout'>>({})
   // 新会话在 conversation-created 回来之前还没有 id，单独记一个生成态
   const [pendingNewStream, setPendingNewStream] = useState(false)
   const [stopping, setStopping] = useState(false)
@@ -537,6 +541,11 @@ export function ChatPanel({ disabled }: Props) {
           setStopping(false)
           if (event.reason === 'timeout') setNotice(t('aiTimeout'))
           else if (event.reason === 'stopped') setNotice(t('aiStopped'))
+          // 记下「这次是被停止/超时结束的」：该消息若最终没有内容，气泡里给一句说明
+          if (event.messageId && (event.reason === 'stopped' || event.reason === 'timeout')) {
+            const reason: 'stopped' | 'timeout' = event.reason
+            setEmptyMsgHints(prev => ({ ...prev, [event.messageId as string]: reason }))
+          }
         }
         refreshConversations()
       }
@@ -1225,6 +1234,7 @@ export function ChatPanel({ disabled }: Props) {
               message={m}
               // 最后一条助手消息还没收到任何内容时，显示「思考中…」而不是一个空气泡
               thinking={streaming && i === messages.length - 1 && m.role === 'assistant'}
+              emptyHint={emptyMsgHints[m.id]}
             />
           ))}
           <div ref={bottomRef} />
@@ -1833,7 +1843,7 @@ function fmtDate(ts?: number): string {
   return `${yyyy}/${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
 }
 
-const MessageItem = memo(function MessageItem({ message, thinking }: { message: AIMessage; thinking?: boolean }) {
+const MessageItem = memo(function MessageItem({ message, thinking, emptyHint }: { message: AIMessage; thinking?: boolean; emptyHint?: 'stopped' | 'timeout' }) {
   const t = useStore(s => s.t)
   const [copied, setCopied] = useState(false)
   const copyTimer = useRef<number | null>(null)
@@ -1885,6 +1895,17 @@ const MessageItem = memo(function MessageItem({ message, thinking }: { message: 
                   <div className="ai-thinking">
                     <span className="ai-thinking-dots"><i /><i /><i /></span>
                     {t('aiThinking')}
+                  </div>
+                )}
+                {/* 停止 / 超时后模型一句都没输出时，气泡是空的 —— 补一句说明，
+                    否则看起来像「AI 没反应」。历史里（没有 in-memory 原因）退化为通用文案。 */}
+                {!thinking && !message.content && (
+                  <div className="ai-msg-empty">
+                    {emptyHint === 'timeout'
+                      ? t('aiMsgEmptyTimeout')
+                      : emptyHint === 'stopped'
+                        ? t('aiMsgEmptyStopped')
+                        : t('aiMsgEmptyGeneric')}
                   </div>
                 )}
               </>

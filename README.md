@@ -4,7 +4,7 @@
 
 - 仓库：https://github.com/maozuxiao/mc-tool
 - 技术栈：Electron 33 + electron-vite + React 18 + TypeScript + Zustand，UI 组件库 [`animal-island-ui`](https://www.npmjs.com/package/animal-island-ui)；AI 面板里的操作类小图标用 [`naive-icons`](https://www.npmjs.com/package/naive-icons)（同为手绘 naive 风，按需引 `svg/*.svg?raw` 并改色跟随主题，见 `src/renderer/src/components/NaiveIcon.tsx`）
-- 当前版本：`1.0.44`（`package.json` 的 `version` 为准）
+- 当前版本：`1.0.45`（`package.json` 的 `version` 为准）
 
 ---
 
@@ -377,9 +377,9 @@ npm run pack:all   # 全平台
 ```
 dist/
 ├─ latest.yml                            # 自动更新元数据
-├─ MC物料查询 Setup 1.0.44.exe            # NSIS 安装包
-├─ MC物料查询 Setup 1.0.44.exe.blockmap  # 增量更新块映射
-└─ MC物料查询 1.0.44.exe                  # 便携版
+├─ MC物料查询 Setup 1.0.45.exe            # NSIS 安装包
+├─ MC物料查询 Setup 1.0.45.exe.blockmap  # 增量更新块映射
+└─ MC物料查询 1.0.45.exe                  # 便携版
 ```
 
 > macOS 交叉编译在 Windows 上不可靠，DMG 请在 macOS 上打包。

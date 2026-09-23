@@ -439,6 +439,14 @@
 }
 .ai-thinking-dots i:nth-child(2) { animation-delay: .15s; }
 .ai-thinking-dots i:nth-child(3) { animation-delay: .3s; }
+/* 停止 / 超时后「模型一句都没输出」的说明文案：避免出现一个纯空气泡（用户反馈过） */
+.ai-msg-empty {
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--animal-text-soft);
+  font-style: italic;
+  user-select: none;
+}
 @keyframes ai-thinking-bounce {
   0%, 60%, 100% { transform: translateY(0); opacity: .4; }
   30% { transform: translateY(-4px); opacity: 1; }
