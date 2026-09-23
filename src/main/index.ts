@@ -2384,7 +2384,7 @@ ipcMain.handle('mc-wjxt-diagnose', async () => {
     const d = await wjxtDiag()
     edoc2 = d.loggedIn
     lines.push(`④ 鸿翼 edoc2 登录态：${d.loggedIn === true ? '✅ 已登录' : d.loggedIn === false ? '❌ 未登录' : '⚠️ 无法判定'}`)
-    lines.push(`⑤ 隐藏窗口页面上下文：${d.ctxWinAlive ? (d.ctxOnSite ? '✅ 在站内' : '⚠️ 已被跳到站外（通常是未登录）') : '⚠️ 未创建'}`)
+    lines.push(`⑤ 隐藏窗口页面上下文：${d.ctxWinAlive ? (d.ctxOnSite ? '✅ 在站内（搜索请求就靠它发出）' : '⚠️ 已被跳到站外（通常是未登录）') : '⚠️ 不可用（页面上下文起不来）'}`)
     lines.push(`⑥ 已保存的文件系统账号：${d.hasSavedCreds ? `✅ ${d.savedUser}（下次会话过期可自动续登）` : '— 无（下次登录时可勾选「记住账号密码」）'}`)
     if (d.h5WindowOpen) lines.push('⑦ 文件系统登录窗口：当前开着')
   } catch (e: any) {

@@ -715,9 +715,6 @@ export interface WjxtDiagSnapshot {
  * 不是读缓存 —— 自检的意义就在于「现在到底能不能用」。
  */
 export async function wjxtDiag(): Promise<WjxtDiagSnapshot> {
-  const win = ctxWin
-  const ctxWinAlive = !!win && !win.isDestroyed()
-  const ctxOnSite = ctxWinAlive ? isOnSite(win!.webContents.getURL()) : null
   const creds = readWjxtCreds()
   let loggedIn: boolean | null = null
   try {
@@ -725,6 +722,12 @@ export async function wjxtDiag(): Promise<WjxtDiagSnapshot> {
   } catch (e: any) {
     wjxtLog('[diag] probeLoggedIn failed: ' + String(e?.message || e))
   }
+  // ⚠️ 顺序很重要：上下文状态必须在**探测之后**采样。probeLoggedIn 走的就是页面上下文
+  // （wjxtRequest → pageFetch → ensureCtxWin），会**按需创建**隐藏窗口 ——
+  // 先采样就会得到「⑤ 未创建」与「④ 已登录」同时出现的自相矛盾结论（1.0.43 实测踩到）。
+  const win = ctxWin
+  const ctxWinAlive = !!win && !win.isDestroyed()
+  const ctxOnSite = ctxWinAlive ? isOnSite(win!.webContents.getURL()) : null
   return {
     loggedIn,
     ctxWinAlive,
