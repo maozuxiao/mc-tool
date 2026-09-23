@@ -952,9 +952,14 @@ html.win-idle .ai-jump-btn.is-live::after { animation-play-state: paused; }
   right: 0;
   bottom: calc(100% + 8px);
   z-index: 50;
-  width: 360px;
-  max-height: 360px;
-  overflow-y: auto;
+  /* 三段式：头 / 列表 / 底栏（底栏常驻可见）。以前整块面板一起滚，
+     英文下三个按钮更宽更高，把列表挤成一小条、还得滚动才能摸到按钮 → 看着「又小又挤」。 */
+  display: flex;
+  flex-direction: column;
+  /* 宽度/高度跟着视口走：英文文案比中文长（hint 3 行、技能描述 2 行），
+     固定 360px 会显得挤；上限用 min() 兜底，窄窗口 / 小屏下也不会顶出窗口。 */
+  width: min(430px, calc(100vw - 48px));
+  max-height: min(460px, 62vh);
   padding: 8px;
   background: var(--mc-surface);
   border: 1px solid var(--mc-line);
@@ -1044,7 +1049,10 @@ html.win-idle .ai-jump-btn.is-live::after { animation-play-state: paused; }
   cursor: pointer;
 }
 .ai-skill-item__del:hover { color: var(--mc-red-deep); background: color-mix(in srgb, var(--mc-red) 12%, transparent); }
-.ai-skill-panel__foot { display: flex; gap: 6px; padding: 8px 4px 2px; }
+/* 底部操作条：按钮用 size="small"（见 ChatPanel），这里只负责换行与固定位置 */
+.ai-skill-panel__foot { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 4px 2px; flex: none; }
+/* 技能列表：唯一可滚动区（头 / 底栏都固定），列表再长也不会把按钮顶出可视区 */
+.ai-skill-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .ai-skill-panel__hint { padding: 4px; font-size: 11px; color: var(--mc-ink-soft); line-height: 1.5; }
 
 /* ── 增强提示词后的「已增强 / 撤销」提示条 ── */

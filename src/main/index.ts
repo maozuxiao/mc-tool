@@ -10,6 +10,7 @@ import { IPC } from '@shared/types'
 import { initAutoUpdater, isUpdateDownloaded, startUpdateDownload } from './updater'
 import { registerAIIPC } from './ai/aiIpc'
 import { setWjxtLoginOpener, setWjxtBootstrap, setWjxtLoginCloser, wjxtResolveOriginUrl, wjxtH5Login, wjxtDiag, clearWjxtCreds, WJXT_ORIGIN } from './ai/wjxtSkill'
+import { translate, type Lang } from '@shared/i18n'
 // 使用持久化 partition，让 OA 登录 Cookie 自动写入磁盘并跨启动保留。
 // 这是最可靠的方案：Electron 会为每个 persist:* partition 维护独立的
 // Cookie/Storage 目录，进程退出后依然保留，无需手动文件备份。
@@ -2351,62 +2352,70 @@ ipcMain.handle('mc-wjxt-login', async () => {
  * 三者的凭证不是同一份，所以「物料能查」不代表「文件系统能用」——这正是这个按钮要暴露的事。
  * 结论一行给界面弹窗，明细同时写进 debug-query.log（用户发日志就能对上）。
  */
-ipcMain.handle('mc-wjxt-diagnose', async () => {
+ipcMain.handle('mc-wjxt-diagnose', async (_e, langRaw?: string) => {
+  // 文案按**界面语言**出（此前写死中文，于是英文界面下「Login self-check」里整段是中文）。
+  // 语言由 preload 传入（它同步跟踪界面语言），兜底用主进程这边的 uiLang。
+  const lang: Lang = langRaw === 'en' ? 'en' : langRaw === 'zh' ? 'zh' : (uiLang === 'en' ? 'en' : 'zh')
+  const tr = (k: string, vars?: Record<string, string | number>) => translate(lang, k, vars)
   const sess = session.fromPartition(PARTITION)
+
+  // lines = 弹窗里给人看的两行；diagLog = 只进日志的内部细节（IAM / 备份 / 页面上下文 / 已保存账号），
+  // 用户嫌细节多，所以弹窗只留「OA + edoc2 + 结论」，其余留在日志里给我们排障用。
   const lines: string[] = []
+  const diagLog: string[] = []
 
   // ① OA 物料查询
   let oaOk = false
   try {
     const r = await probeOaSession(sess)
     oaOk = !!r?.ok
-    lines.push(`① OA 物料查询会话：${oaOk ? '✅ 正常' : '❌ 异常'}${r?.reason ? `（${r.reason}）` : ''}`)
+    lines.push(tr('aiDiagOaLine', { s: tr(oaOk ? 'aiDiagStOk' : 'aiDiagStBad') }))
+    diagLog.push(`OA=${oaOk ? 'ok' : 'bad'}${r?.reason ? `(${r.reason})` : ''}`)
   } catch (e: any) {
-    lines.push(`① OA 物料查询会话：❌ 探测失败（${e?.message || e}）`)
+    lines.push(tr('aiDiagOaLine', { s: tr('aiDiagStBad') }))
+    diagLog.push('OA=probe-failed:' + (e?.message || e))
   }
 
-  // ② IAM 会话（edoc2 换票前提）
+  // IAM 会话（edoc2 的 SSO 换票前提）——只用于选结论文案 + 写日志
   let iam: boolean | null = null
   try {
     iam = await keepIamSessionAlive(sess)
-    lines.push(`② IAM 会话（鸿翼 SSO 换票前提）：${iam ? '✅ 有效' : '⚠️ 未登录 / 已过期'}`)
   } catch (e: any) {
-    lines.push(`② IAM 会话：⚠️ 探测失败（${e?.message || e}）`)
+    diagLog.push('IAM=probe-failed:' + (e?.message || e))
   }
+  diagLog.push(`IAM=${iam === null ? 'unknown' : iam ? 'alive' : 'stale'}`)
 
-  // ③ OA 会话备份（决定「重启能不能自动恢复」）
+  // OA 会话备份（决定「重启能不能自动恢复」）——只用于选结论文案 + 写日志
   const backupExists = existsSync(SESSION_BACKUP_PATH)
-  lines.push(`③ OA 会话备份：${backupExists ? '✅ 存在（重启应用可自动恢复登录态）' : '⚠️ 不存在'}`)
+  diagLog.push(`backup=${backupExists ? 'yes' : 'no'}`)
 
-  // ④⑤⑥ 鸿翼 edoc2（真探一次 GetCurrentUser）
+  // ② 鸿翼 edoc2（真探一次 GetCurrentUser）
   let edoc2: boolean | null = null
   try {
     const d = await wjxtDiag()
     edoc2 = d.loggedIn
-    lines.push(`④ 鸿翼 edoc2 登录态：${d.loggedIn === true ? '✅ 已登录' : d.loggedIn === false ? '❌ 未登录' : '⚠️ 无法判定'}`)
-    lines.push(`⑤ 隐藏窗口页面上下文：${d.ctxWinAlive ? (d.ctxOnSite ? '✅ 在站内（搜索请求就靠它发出）' : '⚠️ 已被跳到站外（通常是未登录）') : '⚠️ 不可用（页面上下文起不来）'}`)
-    lines.push(`⑥ 已保存的文件系统账号：${d.hasSavedCreds ? `✅ ${d.savedUser}（下次会话过期可自动续登）` : '— 无（下次登录时可勾选「记住账号密码」）'}`)
-    if (d.h5WindowOpen) lines.push('⑦ 文件系统登录窗口：当前开着')
+    lines.push(tr('aiDiagEdoc2Line', {
+      s: tr(d.loggedIn === true ? 'aiDiagStSignedIn' : d.loggedIn === false ? 'aiDiagStNotSignedIn' : 'aiDiagStUnknown')
+    }))
+    diagLog.push(`edoc2=${d.loggedIn === null ? 'unknown' : d.loggedIn ? 'in' : 'out'}`)
+    diagLog.push(`ctxWin=${d.ctxWinAlive ? (d.ctxOnSite ? 'onsite' : 'offsite') : 'none'}`)
+    diagLog.push(`savedCreds=${d.hasSavedCreds ? (d.savedUser || 'yes') : 'no'}`)
+    if (d.h5WindowOpen) diagLog.push('h5Win=open')
   } catch (e: any) {
-    lines.push(`④ 鸿翼 edoc2 登录态：⚠️ 探测失败（${e?.message || e}）`)
+    lines.push(tr('aiDiagEdoc2Line', { s: tr('aiDiagStUnknown') }))
+    diagLog.push('edoc2=probe-failed:' + (e?.message || e))
   }
 
   // 结论：按「先修哪一条」的顺序给可执行建议
   let verdict: string
-  if (!oaOk) {
-    verdict = 'OA 会话异常：请先在应用内重新登录 OA，再重试物料查询'
-  } else if (edoc2 === false) {
-    verdict = backupExists
-      ? 'OA 正常、文件系统未登录：先重启应用（会用 OA 会话备份自动恢复）；仍不行就用「账号密码」登录一次'
-      : 'OA 正常、文件系统未登录：请用「账号密码」登录一次（登录时会问是否记住，记住后会自动续登）'
-  } else if (edoc2 === true) {
-    verdict = iam ? '一切正常：物料查询与文件系统都可用' : '文件系统可用（IAM 已过期但不影响当前会话）'
-  } else {
-    verdict = 'OA 正常，文件系统登录态无法判定（页面上下文异常）：请重试一次；仍不行就重启应用'
-  }
+  if (!oaOk) verdict = tr('aiDiagVdOaDown')
+  else if (edoc2 === false) verdict = backupExists ? tr('aiDiagVdFsDownRestart') : tr('aiDiagVdFsDownLogin')
+  else if (edoc2 === true) verdict = iam ? tr('aiDiagVdAllOk') : tr('aiDiagVdIamStale')
+  else verdict = tr('aiDiagVdFsUnknown')
 
-  const detail = [...lines, '', `结论：${verdict}`].join('\n')
-  queryLog('[DIAG] ' + lines.join(' | ') + ' | 结论=' + verdict)
+  // detail 不含结论：弹窗顶部已经单独显示结论，重复一遍是噪音（v1 就重复了）
+  const detail = lines.join('\n')
+  queryLog(`[DIAG] ${diagLog.join(' | ')} | verdict=${verdict}`)
   return { ok: true, verdict, detail, oaOk, iam, edoc2 }
 })
 

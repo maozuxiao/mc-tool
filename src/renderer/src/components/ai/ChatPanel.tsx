@@ -1425,6 +1425,9 @@ export function ChatPanel({ disabled }: Props) {
                         <div className="ai-skill-none">{t('aiSkillNoneOn')}</div>
                       )}
                       {skills.length === 0 && <div className="ai-skill-empty">{t('aiSkillEmpty')}</div>}
+                      {/* 列表单独滚动、头/底栏固定：英文下底部那三个按钮更宽更高，
+                          以前整块面板一起滚，列表被挤成一小条、按钮还得滚动才看得见 */}
+                      <div className="ai-skill-list">
                       {skills.map(s => {
                         const on = selectedSkillKeys.includes(skillKey(s))
                         return (
@@ -1462,11 +1465,14 @@ export function ChatPanel({ disabled }: Props) {
                         </div>
                         )
                       })}
+                      </div>
+                      {/* 底栏按钮统一 size="small"：英文 Import zip / Import folder / Diagnose 用默认尺寸时
+                          又宽又高，三个就把面板占满、纵向还吃掉一大块 —— 这正是「英文下面板显小」的根因 */}
                       <div className="ai-skill-panel__foot">
-                        <Button ghost onClick={() => void importSkill('zip')} disabled={skillBusy}>{t('aiSkillImportZip')}</Button>
-                        <Button ghost onClick={() => void importSkill('dir')} disabled={skillBusy}>{t('aiSkillImportDir')}</Button>
+                        <Button size="small" ghost onClick={() => void importSkill('zip')} disabled={skillBusy}>{t('aiSkillImportZip')}</Button>
+                        <Button size="small" ghost onClick={() => void importSkill('dir')} disabled={skillBusy}>{t('aiSkillImportDir')}</Button>
                         {/* 一键自检：三条会话线（OA / IAM / 鸿翼 edoc2）一次问清，结论直接弹窗 */}
-                        <Button ghost onClick={() => void runDiag()} disabled={diagBusy}>
+                        <Button size="small" ghost onClick={() => void runDiag()} disabled={diagBusy}>
                           {diagBusy ? t('aiDiagRunning') : t('aiDiagBtn')}
                         </Button>
                       </div>

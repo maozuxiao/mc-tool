@@ -112,8 +112,9 @@ const mcApi = {
   // 成功后窗口自动关闭并跳回文件系统首页；用户可在窗口内选择记住账号密码以便自动续登。
   wjxtLogin: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('mc-wjxt-login'),
   // 「一键自检」：体检「OA 物料查询 / IAM 会话 / 鸿翼 edoc2」三条线，返回一行结论 + 明细。
-  wjxtDiagnose: (): Promise<{ ok: boolean; verdict: string; detail: string }> =>
-    ipcRenderer.invoke('mc-wjxt-diagnose'),
+  // 结论与明细由主进程按**界面语言**生成，所以这里把当前语言带过去（同 showMessage 的做法）。
+  wjxtDiagnose: (lang?: 'zh' | 'en'): Promise<{ ok: boolean; verdict: string; detail: string }> =>
+    ipcRenderer.invoke('mc-wjxt-diagnose', lang ?? currentLang),
   getZoom: (): Promise<number> => ipcRenderer.invoke('mc-get-zoom'),
   setZoom: (factor: number): Promise<void> => ipcRenderer.invoke('mc-set-zoom', factor),
   resetZoom: (): Promise<void> => ipcRenderer.invoke('mc-reset-zoom'),
