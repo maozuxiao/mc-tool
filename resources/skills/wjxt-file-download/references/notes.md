@@ -198,6 +198,21 @@ POST https://wj.streamax.com:9443/WebCore
    踩过的坑：把这种失败当成上下文损坏去 `destroy` 窗口 → 「重建 → 又被跳转 → 再失败」的**两秒一轮抖动**，
    日志被刷爆、还不停向 IAM 发起新的 OAuth 跳转（`state=` 每次都变）。现在判据是
    **「窗口当前 URL 是否还在本站域内」**：站外 → 只限速（20s 一次）把窗口拉回首页，不销毁、不重试。
+6.15 **「OA 能用」≠「edoc2 能换票」（2026-09-23 实测，真实分区副本）**：
+
+| 检查 | 结果 |
+|---|---|
+| `iam.streamax.com` cookie | `route / SESSION / usk / REQID / j_lang` **都在** |
+| `oa.streamax.com:8080` cookie | **0 个** |
+| `wj.streamax.com` cookie | 1 个（`checkToken`） |
+| edoc2 `WebCore GetCurrentUser` | `{"errorCode":"4","errorMsg":"Token失效"}` |
+| 窗口加载 `index.html` | 跳到 `iam.streamax.com/ac/#/index?lck=…&entityId=edoc2`，页面渲染「用户登录 / 扫码 / 密码」 |
+
+结论：edoc2 的 OAuth2 换票依赖 **IAM 的「AC 登录态」**，而它当前不成立（即便 IAM 侧的
+`route/SESSION/usk` cookie 还在 —— 那些可能只够 OA 侧的应用级 SSO）。
+**不要**用「OA 物料查询正常」推断「edoc2 应该能换票」，也不要反过来用「IAM 页显示登录界面」
+推断「整个 IAM 都失效了」—— 两者用的不是同一份会话。这正是备份通道（H5 账号密码，绕过 IAM）存在的理由。
+
 6.2 **未登录时 `Preview/GetPreviewPara` 会回 HTTP 200 + 约 430 字节的小信封**
    `{"status":"error","errorCode":0,"data":{"fileId":0,…,"fileUrl":null,…}}` ——
    `errorCode` 是数字 0，既不是 `ErrorCode4` 也不是 HTTP 401/302，只看状态码/长度会误判成
