@@ -1,7 +1,7 @@
-import { BrowserWindow, net, dialog } from 'electron'
+import { app, BrowserWindow, net, dialog } from 'electron'
 import { randomUUID } from 'crypto'
-import { existsSync, statSync } from 'fs'
-import { dirname, resolve } from 'path'
+import { appendFileSync, existsSync, statSync } from 'fs'
+import { dirname, join, resolve } from 'path'
 import type { AISendPayload, AIAttachment, AIExtraRoot as AllowedRoot } from '@shared/ai-types'
 import { resolveMode } from '@shared/ai-types'
 import { getProvider, savePreferences } from './providerStore'
@@ -14,6 +14,40 @@ import {
   appendMessage, appendToolRun, completeToolRun, createConversation,
   getConversation, updateMessage
 } from './historyStore'
+
+/**
+ * AI 侧诊断日志：写 `userData/debug-ai.log`。
+ *
+ * 为什么单独开一个文件：AI 请求受「模型流式 + 工具轮次 + 用户中止」三方影响，
+ * 出问题（比如「狂点停止没反应」）时必须能看到「停止有没有到主进程 / 停在哪一轮 /
+ * 之后还有没有在飞的请求」——这些事件原先一处都没记（`debug-login.log` 只有 OA / 登录 / 鸿翼）。
+ * 只记事件与状态，不记消息正文、不记 API Key。
+ */
+const AI_LOG_PATH = join(app.getPath('userData'), 'debug-ai.log')
+function aiLog(msg: string): void {
+  const line = `[${new Date().toISOString()}] ${msg}\n`
+  try { appendFileSync(AI_LOG_PATH, line) } catch { /* 日志失败不影响对话 */ }
+  console.log(line.trim())
+}
+
+/** 统一的「已中止」错误：name 必须是 AbortError —— sendMessage 靠它区分「用户停止」与真错误 */
+function abortError(): Error {
+  const e = new Error('Aborted')
+  e.name = 'AbortError'
+  return e
+}
+
+/**
+ * 中止检查点 —— **「停止」能否真正生效，全靠这个**。
+ *
+ * `AbortSignal` 的 abort 事件是**一次性**的：如果用户点停止时没有正在等待的 fetch
+ * （例如正在跑工具、或恰好在两轮之间），父 controller 只是把状态置成 aborted，
+ * 不会有任何在途请求收到通知；而事后 `addEventListener` 已经不会再次触发。
+ * 所以必须在每个阶段之间主动查一次。
+ */
+function throwIfAborted(signal: AbortSignal): void {
+  if (signal.aborted) throw abortError()
+}
 
 export interface AIStreamEvent {
   type: 'conversation-created' | 'message-created' | 'delta' | 'tool-start' | 'tool-end' | 'done' | 'error'
@@ -125,10 +159,12 @@ export function stopMessage(id: string): void {
   // 允许传 requestId 或 conversationId
   const conversationId = requestToConversation.get(id) || id
   const controller = controllers.get(conversationId)
+  const toolController = toolControllers.get(conversationId)
   if (controller) controller.abort()
   else pendingStops.add(id) // 请求尚未注册，等它注册时立即取消
-  toolControllers.get(conversationId)?.abort()
+  toolController?.abort()
   requestToConversation.delete(id)
+  aiLog(`[AI] stop id=${id} conv=${conversationId} controller=${controller ? 'found→abort' : 'NOT-FOUND(记为 pendingStops)'} toolController=${toolController ? 'found→abort' : '-'}`)
 }
 
 // 将 Promise 与 AbortSignal / 超时绑定
@@ -221,6 +257,10 @@ async function streamOpenAICompatible(input: {
   const MAX_ROUNDS = 24
   let conversation = [...messages]
   for (let round = 0; round < MAX_ROUNDS; round++) {
+    // 每轮开始先查一次是否已被停止：停止很可能落在上一轮的工具执行 / 两轮间隙里，
+    // 那时没有在途 fetch，只有这里查一次才能真正中断（否则会一路跑到 24 轮）
+    throwIfAborted(controller.signal)
+    aiLog(`[AI] round ${round + 1}/${MAX_ROUNDS} mode=${mode} msgs=${conversation.length}`)
     const isLastRound = round === MAX_ROUNDS - 1
     const body: any = {
       model: payload.modelId,
@@ -252,7 +292,10 @@ async function streamOpenAICompatible(input: {
     // 本次请求独立取消器：用户 stop + 60s 超时都能中断
     const fetchController = new AbortController()
     const onParentAbort = () => fetchController.abort()
-    controller.signal.addEventListener('abort', onParentAbort, { once: true })
+    // ⚠️ abort 事件**一次性**：用户已经点过停止时父信号早已 aborted，此时 addEventListener
+    // 再也不会触发 —— 必须显式同步一次，否则这一轮会一直跑到底（旧实现「狂点停止没反应」的成因之一）
+    if (controller.signal.aborted) fetchController.abort()
+    else controller.signal.addEventListener('abort', onParentAbort)
     // 超时要把 timedOut 打上标记，才能在前端区分「用户停止」与「请求超时」
     const fetchTimeout = setTimeout(() => {
       controller.timedOut = true
@@ -275,7 +318,10 @@ async function streamOpenAICompatible(input: {
       controller.timedOut = false
     } finally {
       clearTimeout(fetchTimeout)
-      controller.signal.removeEventListener('abort', onParentAbort)
+      // 这里**不再**摘掉父级监听：以前拿到响应头就 removeEventListener，于是
+      // 「头已到、正文还在流」或「正在跑工具」时点停止，信号传不到 fetchController，
+      // 这一轮照旧跑完。监听留到整轮结束（下一轮开头的 throwIfAborted 收口），
+      // 每轮最多一个监听、会话结束后随 controller 一起回收，无泄漏风险。
     }
 
     if (!res.ok || !res.body) {
@@ -293,6 +339,9 @@ async function streamOpenAICompatible(input: {
     let toolCalls: any[] = []
 
     while (true) {
+      // 流式阶段也要能停：父级监听已留在整轮上（推送 abort 给 fetchController），
+      // 这里再兜一道 —— 上游 SSE 有时不会因为 abort 立刻让流报错
+      throwIfAborted(controller.signal)
       const { value, done } = await reader.read()
       if (done) break
       buffer += decoder.decode(value, { stream: true })
@@ -352,6 +401,8 @@ async function streamOpenAICompatible(input: {
     toolControllers.set(conversationId, toolController)
     try {
       for (const call of toolCalls) {
+        // 工具是逐个执行的：每个之前查一次，停止后不再启动下一个工具
+        throwIfAborted(controller.signal)
         let parsed: any
         try { parsed = JSON.parse(call.function.arguments || '{}') } catch { parsed = {} }
         const runType = call.function.name.startsWith('file_') || call.function.name === 'open_folder' ? 'file' : 'material'
@@ -451,6 +502,7 @@ export async function sendMessage(payload: AISendPayload): Promise<void> {
   } catch (e: any) {
     if (e.name === 'AbortError') {
       const reason: 'stopped' | 'timeout' = controller.timedOut ? 'timeout' : 'stopped'
+      aiLog(`[AI] aborted conv=${conversationId} reason=${reason}`)
       send({ type: 'done', conversationId, messageId: assistant.id, reason })
       return
     }
