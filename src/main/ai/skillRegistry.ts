@@ -137,6 +137,25 @@ export function skillPrompt(key: string): string {
 }
 
 /**
+ * 内置技能的「路由提示」：**必须压在这段技能说明的最前面**。
+ *
+ * 为什么不能只写在 SKILL.md 或工具描述里：模型是**先定计划、再选工具**的 ——
+ * 计划阶段它读到的就是系统提示（本函数拼的这段），工具描述要等它决定调用某个工具时才看得到。
+ * 此前「只在服务器检索」只写在 SKILL.md / `wjxt_search` 描述里，实测模型仍会先跑一轮本地
+ * `file_search`，再回一句「本地没有命中」——白耗一轮往返，还把结论带偏。
+ */
+function routeHint(key: string): string {
+  const id = bareSkillId(key)
+  if (id === 'wjxt-file-download') {
+    return '【检索顺序（重要）】找文件 / 资料（规格书、认证证书、产品资料、共享给客户的文档等）时，'
+      + '**第一个动作必须是 wjxt_search**，不要先用 file_search / file_list 去搜本地目录 —— '
+      + '企业内容库在服务器上，本地工具只看用户电脑上的路径，先搜本地只会白跑一轮并给出「本地没有」这种无关结论。'
+      + '只有用户给了本地路径、或明确说文件在「本机 / 桌面 / 某盘 / 共享盘」时，才用本地文件工具。\n\n'
+  }
+  return ''
+}
+
+/**
  * 把启用的技能说明拼成一段系统提示。
  * 只注入「已启用」的，且逐个截断 —— 技能再多也不会把上下文挤爆。
  *
@@ -154,7 +173,7 @@ export function skillsPromptBlock(ids: string[], includeOffHint = false): string
     const text = skillPrompt(key).trim()
     if (!text) continue
     // 标题里带上来源：内置与导入同名时，模型/日志能看出注入的是哪一份
-    blocks.push(`【已启用技能：${key}】\n${text.slice(0, PROMPT_MAX)}`)
+    blocks.push(`【已启用技能：${key}】\n${routeHint(key)}${text.slice(0, PROMPT_MAX)}`)
   }
 
   const used = new Set(ids)
