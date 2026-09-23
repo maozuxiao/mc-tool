@@ -695,6 +695,46 @@ async function probeLoggedIn(): Promise<boolean | null> {
   }
 }
 
+/** 「一键自检」用到的鸿翼侧快照（OA / IAM 两条线由 index.ts 补充） */
+export interface WjxtDiagSnapshot {
+  /** edoc2 登录态：true/false，null=无法判定（页面上下文没起来或响应不是 JSON） */
+  loggedIn: boolean | null
+  /** 隐藏窗口（页面上下文宿主）是否还活着 */
+  ctxWinAlive: boolean
+  /** 隐藏窗口当前是否还在站点域内（被 SSO 跳到 iam 就为 false） */
+  ctxOnSite: boolean | null
+  /** H5 登录窗口是否开着 */
+  h5WindowOpen: boolean
+  /** 已保存（可自动续登）的文件系统账号 */
+  savedUser?: string
+  hasSavedCreds: boolean
+}
+
+/**
+ * 鸿翼侧的体检快照：**真实探一次** `GetCurrentUser`（会走页面上下文），
+ * 不是读缓存 —— 自检的意义就在于「现在到底能不能用」。
+ */
+export async function wjxtDiag(): Promise<WjxtDiagSnapshot> {
+  const win = ctxWin
+  const ctxWinAlive = !!win && !win.isDestroyed()
+  const ctxOnSite = ctxWinAlive ? isOnSite(win!.webContents.getURL()) : null
+  const creds = readWjxtCreds()
+  let loggedIn: boolean | null = null
+  try {
+    loggedIn = await probeLoggedIn()
+  } catch (e: any) {
+    wjxtLog('[diag] probeLoggedIn failed: ' + String(e?.message || e))
+  }
+  return {
+    loggedIn,
+    ctxWinAlive,
+    ctxOnSite,
+    h5WindowOpen: !!h5Win && !h5Win.isDestroyed(),
+    savedUser: creds?.username,
+    hasSavedCreds: !!creds
+  }
+}
+
 /**
  * 打开登录窗口后的轮询：**登录成功就自动关窗**（用户扫完码不用自己找关闭按钮），
  * 并把 warmedUp 复位，让下一次搜索重新预热（那时会直接确认「已登录」然后干活）。

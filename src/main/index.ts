@@ -9,7 +9,7 @@ import { OA_LOGIN_URL, OA_ORIGIN } from '@shared/constants'
 import { IPC } from '@shared/types'
 import { initAutoUpdater, isUpdateDownloaded, startUpdateDownload } from './updater'
 import { registerAIIPC } from './ai/aiIpc'
-import { setWjxtLoginOpener, setWjxtBootstrap, setWjxtLoginCloser, wjxtResolveOriginUrl, wjxtH5Login, clearWjxtCreds, WJXT_ORIGIN } from './ai/wjxtSkill'
+import { setWjxtLoginOpener, setWjxtBootstrap, setWjxtLoginCloser, wjxtResolveOriginUrl, wjxtH5Login, wjxtDiag, clearWjxtCreds, WJXT_ORIGIN } from './ai/wjxtSkill'
 // 使用持久化 partition，让 OA 登录 Cookie 自动写入磁盘并跨启动保留。
 // 这是最可靠的方案：Electron 会为每个 persist:* partition 维护独立的
 // Cookie/Storage 目录，进程退出后依然保留，无需手动文件备份。
@@ -2341,6 +2341,73 @@ ipcMain.handle('mc-wjxt-download', async (_e, payload: { fileGuid?: string; name
 ipcMain.handle('mc-wjxt-login', async () => {
   const ok = await wjxtH5Login({})
   return { ok }
+})
+
+/**
+ * 「一键自检」（界面 Skills 面板的「诊断」按钮）：把三条**互相独立**的会话线一次问清 ——
+ *   ① OA 物料查询（oa.streamax.com，实测靠分区全量 cookie 拼头即可用）
+ *   ② IAM 会话（iam.streamax.com；edoc2 的 SSO 换票前提，且它会自己过期）
+ *   ③ 鸿翼 edoc2（wj.streamax.com；靠 LtpaToken 或 H5 账号密码登录建立）
+ * 三者的凭证不是同一份，所以「物料能查」不代表「文件系统能用」——这正是这个按钮要暴露的事。
+ * 结论一行给界面弹窗，明细同时写进 debug-query.log（用户发日志就能对上）。
+ */
+ipcMain.handle('mc-wjxt-diagnose', async () => {
+  const sess = session.fromPartition(PARTITION)
+  const lines: string[] = []
+
+  // ① OA 物料查询
+  let oaOk = false
+  try {
+    const r = await probeOaSession(sess)
+    oaOk = !!r?.ok
+    lines.push(`① OA 物料查询会话：${oaOk ? '✅ 正常' : '❌ 异常'}${r?.reason ? `（${r.reason}）` : ''}`)
+  } catch (e: any) {
+    lines.push(`① OA 物料查询会话：❌ 探测失败（${e?.message || e}）`)
+  }
+
+  // ② IAM 会话（edoc2 换票前提）
+  let iam: boolean | null = null
+  try {
+    iam = await keepIamSessionAlive(sess)
+    lines.push(`② IAM 会话（鸿翼 SSO 换票前提）：${iam ? '✅ 有效' : '⚠️ 未登录 / 已过期'}`)
+  } catch (e: any) {
+    lines.push(`② IAM 会话：⚠️ 探测失败（${e?.message || e}）`)
+  }
+
+  // ③ OA 会话备份（决定「重启能不能自动恢复」）
+  const backupExists = existsSync(SESSION_BACKUP_PATH)
+  lines.push(`③ OA 会话备份：${backupExists ? '✅ 存在（重启应用可自动恢复登录态）' : '⚠️ 不存在'}`)
+
+  // ④⑤⑥ 鸿翼 edoc2（真探一次 GetCurrentUser）
+  let edoc2: boolean | null = null
+  try {
+    const d = await wjxtDiag()
+    edoc2 = d.loggedIn
+    lines.push(`④ 鸿翼 edoc2 登录态：${d.loggedIn === true ? '✅ 已登录' : d.loggedIn === false ? '❌ 未登录' : '⚠️ 无法判定'}`)
+    lines.push(`⑤ 隐藏窗口页面上下文：${d.ctxWinAlive ? (d.ctxOnSite ? '✅ 在站内' : '⚠️ 已被跳到站外（通常是未登录）') : '⚠️ 未创建'}`)
+    lines.push(`⑥ 已保存的文件系统账号：${d.hasSavedCreds ? `✅ ${d.savedUser}（下次会话过期可自动续登）` : '— 无（下次登录时可勾选「记住账号密码」）'}`)
+    if (d.h5WindowOpen) lines.push('⑦ 文件系统登录窗口：当前开着')
+  } catch (e: any) {
+    lines.push(`④ 鸿翼 edoc2 登录态：⚠️ 探测失败（${e?.message || e}）`)
+  }
+
+  // 结论：按「先修哪一条」的顺序给可执行建议
+  let verdict: string
+  if (!oaOk) {
+    verdict = 'OA 会话异常：请先在应用内重新登录 OA，再重试物料查询'
+  } else if (edoc2 === false) {
+    verdict = backupExists
+      ? 'OA 正常、文件系统未登录：先重启应用（会用 OA 会话备份自动恢复）；仍不行就用「账号密码」登录一次'
+      : 'OA 正常、文件系统未登录：请用「账号密码」登录一次（登录时会问是否记住，记住后会自动续登）'
+  } else if (edoc2 === true) {
+    verdict = iam ? '一切正常：物料查询与文件系统都可用' : '文件系统可用（IAM 已过期但不影响当前会话）'
+  } else {
+    verdict = 'OA 正常，文件系统登录态无法判定（页面上下文异常）：请重试一次；仍不行就重启应用'
+  }
+
+  const detail = [...lines, '', `结论：${verdict}`].join('\n')
+  queryLog('[DIAG] ' + lines.join(' | ') + ' | 结论=' + verdict)
+  return { ok: true, verdict, detail, oaOk, iam, edoc2 }
 })
 
 ipcMain.handle(IPC.COOKIE_CLEAR, async () => {

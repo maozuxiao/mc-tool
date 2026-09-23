@@ -245,6 +245,8 @@ export function ChatPanel({ disabled }: Props) {
   const [skills, setSkills] = useState<AISkillInfo[]>([])
   const [skillPanelOpen, setSkillPanelOpen] = useState(false)
   const [skillBusy, setSkillBusy] = useState(false)
+  // 「诊断」按钮的忙碌态：一键自检会真的探测三条会话线（几秒），期间禁用防连点
+  const [diagBusy, setDiagBusy] = useState(false)
   const skillPanelRef = useRef<HTMLDivElement | null>(null)
   // ── 附件（粘贴 / 拖拽 / 选择文件）──
   const [attachments, setAttachments] = useState<AIAttachment[]>([])
@@ -920,6 +922,21 @@ export function ChatPanel({ disabled }: Props) {
       })
     }
   }, [conversationId])
+  // 「诊断」：一键体检三条会话线（OA / IAM / 鸿翼 edoc2），结论弹窗、明细同时写进 wjxt.log。
+  // 用途：用户报「搜不到文件 / 让登录」时，让 TA 点一下就能拿到「到底是哪一条线断了」。
+  const runDiag = async () => {
+    setDiagBusy(true)
+    try {
+      const r: any = await window.mcApi.wjxtDiagnose?.()
+      if (!r?.ok) { void window.mcApi.showMessage({ type: 'warning', message: t('aiDiagFailed') }); return }
+      void window.mcApi.showMessage({ type: 'info', title: t('aiDiagTitle'), message: `${r.verdict}\n\n${r.detail}` })
+    } catch (e: any) {
+      void window.mcApi.showMessage({ type: 'error', message: `${t('aiDiagFailed')}：${e?.message || String(e)}` })
+    } finally {
+      setDiagBusy(false)
+    }
+  }
+
   const importSkill = async (kind: 'zip' | 'dir') => {
     setSkillBusy(true)
     try {
@@ -1448,6 +1465,10 @@ export function ChatPanel({ disabled }: Props) {
                       <div className="ai-skill-panel__foot">
                         <Button ghost onClick={() => void importSkill('zip')} disabled={skillBusy}>{t('aiSkillImportZip')}</Button>
                         <Button ghost onClick={() => void importSkill('dir')} disabled={skillBusy}>{t('aiSkillImportDir')}</Button>
+                        {/* 一键自检：三条会话线（OA / IAM / 鸿翼 edoc2）一次问清，结论直接弹窗 */}
+                        <Button ghost onClick={() => void runDiag()} disabled={diagBusy}>
+                          {diagBusy ? t('aiDiagRunning') : t('aiDiagBtn')}
+                        </Button>
                       </div>
                       <div className="ai-skill-panel__hint">{t('aiSkillHint')}</div>
                     </div>

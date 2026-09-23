@@ -111,6 +111,9 @@ const mcApi = {
   // 打开「登录文件系统（账号密码）」窗口（H5 登录页）：会话缺失/失效时的备份登录方式，
   // 成功后窗口自动关闭并跳回文件系统首页；用户可在窗口内选择记住账号密码以便自动续登。
   wjxtLogin: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('mc-wjxt-login'),
+  // 「一键自检」：体检「OA 物料查询 / IAM 会话 / 鸿翼 edoc2」三条线，返回一行结论 + 明细。
+  wjxtDiagnose: (): Promise<{ ok: boolean; verdict: string; detail: string }> =>
+    ipcRenderer.invoke('mc-wjxt-diagnose'),
   getZoom: (): Promise<number> => ipcRenderer.invoke('mc-get-zoom'),
   setZoom: (factor: number): Promise<void> => ipcRenderer.invoke('mc-set-zoom', factor),
   resetZoom: (): Promise<void> => ipcRenderer.invoke('mc-reset-zoom'),
