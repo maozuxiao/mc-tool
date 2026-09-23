@@ -108,6 +108,9 @@ const mcApi = {
   // 与「预览」分开：预览用 openOaWindow 在应用内窗口看站点预览页，不触发下载。
   wjxtDownload: (payload: { fileGuid: string; name?: string; id?: string }): Promise<any> =>
     ipcRenderer.invoke('mc-wjxt-download', payload),
+  // 打开「登录文件系统（账号密码）」窗口（H5 登录页）：会话缺失/失效时的备份登录方式，
+  // 成功后窗口自动关闭并跳回文件系统首页；用户可在窗口内选择记住账号密码以便自动续登。
+  wjxtLogin: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('mc-wjxt-login'),
   getZoom: (): Promise<number> => ipcRenderer.invoke('mc-get-zoom'),
   setZoom: (factor: number): Promise<void> => ipcRenderer.invoke('mc-set-zoom', factor),
   resetZoom: (): Promise<void> => ipcRenderer.invoke('mc-reset-zoom'),

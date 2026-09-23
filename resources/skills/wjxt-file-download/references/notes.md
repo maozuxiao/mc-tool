@@ -191,8 +191,18 @@ POST https://wj.streamax.com:9443/WebCore
    它的 `$.ajaxSetup` 还专门把 404 静默掉），原技能包的处置「重新导航一次首页」本质就是补这两步。
    MC Tool 现在的 `wjxtWarmUp` 就是「确保隐藏窗口已把首页跑完」，遇到 404 时 **强制重新导航一次**
    再重试一次；持续 404 才说明服务端/网关真的不可用。
-6. `WJXT_NO_SESSION` / `NEED_RELOGIN` → 应用内登录窗口会自动弹出（与工具请求同一登录态分区），
-   用户登录一次后重试即可；**不要把地址交给系统浏览器**（不共享登录态）。
+6. `WJXT_NO_SESSION` / `NEED_RELOGIN` → 顺序见 SKILL.md「登录态」一节。**备份通道是站点自带的 H5 登录页**
+   （`h5.html#login/index`，账号密码），不再是 SSO 页；**不要把地址交给系统浏览器**（不共享登录态）。
+6.1 **隐藏窗口被跳到站外（未登录）时，页内相对 `fetch('WebCore')` 必然 `Failed to fetch`** ——
+   这是**跨域**（页面已经在 `iam.streamax.com` 上），不是「页面上下文坏了」。
+   踩过的坑：把这种失败当成上下文损坏去 `destroy` 窗口 → 「重建 → 又被跳转 → 再失败」的**两秒一轮抖动**，
+   日志被刷爆、还不停向 IAM 发起新的 OAuth 跳转（`state=` 每次都变）。现在判据是
+   **「窗口当前 URL 是否还在本站域内」**：站外 → 只限速（20s 一次）把窗口拉回首页，不销毁、不重试。
+6.2 **未登录时 `Preview/GetPreviewPara` 会回 HTTP 200 + 约 430 字节的小信封**
+   `{"status":"error","errorCode":0,"data":{"fileId":0,…,"fileUrl":null,…}}` ——
+   `errorCode` 是数字 0，既不是 `ErrorCode4` 也不是 HTTP 401/302，只看状态码/长度会误判成
+   「文件被移动/删除」。现在取不到 `fileUrl` 时会**先 `GetCurrentUser` 复核登录态**：
+   未登录 → 报 `WJXT_NO_SESSION`（弹登录入口），确实登录着才报 `WJXT_NO_FILE_URL`。
 6.5 `WJXT_NO_FILE_URL` → `GetPreviewPara` 回了 200 但**没有 `data.fileUrl`**：这是「会话半建立」的形态 ——
    分区里少了站点自己种的 `token` / `browserPlatform` 等 cookie（日志里 `cookies=` 数量会明显偏少，
    实测一次是 4、正常是 7~8），此时该接口会回一个约 400 字节的小信封。MC Tool 会自动**重新导航

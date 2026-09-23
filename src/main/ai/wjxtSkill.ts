@@ -1,5 +1,5 @@
-import { app, BrowserWindow, session } from 'electron'
-import { appendFileSync } from 'fs'
+import { app, BrowserWindow, dialog, safeStorage, session } from 'electron'
+import { appendFileSync, existsSync, readFileSync, unlinkSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { PARTITION, downloadToDir, type DownloadToDirResult } from './fileDownload'
 import type { AIExtraRoot } from '@shared/ai-types'
@@ -91,6 +91,191 @@ export function setWjxtLoginCloser(fn: ((url: string) => void) | null): void {
   closeLoginWindow = fn
 }
 
+// ── H5 账号密码登录（备份登录方式）────────────────────────────────────────────
+/**
+ * 站点自带的 **H5 登录页**（用户名 + 密码，knockout 写的移动端 SPA）：
+ *   `https://wj.streamax.com:9443/h5.html#login/index`
+ * 探针实测的 DOM（`__probe_h5`）：`input.mui-input-clear`（用户名）、
+ * `input.mui-input-password`（密码）、`div.login-btn`（登录按钮）、页面标题「登录」。
+ *
+ * 为什么需要它（备份通道）：
+ * edoc2 的 SSO 依赖 **IAM 会话**。IAM 一旦未登录/过期，`sso/auth/goToLoginPage` 会不停在
+ * `wj.streamax.com` ↔ `iam.streamax.com/idp/authCenter/authenticate?state=…` 之间来回跳，
+ * 应用内窗口看起来就是**白屏**（用户反馈的现象）；此时唯一的自助入口就是这个 H5 页 ——
+ * 直接输账号密码即可建立 edoc2 会话，成功后站点自己会跳到桌面版首页 `/index.html`。
+ */
+export const WJXT_H5_LOGIN_URL = `${WJXT_ORIGIN}/h5.html#login/index?returnUrl=%252Findex.html`
+
+const credsFile = () => join(app.getPath('userData'), 'wjxt-login.json')
+
+/** 读取已保存的文件系统账号（密码用系统 safeStorage 加密保存；读不到/解不开返回 null） */
+export function readWjxtCreds(): { username: string; password: string } | null {
+  try {
+    const raw = JSON.parse(readFileSync(credsFile(), 'utf8'))
+    const username = String(raw?.username || '')
+    const enc = String(raw?.password || '')
+    if (!username || !enc) return null
+    if (raw?.plain) return { username, password: enc }
+    if (!safeStorage.isEncryptionAvailable()) return null
+    return { username, password: safeStorage.decryptString(Buffer.from(enc, 'base64')) }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 保存账号密码。密码优先用系统加密（Windows 下走 DPAPI）；系统不支持加密时**带 `plain:` 语义的
+ * `plain` 标记明文落盘** —— 与 AI 的 API Key 同一套策略（宁可可用，但要能一眼看出是明文）。
+ * 只在用户明确点「记住账号密码」时调用。
+ */
+export function saveWjxtCreds(username: string, password: string): void {
+  try {
+    const u = String(username || '').trim()
+    if (!u || !password) return
+    const payload: Record<string, unknown> = safeStorage.isEncryptionAvailable()
+      ? { username: u, password: safeStorage.encryptString(password).toString('base64') }
+      : { username: u, password, plain: true }
+    writeFileSync(credsFile(), JSON.stringify(payload), { encoding: 'utf8', mode: 0o600 })
+    wjxtLog(`[h5login] credentials saved for user=${u} encrypted=${!payload.plain}`)
+  } catch (e: any) {
+    wjxtLog('[h5login] save credentials failed: ' + String(e?.message || e))
+  }
+}
+
+/** 丢掉保存的账号（改过密码 / 用户选择忘记时用） */
+export function clearWjxtCreds(): void {
+  try { if (existsSync(credsFile())) unlinkSync(credsFile()) } catch { /* ignore */ }
+}
+
+/** 页面里要执行的脚本：装「提交时抓账号密码」钩子；给了凭据就自动填表并提交 */
+function h5FormScript(creds?: { username: string; password: string }): string {
+  const fill = creds
+    ? `(() => {
+    const u = document.querySelector('input.mui-input-clear');
+    const p = document.querySelector('input.mui-input-password');
+    if (!u || !p) return false;
+    u.value = ${JSON.stringify(creds.username)}; u.dispatchEvent(new Event('input', { bubbles: true }));
+    p.value = ${JSON.stringify(creds.password)}; p.dispatchEvent(new Event('input', { bubbles: true }));
+    const btn = document.querySelector('div.login-btn') || document.querySelector('button.mui-btn-primary');
+    if (!btn) return false;
+    setTimeout(() => btn.click(), 150);
+    return true;
+  })()`
+    : 'false'
+  return `(() => {
+  try {
+    if (!window.__mcCredHook) {
+      window.__mcCredHook = true;
+      // 用户点「登录」那一刻把两个输入框的值留在页面里；主进程读完只在用户确认后落盘
+      document.addEventListener('click', (e) => {
+        const t = e.target && e.target.closest ? e.target.closest('div.login-btn, button.mui-btn-primary') : null;
+        if (!t) return;
+        const u = document.querySelector('input.mui-input-clear');
+        const p = document.querySelector('input.mui-input-password');
+        if (u && p) { try { window.__mcCred = JSON.stringify({ u: u.value, p: p.value }); } catch (er) { } }
+      }, true);
+    }
+    return JSON.stringify({ filled: !!(${fill}) });
+  } catch (e) { return JSON.stringify({ error: String((e && e.message) || e) }); }
+})()`
+}
+
+let h5Win: BrowserWindow | null = null
+let h5Pending: Promise<boolean> | null = null
+
+/** 登录成功后的收尾：可选保存凭据 → 关窗 → 让隐藏页面上下文用新会话重新绑定 */
+async function afterH5LoginSuccess(win: BrowserWindow, silent: boolean): Promise<void> {
+  wjxtLog('[h5login] logged in')
+  if (!silent) {
+    let captured: { u?: string; p?: string } | null = null
+    try {
+      const raw = await win.webContents.executeJavaScript('window.__mcCred || ""')
+      if (raw) captured = JSON.parse(String(raw))
+    } catch { /* 拿不到就算了（用户可能用了扫码/其它方式） */ }
+    if (captured?.u && captured?.p && !readWjxtCreds()) {
+      try {
+        const r = await dialog.showMessageBox({
+          type: 'question',
+          buttons: ['记住账号密码', '不用了'],
+          defaultId: 0,
+          cancelId: 1,
+          noLink: true,
+          title: '保存文件系统登录信息',
+          message: `要记住文件系统的账号「${captured.u}」吗？`,
+          detail: '记住后，下次会话过期会自动用该账号重新登录。密码用系统加密保存在本机（userData/wjxt-login.json），不会上传。'
+        })
+        if (r.response === 0) saveWjxtCreds(captured.u, captured.p)
+      } catch { /* 弹窗失败不影响登录 */ }
+    }
+  }
+  try { if (!win.isDestroyed()) win.destroy() } catch { /* ignore */ }
+  warmedUp = false
+  await reloadCtxWin()
+}
+
+/**
+ * 打开 H5 登录窗口并等登录成功。
+ * - 传了 `creds`：窗口**不显示**，自动填表提交（用于「记住过账号密码」的静默续登）
+ * - 不传：窗口显示出来让用户自己输入（备份手工登录）
+ * 返回 true = edoc2 会话已建立。全程只创建一次窗口（重复调用复用同一个 Promise）。
+ */
+export function wjxtH5Login(opts: { creds?: { username: string; password: string }; silent?: boolean } = {}): Promise<boolean> {
+  if (h5Pending) return h5Pending
+  h5Pending = (async (): Promise<boolean> => {
+    const silent = !!opts.silent
+    const win = (h5Win && !h5Win.isDestroyed())
+      ? h5Win
+      : new BrowserWindow({
+        show: !silent,
+        skipTaskbar: silent,
+        width: 460,
+        height: 860,
+        minWidth: 380,
+        minHeight: 620,
+        title: '登录文件系统（账号密码）',
+        autoHideMenuBar: true,
+        webPreferences: { partition: PARTITION, contextIsolation: true, nodeIntegration: false, sandbox: true }
+      })
+    h5Win = win
+    win.on('closed', () => { if (h5Win === win) h5Win = null })
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const t = setTimeout(() => reject(new Error('load timeout')), 25000)
+        win.webContents.once('did-finish-load', () => { clearTimeout(t); resolve() })
+        win.webContents.once('did-fail-load', (_e, c, d) => { clearTimeout(t); reject(new Error(`did-fail-load ${c} ${d}`)) })
+        void win.loadURL(WJXT_H5_LOGIN_URL)
+      })
+      await new Promise(r => setTimeout(r, 1500)) // 等 knockout 把表单渲染出来
+      const res = await win.webContents
+        .executeJavaScript(h5FormScript(opts.creds), true)
+        .catch((e: any) => JSON.stringify({ error: String(e?.message || e) }))
+      wjxtLog(`[h5login] window open silent=${silent} form=${String(res).slice(0, 120)}`)
+
+      // 轮询登录结果（用户手输也给足 3 分钟）
+      const deadline = Date.now() + 3 * 60 * 1000
+      while (Date.now() < deadline) {
+        await new Promise(r => setTimeout(r, 2000))
+        if (win.isDestroyed()) break
+        if (await probeLoggedIn() === true) {
+          await afterH5LoginSuccess(win, silent)
+          return true
+        }
+      }
+      wjxtLog('[h5login] give up: still not logged in after 3 minutes')
+      return false
+    } catch (e: any) {
+      wjxtLog('[h5login] failed: ' + String(e?.message || e))
+      // H5 页都起不来 → 退回原来的 SSO 登录窗口（老路径，IAM 会话正常时仍可用）
+      try { openLoginWindow?.(WJXT_SSO_LOGIN_URL) } catch { /* ignore */ }
+      watchLoginUntilDone()
+      return false
+    } finally {
+      h5Pending = null
+    }
+  })()
+  return h5Pending
+}
+
 export interface WjxtFileInfo {
   /** ES 文档 id（DownLoadCheck 用） */
   id: string
@@ -161,6 +346,25 @@ async function cookieNamesFor(url: string): Promise<{ count: number; names: stri
   }
 }
 
+/** 该 URL 是否还在站点域内（被 SSO 跳到 iam.streamax.com 之后就不再是） */
+function isOnSite(u: string): boolean {
+  try { return new URL(u).host.toLowerCase() === new URL(WJXT_ORIGIN).host.toLowerCase() } catch { return false }
+}
+
+let ctxRenavAt = 0
+/**
+ * 隐藏窗口被跳到站外（= 未登录）时，**限速**把它拉回首页。
+ * 不限速的话：`probeLoggedIn` 每 2 秒轮询一次 → 每次都重新发起 SSO 跳转（state= 每次不同），
+ * 既刷日志、又可能触发服务端风控；限速后 20 秒最多拉一次。
+ */
+async function renavigateCtxWinIfStale(): Promise<void> {
+  if (Date.now() - ctxRenavAt < 20000) return
+  ctxRenavAt = Date.now()
+  const win = ctxWin
+  if (!win || win.isDestroyed()) return
+  try { await win.loadURL(WJXT_LOGIN_URL) } catch { /* 拉不回来也无所谓，下次再说 */ }
+}
+
 // ── 页面上下文（隐藏窗口）─────────────────────────────────────────────────────────────
 /**
  * 常驻的隐藏窗口：站点首页的宿主。所有 WebCore 请求都在它的页面上下文里发起。
@@ -183,8 +387,15 @@ function destroyCtxWin(): void {
   }
 }
 
-// 退出时收掉隐藏窗口，别留下游离的渲染进程
-app.on('will-quit', () => destroyCtxWin())
+// 退出时收掉这两个工具侧窗口，别留下游离的渲染进程
+app.on('will-quit', () => {
+  destroyCtxWin()
+  const w = h5Win
+  h5Win = null
+  if (w && !w.isDestroyed()) {
+    try { w.destroy() } catch { /* ignore */ }
+  }
+})
 
 /** 创建（或复用）隐藏窗口，并等站点首页加载完成。返回 false = 页面上下文不可用。 */
 async function ensureCtxWin(timeoutMs = 25000): Promise<boolean> {
@@ -235,7 +446,10 @@ async function reloadCtxWin(): Promise<void> {
   const win = ctxWin
   if (!win || win.isDestroyed()) { await ensureCtxWin(); return }
   try {
-    await win.webContents.reload()
+    // 窗口若已被跳到站外（未登录时会被 302 到 iam），reload 只会把登录页再刷一遍 ——
+    // 这种情况要显式导航回站点首页，才能让页面重新跑会话绑定
+    if (!isOnSite(win.webContents.getURL())) await win.loadURL(WJXT_LOGIN_URL)
+    else await win.webContents.reload()
     await new Promise(r => setTimeout(r, 1200))
     wjxtLog('[page] hidden context reloaded')
   } catch (e: any) {
@@ -257,6 +471,18 @@ async function pageFetch(
   if (!(await ensureCtxWin(Math.min(timeoutMs, 25000)))) return null
   const win = ctxWin
   if (!win || win.isDestroyed()) return null
+
+  // 未登录 / SSO 换票失败时，隐藏窗口会被 302 到 iam.streamax.com（或 /sso/）——
+  // 此时页内**相对** fetch('WebCore') 会解析成跨域请求，浏览器直接回 `Failed to fetch`。
+  // 这不是「上下文坏了」，而是「没登录」：
+  //   · 不能据此销毁窗口 —— 否则会陷入「重建 → 又被跳转 → 再失败」的两秒一轮抖动
+  //     （实测把日志刷爆、还不停向 IAM 发起新的 OAuth 跳转）；
+  //   · 也不能拿它当业务结论 —— 交给降级通道去给出明确的「未登录」判据。
+  if (!isOnSite(win.webContents.getURL())) {
+    wjxtLog(`[page] hidden window off-site (${win.webContents.getURL().slice(0, 120)}) -> not logged in, skip page-context fetch`)
+    void renavigateCtxWinIfStale()
+    return null
+  }
 
   const url = new URL(path, WJXT_ORIGIN).toString()
   const headers: Record<string, string> = {
@@ -311,7 +537,8 @@ async function pageFetch(
   if (parsed?.error) {
     const msg = String(parsed.error)
     wjxtLog(`[page] fetch ${path} failed: ${msg}`)
-    // 上下文坏了（Failed to fetch / Load failed）→ 丢窗口重建；这类失败不是业务结论，交给降级通道
+    // 走到这里说明窗口仍在站点域内（站外的情况已在上面拦掉），这种 Failed to fetch 才是
+    // 「页面上下文真坏了」→ 丢窗口重建；同样不作为业务结论，交给降级通道
     if (/failed to fetch|networkerror|load failed|err_/i.test(msg)) { destroyCtxWin(); return null }
     return null
   }
@@ -541,6 +768,17 @@ async function wjxtWarmUp(force = false): Promise<void> {
         wjxtLog('[warmup] hidden bootstrap failed: ' + String(e?.message || e))
       }
       loggedIn = await recheck('recheck#2')
+    }
+
+    // ③ H5 账号密码自动续登：用户之前点过「记住账号密码」时，这里静默登录，用户完全无感
+    if (loggedIn === false) {
+      const saved = readWjxtCreds()
+      if (saved) {
+        wjxtLog(`[warmup] try silent H5 login with saved credentials (user=${saved.username})`)
+        const ok = await wjxtH5Login({ creds: saved, silent: true })
+        wjxtLog(`[warmup] silent H5 login ok=${ok}`)
+        if (ok) loggedIn = true
+      }
     }
 
     if (loggedIn === false) {
@@ -937,7 +1175,16 @@ export async function wjxtResolveOriginUrl(fileGuid: string): Promise<string> {
     await reloadCtxWin()
     raw = await fetchPara()
   }
-  if (!raw) throw new Error('WJXT_NO_FILE_URL')
+  if (!raw) {
+    // 拿不到下载地址时**先确认登录态**：实测未登录时该接口回的是
+    // HTTP 200 + {"status":"error","errorCode":0,"data":{"fileUrl":null,…}}（约 430 字节），
+    // 只看状态码/长度会把「没登录」误判成「文件被移动/删除」。
+    // 未登录 → 抛 WJXT_NO_SESSION，上层据此弹出登录入口；确实登录着才说「拿不到下载地址」。
+    const loggedIn = await probeLoggedIn()
+    wjxtLog(`[preview] no fileUrl -> loggedIn=${loggedIn}`)
+    if (loggedIn === false) throw new Error('WJXT_NO_SESSION')
+    throw new Error('WJXT_NO_FILE_URL')
+  }
 
   let url: URL
   try { url = new URL(raw, WJXT_ORIGIN) } catch { throw new Error('WJXT_BAD_FILE_URL') }
@@ -968,24 +1215,26 @@ function toUserError(e: any): string {
  * 窗口与工具请求共用 persist:mc-query 分区 —— 用户登录一次，工具侧立刻就有会话。
  */
 function reloginResult(code: 'NEED_RELOGIN' | 'WJXT_NO_SESSION'): any {
-  // 直接开 SSO 登录页：实测该页面不会自动登录（分区里有 SSO 票也照样 ErrorCode4），
-  // 首次必须人工扫码一次 —— 让用户一开窗就看到登录界面，别先看一屏空白
-  try { openLoginWindow?.(WJXT_SSO_LOGIN_URL) } catch { /* 开窗失败不影响给模型的结论 */ }
-  watchLoginUntilDone()
-  wjxtLog(`need login (${code}) -> open in-app SSO login window ${WJXT_SSO_LOGIN_URL}`)
+  // 首选 **H5 账号密码登录窗口**（备份通道，见文件顶部 wjxtH5Login 的长注释）：
+  // 老的 SSO 页在 IAM 未登录时会不停在 wj/sso ↔ iam 之间跳转，应用内窗口看起来就是白屏（用户反馈过）；
+  // H5 页直接输账号密码即可建会话，成功后自动关窗并跳回桌面版首页。
+  // 这里不 await：本次工具调用要先给模型/用户一个可执行结论，窗口在后台等登录结果。
+  void wjxtH5Login({})
+  wjxtLog(`need login (${code}) -> open in-app H5 login window ${WJXT_H5_LOGIN_URL}`)
   return {
     ok: false,
     error: code,
     needLogin: true,
-    loginUrl: WJXT_SSO_LOGIN_URL,
+    loginUrl: WJXT_H5_LOGIN_URL,
     message: code === 'WJXT_NO_SESSION'
-      ? '应用内还没有鸿翼文件系统（edoc2）的登录态 —— 服务端对请求返回了未登录信封'
-        + '（errorCode=ErrorCode4，url 指向 sso/auth/goToLoginPage）。'
-        + '已为你打开应用内登录窗口：**首次需要在那个窗口里扫码登录一次（这一步工具无法代扫）**。'
-        + '登录成功后窗口会自动关闭，届时让我重试同一个查询即可 —— 会话会保留下来，之后不会再打扰你。'
-        + '**不要**把这个地址复制到系统浏览器：系统浏览器与应用不共享登录态。'
-      : '鸿翼文件系统的登录态已失效：已重新打开应用内登录窗口（首次需扫码一次，成功后窗口会自动关闭），'
-        + '登录完让我重试同一个查询。'
+      ? '应用内还没有鸿翼文件系统（edoc2）的登录态。'
+        + '已为你打开【登录文件系统（账号密码）】窗口：在那个窗口里用**账号密码**登录一次即可 —— '
+        + '登录成功后窗口会自动关闭并跳回文件系统首页，届时让我重试同一个查询。'
+        + '若你愿意，登录时可以直接勾选窗口里的「记住账号密码」提示：之后会话过期会自动续登、不再打扰你。'
+        + '（不要把这个地址复制到系统浏览器：系统浏览器与应用不共享登录态。）'
+        + '若那个窗口是空白页，说明当前连站点本身都打不开，请先确认内网/VPN 是否正常。'
+      : '鸿翼文件系统的登录态已失效：已重新打开【登录文件系统（账号密码）】窗口，'
+        + '用账号密码登录一次后让我重试；如果你之前选过「记住账号密码」，会自动续登、通常无需操作。'
   }
 }
 

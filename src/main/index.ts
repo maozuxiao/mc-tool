@@ -9,7 +9,7 @@ import { OA_LOGIN_URL, OA_ORIGIN } from '@shared/constants'
 import { IPC } from '@shared/types'
 import { initAutoUpdater, isUpdateDownloaded, startUpdateDownload } from './updater'
 import { registerAIIPC } from './ai/aiIpc'
-import { setWjxtLoginOpener, setWjxtBootstrap, setWjxtLoginCloser, wjxtResolveOriginUrl, WJXT_ORIGIN } from './ai/wjxtSkill'
+import { setWjxtLoginOpener, setWjxtBootstrap, setWjxtLoginCloser, wjxtResolveOriginUrl, wjxtH5Login, clearWjxtCreds, WJXT_ORIGIN } from './ai/wjxtSkill'
 // 使用持久化 partition，让 OA 登录 Cookie 自动写入磁盘并跨启动保留。
 // 这是最可靠的方案：Electron 会为每个 persist:* partition 维护独立的
 // Cookie/Storage 目录，进程退出后依然保留，无需手动文件备份。
@@ -2328,9 +2328,19 @@ ipcMain.handle('mc-wjxt-download', async (_e, payload: { fileGuid?: string; name
     const msg = e?.message || String(e)
     debugLog('[wjxt-download] error: ' + msg)
     sendDownloadEvent(id, { error: msg })
-    if (msg === 'NEED_RELOGIN' || msg === 'WJXT_NO_SESSION') return { ok: false, error: 'NEED_RELOGIN' }
+    if (msg === 'NEED_RELOGIN' || msg === 'WJXT_NO_SESSION') {
+      // 走链接下载时不会经过技能的 reloginResult，这里补一次登录入口（H5 账号密码窗口）
+      void wjxtH5Login({})
+      return { ok: false, error: 'NEED_RELOGIN', needLogin: true }
+    }
     return { ok: false, error: msg }
   }
+})
+
+// 手动打开「文件系统登录」窗口（H5 账号密码），供界面在需要时调用
+ipcMain.handle('mc-wjxt-login', async () => {
+  const ok = await wjxtH5Login({})
+  return { ok }
 })
 
 ipcMain.handle(IPC.COOKIE_CLEAR, async () => {
@@ -2357,6 +2367,8 @@ ipcMain.handle(IPC.COOKIE_CLEAR, async () => {
   debugLog('[COOKIE_CLEAR] cleared OA/streamax session cookies, kept IAM session')
   // 同时删除 OA 会话文件备份，避免退出登录后重开又自动恢复登录态
   try { if (existsSync(SESSION_BACKUP_PATH)) unlinkSync(SESSION_BACKUP_PATH) } catch {}
+  // 文件系统（H5 账号密码）保存的凭据一并清掉：用户点「退出登录」就不该再自动续登
+  clearWjxtCreds()
   checkLoginAndNotify()
 })
 ipcMain.handle(IPC.INSTALL_UPDATE, () => {
