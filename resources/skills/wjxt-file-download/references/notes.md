@@ -213,6 +213,23 @@ POST https://wj.streamax.com:9443/WebCore
 **不要**用「OA 物料查询正常」推断「edoc2 应该能换票」，也不要反过来用「IAM 页显示登录界面」
 推断「整个 IAM 都失效了」—— 两者用的不是同一份会话。这正是备份通道（H5 账号密码，绕过 IAM）存在的理由。
 
+6.17 **登录态判据必须「结构化」，否则会把能用的会话误报成未登录（2026-09-23 真实事故）**：
+旧实现是全文正则 `/"errorCode"\s*:/.test(body)`。某次 `GetCurrentUser` 回了 **37KB 的 text/plain**
+（`len=37144`，不是登录信封），正文里含 `errorCode` 字样 → 被判成「未登录」，
+日志里于是先出现 `[warmup] recheck#1 loggedIn=false` 与「需要用户手动登录」，
+**紧接着那次检索其实成功命中 10 条**（`[search] strategy=word hit 10/10`），还顺手弹了登录窗与隐藏 bootstrap 窗。
+现在：
+- 只对**解析出来的 JSON 顶层字段**判：`errorCode` ∈ {`ErrorCode4`, `4`+失效类 errorMsg}、`url` 指向登录页、`islogin:false`；
+- **解析不出判据 → 返回「未知」(null)**，绝不把「不知道」说成「未登录」；
+- `nResult:601` 同理移到解析后判，不再对长正文做正则。
+已用日志里真实出现过的 7 种响应体做过用例（含 37KB text/plain、Token失效信封、预览假成功信封、正常用户对象）。
+
+6.18 **`LtpaToken` 在，edoc2 就能用（不需要 IAM AC 登录）**：2026-09-23 06:04 的日志显示，
+应用**重启后从 `oa-session-backup.json` 恢复了 OA 会话**（`[oaCookie] inject http wj.streamax.com:9443 +12 cookies`），
+分区里重新有了 `LtpaToken@.streamax.com` / `usk` / `SESSION`，edoc2 检索随即成功（`cookies=10`）。
+也就是说：**出现「edoc2 未登录」时，先让用户重启应用（或重新完成一次 OA 登录）往往就够了**，
+H5 账号密码通道是再往后的兜底。
+
 6.2 **未登录时 `Preview/GetPreviewPara` 会回 HTTP 200 + 约 430 字节的小信封**
    `{"status":"error","errorCode":0,"data":{"fileId":0,…,"fileUrl":null,…}}` ——
    `errorCode` 是数字 0，既不是 `ErrorCode4` 也不是 HTTP 401/302，只看状态码/长度会误判成

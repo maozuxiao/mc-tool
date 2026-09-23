@@ -633,9 +633,44 @@ async function getWjxtTokenCookie(): Promise<string> {
 }
 
 /**
- * 按站点自己的判据探测「当前用户」：true=已登录，false=未登录，null=探测失败。
- * 判据来自 `/scripts/app/main.js` 的 `$.ajaxSetup.dataFilter`：
- * 正文里出现 `errorCode`（ErrorCode4）或 `url` 指向登录页 → 未登录。
+ * 把 WebCore 响应体解析成对象；不是 JSON 对象则返回 null。
+ * 只有**确实解析出 JSON**才做后续判据 —— 站点偶尔会回几十 KB 的 text/plain（不是登录信封），
+ * 用「正文里有没有 errorCode 字样」这种全文正则会把它们误判成未登录（下面的真实事故）。
+ */
+function parseJsonBody(body: string): any | null {
+  const t = String(body || '').trim()
+  if (!t.startsWith('{') && !t.startsWith('[')) return null
+  try { return JSON.parse(t) } catch { return null }
+}
+
+/**
+ * 顶层 JSON 是否属于「未登录」信封。实测三种形态：
+ *   ① `{"errorCode":"ErrorCode4","url":"…/sso/auth/goToLoginPage",…}`（搜索等业务接口）
+ *   ② `{"errorCode":"4","errorMsg":"Token失效"}`（GetCurrentUser）
+ *   ③ `{"islogin":false,…}`
+ * 注意只看**顶层字段**，不要在整篇正文里搜关键字。
+ */
+function isNotLoggedJson(json: any): boolean {
+  if (!json || typeof json !== 'object' || Array.isArray(json)) return false
+  const code = json.errorCode === undefined || json.errorCode === null ? '' : String(json.errorCode)
+  const jump = String(json.url ?? '')
+  const msg = String(json.errorMsg ?? json.message ?? '')
+  if (code === 'ErrorCode4') return true
+  if (code === '4' && /失效|未登录|登录|token|授权/i.test(msg)) return true
+  if (jump && isLoginUrl(jump)) return true
+  if (json.islogin === false) return true
+  return false
+}
+
+/**
+ * 按站点自己的判据探测「当前用户」：true=已登录，false=未登录，**null=无法判定**。
+ *
+ * 为什么必须有「null」这一档（2026-09-23 的真实事故）：
+ * 旧实现是 `/"errorCode"\s*:/.test(body)` 全文正则 —— 某次 `GetCurrentUser` 返回了
+ * **37KB 的 text/plain**（不是登录信封），正文里恰好含 `errorCode` 字样，于是被判成「未登录」；
+ * 紧接着的那次检索其实**成功命中 10 条**，但界面/日志先宣告了「需要手动登录」，
+ * 还顺手弹了登录窗口与隐藏 bootstrap 窗（用户看到的白窗之一）。
+ * 现在：不是 JSON / 解析不出判据 → 返回 null（未知），**绝不把「不知道」说成「未登录」**。
  */
 async function probeLoggedIn(): Promise<boolean | null> {
   try {
@@ -647,8 +682,13 @@ async function probeLoggedIn(): Promise<boolean | null> {
       form: new URLSearchParams(params).toString(),
       timeoutMs: 20000
     })
-    const notLogged = /"errorCode"\s*:/.test(res.body) || /goToLoginPage/.test(res.body)
-    return !notLogged
+    if (isLoginUrl(res.finalUrl)) return false
+    const json = parseJsonBody(res.body)
+    if (!json) {
+      wjxtLog(`[probe] GetCurrentUser 非 JSON（ct=${res.contentType} len=${res.body.length}）-> 登录态未知（不当作未登录）`)
+      return null
+    }
+    return isNotLoggedJson(json) ? false : true
   } catch (e: any) {
     wjxtLog('[probe] GetCurrentUser failed: ' + String(e?.message || e))
     return null
@@ -731,9 +771,12 @@ async function wjxtWarmUp(force = false): Promise<void> {
         form: new URLSearchParams(params).toString(),
         timeoutMs: 20000
       })
-      // 站点判据（main.js 的 dataFilter）：正文里出现 errorCode 或 url 指向登录页 = 未登录
-      const notLogged = /"errorCode"\s*:/.test(res.body) || /goToLoginPage/.test(res.body)
-      if (fun === 'GetCurrentUser') loggedIn = !notLogged
+      // 站点判据（main.js 的 dataFilter）：**只看顶层 JSON 字段**，且解析不出判据时记为「未知」。
+      // （旧版在这里做全文正则：37KB 的 text/plain 里含 errorCode 字样 → 误报未登录，见 probeLoggedIn 注释）
+      const verdict = (isLoginUrl(res.finalUrl) || isNotLoggedJson(parseJsonBody(res.body)))
+        ? false
+        : (parseJsonBody(res.body) ? true : null)
+      if (fun === 'GetCurrentUser') loggedIn = verdict
       wjxtLog(`[warmup] POST ${fun} status=${res.status} ct=${res.contentType} len=${res.body.length} loggedIn=${fun === 'GetCurrentUser' ? loggedIn : '-'} body=${JSON.stringify(res.body.slice(0, 140))}`)
     } catch (e: any) {
       wjxtLog(`[warmup] POST ${fun} failed: ${String(e?.message || e)}`)
@@ -798,8 +841,8 @@ function readJson(res: WjxtResponse, what: string): any {
     // 这条其实是 Referer 不对，但对我们来说同样是「不可用」
     throw new Error('WJXT_BAD_REQUEST')
   }
-  const m = /"nResult"\s*:\s*(-?\d+)/.exec(res.body)
-  if (m && m[1] === '601') throw new Error('NEED_RELOGIN')
+  // 注意：这里**不做** `"nResult":601` 的全文正则 —— 站点会回几十 KB 的 text/plain，
+  // 全文匹配容易误伤；601 与「未登录信封」都改到下面解析出 JSON 之后再判（只看顶层字段）。
   // 最终落点是 SSO 登录页 = 未登录 / 会话过期（服务端对未登录请求是 302 到登录页，不是 401）
   if (isLoginUrl(res.finalUrl)) {
     wjxtLog(`[${what}] redirected to login page: ${res.finalUrl.slice(0, 200)} cookies=${res.cookieCount}`)
@@ -823,14 +866,21 @@ function readJson(res: WjxtResponse, what: string): any {
   // ── 「未登录」是**合法 JSON + HTTP 200**，必须按站点自己的判据识别（/scripts/app/main.js 的 dataFilter）：
   //    {"url":"…/sso/auth/goToLoginPage","returnUrl":"/WebCore","defaultUrl":"/index.html","errorCode":"ErrorCode4"}
   // 光看状态码/结构会把它当成「搜索结果 0 条」——这正是之前一直「无报错但 0 条」的真因。
-  if (json && typeof json === 'object') {
-    const code = String((json as any).errorCode || '')
-    const jump = String((json as any).url || '')
-    if (code === 'ErrorCode4' || (jump && isLoginUrl(jump))) {
-      wjxtLog(`[${what}] NOT LOGGED IN: errorCode=${code || '-'} url=${jump.slice(0, 140)} cookies=${res.cookieCount}`)
+  // 判据一律**只看顶层字段**（见 isNotLoggedJson）。
+  if (json && typeof json === 'object' && !Array.isArray(json)) {
+    const nr = json.nResult === undefined || json.nResult === null ? '' : String(json.nResult)
+    if (nr === '601') {
+      wjxtLog(`[${what}] nResult=601 -> NEED_RELOGIN`)
+      throw new Error('NEED_RELOGIN')
+    }
+    if (isNotLoggedJson(json)) {
+      wjxtLog(`[${what}] NOT LOGGED IN: errorCode=${json.errorCode ?? '-'} url=${String(json.url ?? '').slice(0, 140)} cookies=${res.cookieCount}`)
       throw new Error('WJXT_NO_SESSION')
     }
-    if (code) {
+    const code = json.errorCode === undefined || json.errorCode === null ? '' : String(json.errorCode)
+    // 0 = 无错误：`Preview/GetPreviewPara` 在「没拿到 fileUrl」时正是 errorCode:0 + status:error，
+    // 这种形态留给上层（wjxtResolveOriginUrl）去复核登录态，别在这里当成服务端错误
+    if (code && code !== '0') {
       // 其它服务端错误码（站点用 edoc2ErrorCode 字典翻译）：原样上报，便于定位
       throw new Error(`WJXT_SERVER_ERROR: errorCode=${code} body=${res.body.slice(0, 160)}`)
     }
