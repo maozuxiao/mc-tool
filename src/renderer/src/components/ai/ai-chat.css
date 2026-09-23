@@ -1051,6 +1051,9 @@ html.win-idle .ai-jump-btn.is-live::after { animation-play-state: paused; }
 .ai-skill-item__del:hover { color: var(--mc-red-deep); background: color-mix(in srgb, var(--mc-red) 12%, transparent); }
 /* 底部操作条：按钮用 size="small"（见 ChatPanel），这里只负责换行与固定位置 */
 .ai-skill-panel__foot { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 4px 2px; flex: none; }
+/* 按钮上的 emoji 图标（🗃️ 导入 zip / 📂 导入文件夹 / 🩺 诊断）：
+   纯装饰（aria-hidden），只做尺寸对齐，不参与布局换行 */
+.ai-skill-btn-ico { font-size: 13px; line-height: 1; display: inline-block; }
 /* 技能列表：唯一可滚动区（头 / 底栏都固定），列表再长也不会把按钮顶出可视区 */
 .ai-skill-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .ai-skill-panel__hint { padding: 4px; font-size: 11px; color: var(--mc-ink-soft); line-height: 1.5; }

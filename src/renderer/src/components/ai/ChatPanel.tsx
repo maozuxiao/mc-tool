@@ -1469,12 +1469,30 @@ export function ChatPanel({ disabled }: Props) {
                       {/* 底栏按钮统一 size="small"：英文 Import zip / Import folder / Diagnose 用默认尺寸时
                           又宽又高，三个就把面板占满、纵向还吃掉一大块 —— 这正是「英文下面板显小」的根因 */}
                       <div className="ai-skill-panel__foot">
-                        <Button size="small" ghost onClick={() => void importSkill('zip')} disabled={skillBusy}>{t('aiSkillImportZip')}</Button>
-                        <Button size="small" ghost onClick={() => void importSkill('dir')} disabled={skillBusy}>{t('aiSkillImportDir')}</Button>
+                        {/* 图标走 Button 的 icon 插槽（inline-flex + gap，间距由库负责），
+                            emoji 纯装饰故 aria-hidden；文案仍走 i18n，中英各一份 */}
+                        <Button
+                          size="small"
+                          ghost
+                          icon={<span className="ai-skill-btn-ico" aria-hidden="true">🗃️</span>}
+                          onClick={() => void importSkill('zip')}
+                          disabled={skillBusy}
+                        >{t('aiSkillImportZip')}</Button>
+                        <Button
+                          size="small"
+                          ghost
+                          icon={<span className="ai-skill-btn-ico" aria-hidden="true">📂</span>}
+                          onClick={() => void importSkill('dir')}
+                          disabled={skillBusy}
+                        >{t('aiSkillImportDir')}</Button>
                         {/* 一键自检：三条会话线（OA / IAM / 鸿翼 edoc2）一次问清，结论直接弹窗 */}
-                        <Button size="small" ghost onClick={() => void runDiag()} disabled={diagBusy}>
-                          {diagBusy ? t('aiDiagRunning') : t('aiDiagBtn')}
-                        </Button>
+                        <Button
+                          size="small"
+                          ghost
+                          icon={<span className="ai-skill-btn-ico" aria-hidden="true">🩺</span>}
+                          onClick={() => void runDiag()}
+                          disabled={diagBusy}
+                        >{diagBusy ? t('aiDiagRunning') : t('aiDiagBtn')}</Button>
                       </div>
                       <div className="ai-skill-panel__hint">{t('aiSkillHint')}</div>
                     </div>
