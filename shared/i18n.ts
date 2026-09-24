@@ -295,6 +295,10 @@ export const I18N: Record<string, Record<string, string | string[]>> = {
     mcpErrRequired: '名称与启动命令不能为空',
     mcpSaved: '已保存',
     mcpInstalling: '正在安装依赖…',
+    mcpInstallDone: '✔ 依赖安装完成',
+    mcpInstallFailed: '✘ 依赖安装失败',
+    mcpLogHead: '最近一次安装日志',
+    mcpUnboundWarn: '未绑定技能：勾选任何技能都不会下发它的工具 —— 请点「编辑」绑定一个技能',
     // 自检结果（弹窗只给「OA + edoc2 + 结论」三行；IAM / 备份 / 页面上下文等细节只进日志）
     aiDiagOaLine: '① OA 物料查询会话：{s}',
     aiDiagEdoc2Line: '② 鸿翼 edoc2 登录态：{s}',
@@ -689,6 +693,10 @@ export const I18N: Record<string, Record<string, string | string[]>> = {
     mcpErrRequired: 'Name and command are required',
     mcpSaved: 'Saved',
     mcpInstalling: 'Installing dependencies…',
+    mcpInstallDone: '✔ Dependencies installed',
+    mcpInstallFailed: '✘ Dependency install failed',
+    mcpLogHead: 'Last install log',
+    mcpUnboundWarn: 'Unbound: its tools are never exposed to the AI — click "Edit" and bind a skill',
     // Self-check result (the dialog shows only OA + edoc2 + verdict; IAM / backup / page-context details go to the log)
     aiDiagOaLine: '① OA material search session: {s}',
     aiDiagEdoc2Line: '② Streamax edoc2 sign-in: {s}',

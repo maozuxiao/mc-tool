@@ -40,6 +40,29 @@ export function logPath(id: string): string {
   return join(LOG_DIR(), `${String(id || '').replace(/[^\w-]/g, '_')}.log`)
 }
 
+/**
+ * 展开路径里的环境变量占位符（`%APPDATA%` / `%USERPROFILE%` …）。
+ *
+ * 为什么必须做：登记表单与「粘贴 JSON」经常直接写 `%APPDATA%\...`（技能文档就是这么给的），
+ * 不展开的话目录不存在 → `spawn` 抛 **ENOENT**，而错误信息指向的是 node.exe，
+ * 看起来像「Node 路径不对」，实际根因是 cwd/env 无效（1.0.46 实测踩到）。
+ */
+export function expandVars(value: string): string {
+  const s = String(value || '')
+  if (!s.includes('%')) return s
+  return s.replace(/%([A-Za-z0-9_]+)%/g, (all, name) => {
+    for (const [k, v] of Object.entries(process.env)) {
+      if (k.toLowerCase() === String(name).toLowerCase() && v) return v
+    }
+    return all
+  })
+}
+
+/** 展开后的真实工作目录（空 = 未设置） */
+function resolvedCwd(cfg: McpServerConfig): string {
+  return expandVars(String(cfg.cwd || ''))
+}
+
 function logLine(id: string, line: string): void {
   try {
     mkdirSync(LOG_DIR(), { recursive: true })
@@ -126,7 +149,7 @@ export function listStatuses(): McpStatus[] {
 }
 
 export function checkDependencies(cfg: { cwd?: string }): { needsInstall: boolean; hasPackageJson: boolean; cwd: string } {
-  const cwd = String(cfg?.cwd || '')
+  const cwd = expandVars(String(cfg?.cwd || ''))
   const hasPkg = !!cwd && existsSync(join(cwd, 'package.json'))
   const hasNm = !!cwd && existsSync(join(cwd, 'node_modules'))
   return { needsInstall: hasPkg && !hasNm, hasPackageJson: hasPkg, cwd }
@@ -231,15 +254,22 @@ export async function connect(cfg: McpServerConfig): Promise<void> {
 
   conn.connecting = (async () => {
     const node = resolveNodeBinary()
-    // command 填 `node`（或留空）= 由应用解析真实 node；其它命令原样使用
+    // command 填 `node`（或留空）= 由应用解析真实 node；其它命令原样使用（都做一次变量展开）
     const useResolved = !cfg.command || /^(node|node\.exe)$/i.test(cfg.command.trim())
-    const command = useResolved ? node.path : cfg.command
+    const command = useResolved ? node.path : expandVars(cfg.command)
     const env: Record<string, string> = { ...(process.env as Record<string, string>) }
     if (useResolved && node.electronAsNode) env.ELECTRON_RUN_AS_NODE = '1'
-    for (const [k, v] of Object.entries(cfg.env || {})) env[k] = v
+    for (const [k, v] of Object.entries(cfg.env || {})) env[k] = expandVars(v)
 
-    const child = spawn(command, cfg.args || [], {
-      cwd: cfg.cwd || undefined,
+    // 工作目录先校验再 spawn：目录不存在时 Windows 上的报错是 ENOENT 且指向 node.exe，
+    // 极易误导成「Node 路径不对」（登记表单/粘贴 JSON 里的 %APPDATA% 未展开就是这个症状）
+    const cwd = resolvedCwd(cfg)
+    if (cwd && !existsSync(cwd)) {
+      throw new Error(`工作目录不存在：${cwd}（登记时填的路径无效，或环境变量未展开）`)
+    }
+
+    const child = spawn(command, (cfg.args || []).map(a => expandVars(String(a))), {
+      cwd: cwd || undefined,
       env,
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe']
@@ -477,12 +507,14 @@ export async function installDependencies(
   installs.set(cfg.id, ac)
   const link = () => ac.abort(new DOMException('Aborted', 'AbortError'))
   signal?.addEventListener('abort', link, { once: true })
-  const cwd = String(cfg.cwd || '')
-  logLine(cfg.id, `[install] start cwd=${cwd}`)
+  const cwd = resolvedCwd(cfg)
+  logLine(cfg.id, `[install] start cwd=${cwd}（原始值 ${String(cfg.cwd || '')}）`)
 
   try {
-    if (!cwd || !existsSync(join(cwd, 'package.json'))) {
-      return { ok: false, error: `工作目录没有 package.json：${cwd || '(空)'}` }
+    if (!cwd) return { ok: false, error: '未设置工作目录：请在登记条目里填 MCP 服务所在目录（含 package.json）' }
+    if (!existsSync(cwd)) return { ok: false, error: `工作目录不存在：${cwd}（环境变量未展开或路径无效）` }
+    if (!existsSync(join(cwd, 'package.json'))) {
+      return { ok: false, error: `工作目录没有 package.json：${cwd}` }
     }
     const node = await ensureNodeWithNpm(ac.signal)
     if (!node) {

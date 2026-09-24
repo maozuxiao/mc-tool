@@ -73,6 +73,8 @@ export function McpModal({ open, onClose, skills }: Props): React.ReactElement |
   const [statuses, setStatuses] = useState<Record<string, McpStatus>>({})
   const [logs, setLogs] = useState<{ id: string; lines: string[] }>({ id: '', lines: [] })
   const [installing, setInstalling] = useState<string | null>(null)
+  /** 最近一次安装过日志的服务 —— 让日志区在安装结束后仍可见（否则失败信息一闪而过） */
+  const [lastLogId, setLastLogId] = useState<string | null>(null)
   const [testBusy, setTestBusy] = useState<string | null>(null)
   const [draft, setDraft] = useState<Draft | null>(null)
   const [importText, setImportText] = useState('')
@@ -103,10 +105,14 @@ export function McpModal({ open, onClose, skills }: Props): React.ReactElement |
           ? { id: event.id, lines: [...prev.lines, event.line].slice(-200) }
           : { id: event.id, lines: [event.line] }))
       } else if (event?.type === 'install-done') {
+        const tail = event.ok ? t('mcpInstallDone') : `${t('mcpInstallFailed')}：${event.error || ''}`
         setLogs(prev => (prev.id === event.id
-          ? { id: event.id, lines: [...prev.lines, event.ok ? '✔ 依赖安装完成' : `✘ ${event.error || '安装失败'}`] }
-          : prev))
+          ? { id: event.id, lines: [...prev.lines, tail] }
+          : { id: event.id, lines: [tail] }))
         setInstalling(prev => (prev === event.id ? null : prev))
+        setLastLogId(event.id)
+        // 结果必须弹成 notice：安装若瞬间失败，日志区会在结束瞬间隐藏 —— 用户会以为「点了没反应」
+        setNotice(tail)
         void refresh()
       }
     })
@@ -226,6 +232,7 @@ export function McpModal({ open, onClose, skills }: Props): React.ReactElement |
                 <div className="ai-mcp-item__meta">
                   {t('mcpBoundTo')}：{skillName(s.skillKey)} · {s.command} {(s.args || []).join(' ')}
                 </div>
+                {!s.skillKey && <div className="ai-mcp-item__warn">{t('mcpUnboundWarn')}</div>}
                 {dep && <div className="ai-mcp-item__warn">{t('mcpNeedInstall')}</div>}
                 {st(s.id)?.state === 'failed' && (
                   <div className="ai-mcp-item__warn">{st(s.id)?.error || ''}</div>
@@ -245,16 +252,18 @@ export function McpModal({ open, onClose, skills }: Props): React.ReactElement |
             )
           })}
 
-          {/* ── 安装日志流 ── */}
-          {installing && (
+          {/* ── 安装日志流：安装结束后仍保留，便于看失败原因 ── */}
+          {(installing || (lastLogId && logs.id === lastLogId && logs.lines.length > 0)) && (
             <div className="ai-mcp-log">
               <div className="ai-mcp-log__head">
-                {t('mcpInstalling')}
-                <button className="ai-mcp-log__cancel" onClick={() => void window.mcApi.ai.mcpCancelPrepare(installing)}>
-                  {t('mcpCancel')}
-                </button>
+                {installing ? t('mcpInstalling') : t('mcpLogHead')}
+                {installing && (
+                  <button className="ai-mcp-log__cancel" onClick={() => void window.mcApi.ai.mcpCancelPrepare(installing)}>
+                    {t('mcpCancel')}
+                  </button>
+                )}
               </div>
-              <pre className="ai-mcp-log__body">{(logs.id === installing ? logs.lines : []).join('\n')}</pre>
+              <pre className="ai-mcp-log__body">{(logs.id === (installing || lastLogId) ? logs.lines : []).join('\n')}</pre>
             </div>
           )}
 
