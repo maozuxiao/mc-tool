@@ -117,7 +117,7 @@ export const FILE_WRITE_TOOL_DEFINITION = {
   type: 'function',
   function: {
     name: 'file_write',
-    description: '写入文件。文本类（md/txt/csv/json/log/yml 等）直接给文本内容；电子表格（xlsx / xls）把内容以 CSV/TSV（首行表头）或 JSON（二维数组 / 对象数组）形式给出，工具会生成真正的二进制工作簿（支持 --append 分段追加）。回填/修复已有电子表格时设 update=true，content 给 JSON：{ "key": "关键列名", "rows": [ { "关键列": "值", "要填的列": "值", ... } ] }，工具按关键列匹配原表行、把其余列写回（原表没有的列自动追加到最右），原地保存不另存新文件。要在已存在的工作簿里新增一个 Sheet（与 Sheet1 等原表并存、保留原表样式）则传 newsheet：可传具体名称（如 "汇总"）或 true 表示自动命名 Sheet2/Sheet3…；newsheet 与 update 互斥，且目标文件必须已存在。用户要求「新建子表/新工作表/Sheet2」时必须用 newsheet，不要用 update 在原表上追加列。【重要】已存在的表格做任何改动（新增行/列、写回数据、标记颜色、新建子表）都必须用 update=true 或 newsheet 在原工作簿上原地处理，禁止用无 update/newsheet 的 write 重建文件（会丢失原工作表名与样式）。单元格背景色：任意单元格值可写成 { "value": "文本", "fill": "green" }；整行上色加 "__rowFill": "yellow"（用户说「当前行」/「这一行」标色时必须用整行填充，会填满从 A 列到最右列，不要只给单个单元格上色；多路径判断时按「任一命中即绿，全部未命中才黄」统一整行颜色：例如「Murat记录」和「Order summary记录」两列，只要任一列不是「无」/「无记录」（如有具体记录），该行 __rowFill 就必须为 green；只有当两列都是「无」/「无记录」时才为 yellow；禁止把一行拆成 A-D 绿、E-J 黄几段分别上色）。fill 支持 green/yellow/red/blue/gray/orange（及 light 前缀变体）或 #RRGGBB。修改已有文件前必须先读取确认现有内容，不要凭空覆盖。写入前若目标列在原表已有内容（非空白），应先向用户确认是否覆盖，待用户明确确认后再写入；用户明确指定写入某列时，必须严格写到该列，禁止因为原表存在同名的其他列就改写到别处。路径用法同 file_read（可直接绝对路径或「别名/路径」）。',
+    description: '写入文件。文本类（md/txt/csv/json/log/yml 等）直接给文本内容；**.docx 直接给 Markdown 内容，工具会生成真正的 Word 文档**（1.0.46：标题/列表/粗体/表格都在，任意语言可用，Word/WPS 可直接打开，不要再让用户拿 HTML 去 Word 另存为）；电子表格（xlsx / xls）把内容以 CSV/TSV（首行表头）或 JSON（二维数组 / 对象数组）形式给出，工具会生成真正的二进制工作簿（支持 --append 分段追加）。要「把一份中文 docx 翻成别的语言且保持原格式」请改用 translate_docx 工具，不要用本工具重写 docx。回填/修复已有电子表格时设 update=true，content 给 JSON：{ "key": "关键列名", "rows": [ { "关键列": "值", "要填的列": "值", ... } ] }，工具按关键列匹配原表行、把其余列写回（原表没有的列自动追加到最右），原地保存不另存新文件。要在已存在的工作簿里新增一个 Sheet（与 Sheet1 等原表并存、保留原表样式）则传 newsheet：可传具体名称（如 "汇总"）或 true 表示自动命名 Sheet2/Sheet3…；newsheet 与 update 互斥，且目标文件必须已存在。用户要求「新建子表/新工作表/Sheet2」时必须用 newsheet，不要用 update 在原表上追加列。【重要】已存在的表格做任何改动（新增行/列、写回数据、标记颜色、新建子表）都必须用 update=true 或 newsheet 在原工作簿上原地处理，禁止用无 update/newsheet 的 write 重建文件（会丢失原工作表名与样式）。单元格背景色：任意单元格值可写成 { "value": "文本", "fill": "green" }；整行上色加 "__rowFill": "yellow"（用户说「当前行」/「这一行」标色时必须用整行填充，会填满从 A 列到最右列，不要只给单个单元格上色；多路径判断时按「任一命中即绿，全部未命中才黄」统一整行颜色：例如「Murat记录」和「Order summary记录」两列，只要任一列不是「无」/「无记录」（如有具体记录），该行 __rowFill 就必须为 green；只有当两列都是「无」/「无记录」时才为 yellow；禁止把一行拆成 A-D 绿、E-J 黄几段分别上色）。fill 支持 green/yellow/red/blue/gray/orange（及 light 前缀变体）或 #RRGGBB。修改已有文件前必须先读取确认现有内容，不要凭空覆盖。写入前若目标列在原表已有内容（非空白），应先向用户确认是否覆盖，待用户明确确认后再写入；用户明确指定写入某列时，必须严格写到该列，禁止因为原表存在同名的其他列就改写到别处。路径用法同 file_read（可直接绝对路径或「别名/路径」）。',
     parameters: {
       type: 'object',
       properties: {
@@ -140,9 +140,63 @@ export const FILE_WRITE_TOOL_DEFINITION = {
         newsheet: {
           type: 'string',
           description: '仅对 xlsx/xls 生效：在已存在的工作簿中追加一个新工作表（与 Sheet1 等原表并存、保留原表样式）。传具体字符串作为新表名称（如 "汇总"）；传 "true" 表示自动命名为 Sheet2/Sheet3…。与 update 互斥，目标文件必须已存在。'
+        },
+        force: {
+          type: 'boolean',
+          description: '仅对 docx 生效（1.0.46）：目标已存在时允许覆盖。docx 是整体生成的，无法像表格那样原地改。'
         }
       },
       required: ['path', 'content']
+    }
+  }
+}
+
+// 保布局翻译 docx（1.0.46）：只替换文字，样式/表格/图片/页眉页脚/编号全部保持原样
+export const FILE_TRANSLATE_DOCX_TOOL_DEFINITION = {
+  type: 'function',
+  function: {
+    name: 'translate_docx',
+    description: '把 .docx 里的文字翻译成另一种语言并**保持原布局不变**（1.0.46）。两步使用：' +
+      '① action="extract" 拿到待翻译清单 { items:[{id, part, style, text}] }（含表格单元格与页眉页脚，纯图片段自动跳过）；' +
+      '② 自己把每条 text 翻译成目标语言，再 action="apply" 并按 id 传 mapping 写回。' +
+      '产出的新 .docx 只换了文字：字体/字号/颜色/表格/图片/页眉页脚/项目编号/分栏 100% 与原文档一致，Word/WPS 可直接打开。' +
+      '【重要】用户要「把这份中文 docx 翻成土耳其语/英文的 docx」「保持格式翻译」时必须用本工具；' +
+      '禁止用 file_write 重写 docx（那样会丢掉原文档全部样式与图片）。只支持 .docx（.doc 请先另存为 docx）。' +
+      '段数多时用 offset/limit 分批（默认一批 300 段）。',
+    parameters: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          description: 'extract = 抽取待翻译段落；apply = 按 id 写回译文'
+        },
+        path: {
+          type: 'string',
+          description: '源 .docx 路径（绝对路径或「别名/路径」）'
+        },
+        mapping: {
+          type: 'object',
+          description: '仅 apply：id → 译文的映射，如 {"0":"Çözünürlük:1280H*800V","1":"Ürün Özellikleri"}。' +
+            '未提供的 id 保持原文，因此可分批翻译分批写回。'
+        },
+        dst: {
+          type: 'string',
+          description: '仅 apply：输出路径。省略时在源文件旁生成「原名.translated.docx」（或用 lang 作后缀）'
+        },
+        lang: {
+          type: 'string',
+          description: '仅 apply 且省略 dst 时：用作文件名后缀（如 "tr"、"Türkçe"）'
+        },
+        offset: {
+          type: 'number',
+          description: '仅 extract：从第几条开始（配合 limit 分批）'
+        },
+        limit: {
+          type: 'number',
+          description: '仅 extract：本批最多返回多少段，默认 300'
+        }
+      },
+      required: ['action', 'path']
     }
   }
 }
@@ -231,7 +285,8 @@ export const FILE_TOOL_DEFINITIONS = [
   FILE_WRITE_TOOL_DEFINITION,
   FILE_READ_BATCH_TOOL_DEFINITION,
   FILE_OPEN_FOLDER_TOOL_DEFINITION,
-  FILE_DOWNLOAD_TOOL_DEFINITION
+  FILE_DOWNLOAD_TOOL_DEFINITION,
+  FILE_TRANSLATE_DOCX_TOOL_DEFINITION
 ]
 
 export function fileSkillAvailable(): boolean {

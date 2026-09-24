@@ -1,0 +1,32 @@
+feat(file): Word 文档能生成、也能「保布局」翻译（1.0.46）
+
+痛点：此前 .docx 被写死在 WRITE_UNSUPPORTED 里，模型只能让用户「生成 HTML 再去 Word 另存为」；
+用户要「把中文规格书翻成土耳其语的 docx」时完全做不到。
+
+① 生成 docx：file_write 写 .docx 时 content 给 Markdown → 用新增的 docx 依赖产出真正的 OOXML
+   二进制（# 标题 / - 列表 / **粗体** / |表格|，首行当表头加浅灰底，有序列表走 numbering）。
+   不支持 --append / --update（整体生成），覆盖已有文件需 --force，并给出明确报错引导改走 translate_docx。
+
+② 保布局翻译：新工具 translate_docx，两阶段 —— extract 抽取 {id, part, style, text}
+   （含表格单元格与页眉页脚，纯图片段自动跳过）→ 模型翻译 → apply 按 id 写回。
+   原理：docx = zip + OOXML，只替换 <w:t> 文本节点，其余 XML 一字不动 →
+   字体/字号/颜色/表格/图片/页眉页脚/项目编号/分栏 100% 保留。
+   支持 --offset / --limit 分批（默认一批 300 段）；未给译文的 id 保持原文。
+   关键取舍：一个段落的文字常被切成多个 run（本机规格书实测 51/61 段，且 run 间样式不同），
+   逐 run 翻译会把话切碎、术语与数字容易翻散 —— 因此按整段翻译，译文写入该段首个 <w:t>
+   （继承其字体字号），其余文本节点清空；代价是段内「部分加粗」统一成首个 run 的样式。
+   mapping 走 --mapping-file 临时文件而非命令行参数（Windows 命令行约 32K 上限会截断大段译文）。
+
+③ 体积：清掉技能 node_modules 里 34 个 npm 中断安装残留（27.3 MB，如 .exceljs-8KuXvZXn 20.8MB、
+   .pptxgenjs-rs0GYs4x 4.7MB），新增 docx 约 8MB —— 112.5MB → 93MB，净减约 20MB。
+
+④ 提示词与工具：file_write 描述补 docx 用法并新增 force 参数；新增 translate_docx 工具定义与
+   注册表实现（mapping 写临时文件）；Build 模式提示词新增「翻译 Office 文档保持格式必须走
+   translate_docx，禁止用 file_write 重写 docx」。SKILL.md 补能力表、两阶段用法与取舍说明。
+
+⑤ 实测（真实规格书 CA29M-DSM摄像机-720P规格书）：extract 63 段、offset/limit 分批正确；
+   apply 写回 63 段（61 正文 + 2 页脚），mammoth 回读译文正确，6 张图片 / 2 个表格 /
+   styles.xml / numbering.xml / footer1.xml 全部保留；四条错误分支（非 docx、缺 mapping、
+   覆盖需 --force、docx 不支持 --append）均按预期报错。
+
+文档：README ④文件读写补两条；Release Notes 1.0.46 行补 ⑩。

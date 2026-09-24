@@ -15,8 +15,13 @@
  *                                       按文件名 / 内容搜索（内容覆盖 xlsx/xls/docx/pptx/pdf，xlsx 命中定位到 sheet+行号）。
  *                                       默认不使用缓存索引，每次直接读取文件；加 --index 启用索引缓存（按 hash+版本校验），命中缓存却零命中时自动全量兜底重扫防漏查；--rebuild-index 强制忽略旧缓存重建。
  *   write <path> [--content <文本>] [--append] [--update] [--newsheet [名称]]
- *                                       写文本类文件（md/txt/csv/json...）；电子表格 --update 时 content 为 JSON { key, rows } 原地按关键列回填；
+ *                                       写文本类文件（md/txt/csv/json...）；.docx 时 content 给 Markdown，生成真正的 Word 文档；
+ *                                       电子表格 --update 时 content 为 JSON { key, rows } 原地按关键列回填；
  *                                       --newsheet 在已存在的工作簿里追加一个新工作表（与 Sheet1 并存、保留原表样式），省略名称则自动 Sheet2/Sheet3…
+ *   translate_docx extract <docx> [--offset N] [--limit N]
+ *                                       抽取 docx 里有文字的段落（含表格/页眉页脚），返回 {id, part, style, text} 供翻译
+ *   translate_docx apply <docx> [--dst <路径>] [--lang <后缀>] --mapping '{...}'
+ *                                       按 id 把译文写回，**只替换文字**：样式/表格/图片/页眉页脚/编号全部保持原样
  *   read_batch <path1> [path2 ...] [--path <p> ...]
  *                                       一次读取多个文件（最多 12 个），返回结果数组
  *
@@ -40,8 +45,8 @@ const HARD_MAX_BYTES = 2 * 1024 * 1024 // 无论如何不超过 2MB
 const BATCH_MAX_FILES = 12
 const BATCH_PER_FILE_BYTES = 120 * 1024
 // 这些二进制格式暂时只能「读」，write 还没实现生成，避免写出无效文件。
-// xlsx / xls 已支持生成（见 writeSpreadsheet），故不在其中。
-const WRITE_UNSUPPORTED = new Set(['.docx', '.pptx', '.pdf', '.doc', '.ppt'])
+// xlsx / xls 已支持生成（见 writeSpreadsheet），docx 已支持生成（见 writeDocx），故都不在其中。
+const WRITE_UNSUPPORTED = new Set(['.pptx', '.pdf', '.doc', '.ppt'])
 
 // ── 输出协议 ──────────────────────────────────────────────
 function printJson(obj) {
@@ -200,7 +205,8 @@ const MODULES = {
   jszip: 'jszip',
   'pdfjs-dist': 'pdfjs-dist/legacy/build/pdf.js',
   'iconv-lite': 'iconv-lite',
-  xlsx: 'xlsx'
+  xlsx: 'xlsx',
+  docx: 'docx'
 }
 
 function cmdPing() {
@@ -1221,8 +1227,14 @@ function cmdWrite(positional, flags, roots) {
   const isSheet = ext === '.xlsx' || ext === '.xls'
   if (!isSheet && WRITE_UNSUPPORTED.has(ext)) {
     throw new CommandError(
-      `暂不支持生成该二进制格式：${path.basename(target)}（write 目前仅支持文本类 md/txt/csv/json 与电子表格 xlsx/xls）`,
+      `暂不支持生成该二进制格式：${path.basename(target)}（write 目前支持文本类 md/txt/csv/json、电子表格 xlsx/xls 与文档 docx）`,
       'WRITE_BINARY_UNSUPPORTED'
+    )
+  }
+  if (ext === '.docx' && (flags.append || flags.update || flags.newsheet)) {
+    throw new CommandError(
+      'docx 不支持 --append / --update / --newsheet：它是整体生成的。要「保留原布局改文字」请用 translate_docx。',
+      'UNSUPPORTED_FLAG'
     )
   }
   // 内容来源：优先 --content，其次路径后的位置参数（write file.txt "内容"）
@@ -1234,6 +1246,10 @@ function cmdWrite(positional, flags, roots) {
   // 还原模型常用的字面转义（update 模式给的是 JSON，不做转义以免破坏）
   if (!doUpdate) {
     content = String(content).replace(/\\n/g, '\n').replace(/\\t/g, '\t')
+  }
+  // docx（1.0.46）：content 给 Markdown → 生成真正的 .docx（不再是「挂名 docx 的 HTML」）
+  if (ext === '.docx') {
+    return writeDocx(target, content, { roots, force: !!flags.force })
   }
 
   // 电子表格原地按关键列回填（xlsx / xls）：content 为 JSON { key, rows }
@@ -1286,6 +1302,282 @@ function cmdWrite(positional, flags, roots) {
   }
 }
 
+// ── 生成 docx（Markdown → 真 .docx）────────────────────────
+// 1.0.46：write 写 .docx 时 content 给 Markdown，这里用 docx 库生成真正的 OOXML 二进制。
+// 此前 .docx 被列入 WRITE_UNSUPPORTED，AI 只能让用户拿 HTML 去 Word「另存为」——
+// 现在直接产出 Word/WPS 能双击打开的真文档（标题/列表/粗体/表格都在）。
+async function writeDocx(target, content, opts) {
+  let lib
+  try { lib = require('docx') } catch {
+    throw new CommandError(
+      '生成 docx 需要 docx 依赖，但未安装。请在 skills/file-office-local 目录下执行 npm install docx。',
+      'MISSING_DEP'
+    )
+  }
+  const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, HeadingLevel, LevelFormat, AlignmentType } = lib
+  const HEADINGS = [HeadingLevel.HEADING_1, HeadingLevel.HEADING_2, HeadingLevel.HEADING_3, HeadingLevel.HEADING_4, HeadingLevel.HEADING_5, HeadingLevel.HEADING_6]
+
+  // 行内只处理 **粗体**（模型最常用）；其余原样成文本
+  const runs = (text) => {
+    const out = []
+    const re = /\*\*([^*]+)\*\*/g
+    let last = 0, m
+    while ((m = re.exec(text)) !== null) {
+      if (m.index > last) out.push(new TextRun(text.slice(last, m.index)))
+      out.push(new TextRun({ text: m[1], bold: true }))
+      last = m.index + m[0].length
+    }
+    if (last < text.length) out.push(new TextRun(text.slice(last)))
+    return out.length ? out : [new TextRun(text)]
+  }
+
+  const children = []
+  let tableRows = null
+  const flushTable = () => {
+    if (!tableRows || !tableRows.length) { tableRows = null; return }
+    children.push(new Table({
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      rows: tableRows.map((cells, ri) => new TableRow({
+        children: cells.map(c => new TableCell({
+          children: [new Paragraph({ children: runs(c) })],
+          shading: ri === 0 ? { fill: 'F2F2F2' } : undefined // 首行当表头，浅灰底
+        }))
+      }))
+    }))
+    tableRows = null
+  }
+
+  for (const rawLine of String(content || '').replace(/\r\n/g, '\n').split('\n')) {
+    const line = rawLine.trimEnd()
+    // Markdown 表格：连续的 |a|b| 行合并成一张真表格（跳过 |---| 分隔行）
+    if (/^\s*\|.*\|\s*$/.test(line)) {
+      const cells = line.trim().slice(1, -1).split('|').map(s => s.trim())
+      if (cells.every(c => /^:?-{2,}:?$/.test(c))) continue
+      if (!tableRows) tableRows = []
+      tableRows.push(cells)
+      continue
+    }
+    flushTable()
+    if (!line.trim()) continue
+    const h = /^(#{1,6})\s+(.*)$/.exec(line)
+    if (h) { children.push(new Paragraph({ heading: HEADINGS[h[1].length - 1], children: runs(h[2]) })); continue }
+    const ul = /^\s*[-*+]\s+(.*)$/.exec(line)
+    if (ul) { children.push(new Paragraph({ bullet: { level: 0 }, children: runs(ul[1]) })); continue }
+    const ol = /^\s*\d+[.)]\s+(.*)$/.exec(line)
+    if (ol) { children.push(new Paragraph({ numbering: { reference: 'mc-ordered', level: 0 }, children: runs(ol[1]) })); continue }
+    children.push(new Paragraph({ children: runs(line) }))
+  }
+  flushTable()
+  if (!children.length) throw new CommandError('内容为空，未生成 docx', 'EMPTY_CONTENT')
+
+  const doc = new Document({
+    numbering: {
+      config: [{
+        reference: 'mc-ordered',
+        levels: [{ level: 0, format: LevelFormat.DECIMAL, text: '%1.', alignment: AlignmentType.START }]
+      }]
+    },
+    sections: [{ children }]
+  })
+  const buf = await Packer.toBuffer(doc)
+
+  const { root, rest } = pickRoot(target, opts.roots)
+  const abs = resolveSafe(root, rest)
+  if (fs.existsSync(abs) && !opts.force) {
+    throw new CommandError(`目标已存在：${target}。覆盖请加 --force（docx 是整体生成，无法像表格那样原地改）。`, 'EXISTS_NO_FORCE')
+  }
+  fs.writeFileSync(abs, buf)
+  return {
+    ok: true,
+    command: 'write',
+    path: abs,
+    relative: displayRel(aliasOf(opts.roots, root), root, abs),
+    bytes: buf.length,
+    size: buf.length,
+    format: 'docx',
+    hint: '已生成真正的 .docx（Word/WPS 可直接打开）'
+  }
+}
+
+// ── 保布局翻译 docx（只替换 <w:t> 文本，其余 XML 一字不动）──
+// 1.0.46：中文 docx → 其他语言 docx。为什么不「重建文档」：docx 是 zip + OOXML，
+// 只要不动样式/结构节点（pPr / rPr / tbl / drawing / numbering / 页眉页脚），
+// 字体、颜色、表格、图片、编号、分栏就 100% 原样保留 —— 这正是「布局不变」的含义。
+// 关键取舍：一个段落的文字常被切成多个 run（实测 51/61 段如此，且 run 间样式不同），
+// 逐 run 翻译会把一句话切碎、术语和数字容易翻散。因此按**整段**翻译，
+// 译文写入该段第一个 <w:t>，其余 <w:t> 清空 —— 段内「部分加粗」会统一成首个 run 的样式。
+const DOCX_PARA_RE = /<w:p(?:\s[^>]*)?>[\s\S]*?<\/w:p>/g
+const DOCX_TEXT_RE = /<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>/g
+const DOCX_TBL_RE = /<w:tbl>[\s\S]*?<\/w:tbl>/g
+
+function xmlDecodeXmlEntities(s) {
+  return String(s)
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'")
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(Number(d)))
+    .replace(/&amp;/g, '&') // & 必须最后还原
+}
+function xmlEscapeText(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
+/** 需要处理的部件：正文 + 页眉/页脚（按固定顺序，保证 extract 与 apply 的编号一致） */
+function docxTextParts(names) {
+  const pick = (re) => names.filter(n => re.test(n)).sort((a, b) => {
+    const na = Number((a.match(/(\d+)\.xml$/) || [0, 0])[1])
+    const nb = Number((b.match(/(\d+)\.xml$/) || [0, 0])[1])
+    return na - nb
+  })
+  return [
+    ...pick(/^word\/document\.xml$/),
+    ...pick(/^word\/header\d*\.xml$/),
+    ...pick(/^word\/footer\d*\.xml$/)
+  ]
+}
+function docxStyleLabel(body, inTable) {
+  const pStyle = (/<w:pStyle\s+w:val="([^"]+)"/.exec(body) || [])[1] || ''
+  if (/heading|标题|title/i.test(pStyle)) return 'heading'
+  if (inTable) return 'table'
+  return 'body'
+}
+
+async function docxExtract(abs, offset, limit) {
+  const JSZip = require('jszip')
+  const zip = await JSZip.loadAsync(fs.readFileSync(abs))
+  const parts = docxTextParts(Object.keys(zip.files).filter(n => !zip.files[n].dir))
+  const items = []
+  for (const name of parts) {
+    const xml = await zip.file(name).async('string')
+    const tblRanges = [...xml.matchAll(DOCX_TBL_RE)].map(m => [m.index, m.index + m[0].length])
+    for (const m of xml.matchAll(DOCX_PARA_RE)) {
+      const body = m[0]
+      const text = [...body.matchAll(DOCX_TEXT_RE)].map(x => xmlDecodeXmlEntities(x[1])).join('').trim()
+      if (!text) continue
+      const inTable = tblRanges.some(([a, b]) => m.index >= a && m.index < b)
+      items.push({ id: items.length, part: name.replace(/^word\//, ''), style: docxStyleLabel(body, inTable), text })
+    }
+  }
+  const page = items.slice(offset, limit > 0 ? offset + limit : undefined)
+  return {
+    ok: true,
+    command: 'translate_docx',
+    action: 'extract',
+    path: abs,
+    total: items.length,
+    offset,
+    limit: limit > 0 ? limit : items.length,
+    returned: page.length,
+    items: page,
+    hint: page.length < items.length - offset
+      ? `还有 ${items.length - offset - page.length} 段未返回，翻完这批后用 --offset ${offset + page.length} 继续`
+      : '把这些 text 逐条翻译成目标语言，再用 translate_docx apply 按 id 写回（未提供的 id 保持原文）'
+  }
+}
+
+async function docxApply(abs, dstAbs, mapping) {
+  const JSZip = require('jszip')
+  const zip = await JSZip.loadAsync(fs.readFileSync(abs))
+  const parts = docxTextParts(Object.keys(zip.files).filter(n => !zip.files[n].dir))
+  let cursor = 0
+  let replaced = 0
+  let touched = 0
+  for (const name of parts) {
+    const xml = await zip.file(name).async('string')
+    let changed = false
+    const next = xml.replace(DOCX_PARA_RE, (para) => {
+      const text = [...para.matchAll(DOCX_TEXT_RE)].map(x => xmlDecodeXmlEntities(x[1])).join('').trim()
+      if (!text) return para
+      const id = cursor++
+      const tr = mapping[id]
+      if (tr === undefined || tr === null || String(tr) === '') return para
+      replaced++
+      changed = true
+      let first = true
+      // 译文写入本段第一个 <w:t>（继承它的字体/字号/加粗），其余文本节点清空
+      return para.replace(DOCX_TEXT_RE, () => {
+        if (first) { first = false; return `<w:t xml:space="preserve">${xmlEscapeText(String(tr))}</w:t>` }
+        return '<w:t></w:t>'
+      })
+    })
+    if (changed) { zip.file(name, next); touched++ }
+  }
+  const buf = await zip.generateAsync({
+    type: 'nodebuffer',
+    compression: 'DEFLATE',
+    mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+  })
+  fs.writeFileSync(dstAbs, buf)
+  return {
+    ok: true,
+    command: 'translate_docx',
+    action: 'apply',
+    path: dstAbs,
+    source: abs,
+    replaced,
+    partsTouched: touched,
+    bytes: buf.length,
+    hint: replaced ? '已生成，布局（样式/表格/图片/页眉页脚/编号）保持原样' : '没有命中任何 id，检查 mapping 的 id 是否为 extract 返回的 id'
+  }
+}
+
+function cmdTranslateDocx(positional, flags, roots) {
+  const action = String(positional[0] || flags.action || '').toLowerCase()
+  if (!action) throw new CommandError('translate_docx 需要指定动作：extract 或 apply', 'MISSING_ARG')
+  const src = flags.src || positional[1]
+  if (!src) throw new CommandError('缺少 --src <docx 路径>', 'MISSING_ARG')
+  if (path.extname(String(src)).toLowerCase() !== '.docx') {
+    throw new CommandError('translate_docx 只支持 .docx（.doc 老格式请先转成 docx）', 'UNSUPPORTED_FORMAT')
+  }
+  const { root, rest } = pickRoot(src, roots)
+  const abs = resolveSafe(root, rest, { mustExist: true })
+
+  if (action === 'extract') {
+    const offset = Number(flags.offset || 0) || 0
+    const limit = flags.limit === undefined ? 300 : (Number(flags.limit) || 0)
+    return docxExtract(abs, offset, limit)
+  }
+  if (action !== 'apply') throw new CommandError(`不支持的动作：${action}（只支持 extract / apply）`, 'BAD_ACTION')
+
+  // mapping：--mapping-file <json 文件>（推荐，避免 Windows 命令行长度上限）、
+  // --mapping '{...}'，或位置参数；支持 {"0":"译文"} 与 [{"id":0,"text":"译文"}]
+  let raw
+  if (flags['mapping-file']) {
+    try { raw = fs.readFileSync(String(flags['mapping-file']), 'utf8') } catch (e) {
+      throw new CommandError(`读取 mapping 文件失败：${e.message}`, 'BAD_JSON')
+    }
+  } else {
+    raw = flags.mapping !== undefined ? flags.mapping : positional[2]
+  }
+  if (raw === undefined) throw new CommandError('apply 缺少 --mapping（JSON：{"id":"译文"} 或 [{"id":0,"text":"译文"}]）', 'MISSING_ARG')
+  let parsed
+  try { parsed = JSON.parse(String(raw)) } catch (e) {
+    throw new CommandError(`mapping JSON 解析失败：${e.message}`, 'BAD_JSON')
+  }
+  const mapping = {}
+  if (Array.isArray(parsed)) {
+    for (const it of parsed) {
+      if (!it) continue
+      const id = it.id !== undefined ? it.id : it[0]
+      const text = it.text !== undefined ? it.text : it[1]
+      if (id !== undefined) mapping[Number(id)] = text
+    }
+  } else if (parsed && typeof parsed === 'object') {
+    for (const [k, v] of Object.entries(parsed)) mapping[Number(k)] = v
+  }
+  if (!Object.keys(mapping).length) throw new CommandError('mapping 为空', 'BAD_JSON')
+
+  // 输出路径：--dst，缺省在原文件名后加 .translated（--lang 时用它作后缀）
+  let dst = flags.dst
+  if (!dst) {
+    const ext = path.extname(abs)
+    const base = abs.slice(0, abs.length - ext.length)
+    const suffix = flags.lang ? `.${String(flags.lang).replace(/[\\/:*?"<>|]/g, '')}` : '.translated'
+    dst = `${base}${suffix}${ext}`
+  }
+  const { root: droot, rest: drest } = pickRoot(dst, roots)
+  const dstAbs = resolveSafe(droot, drest)
+  return docxApply(abs, dstAbs, mapping)
+}
+
 // ── 分发 ──────────────────────────────────────────────────
 const COMMANDS = {
   ping: (pos) => cmdPing(pos),
@@ -1293,7 +1585,8 @@ const COMMANDS = {
   read_batch: (pos, flags, roots) => cmdReadBatch(pos, flags, roots),
   list: (pos, flags, roots) => cmdList(pos, flags, roots),
   search: (pos, flags, roots) => cmdSearch(pos, flags, roots),
-  write: (pos, flags, roots) => cmdWrite(pos, flags, roots)
+  write: (pos, flags, roots) => cmdWrite(pos, flags, roots),
+  translate_docx: (pos, flags, roots) => cmdTranslateDocx(pos, flags, roots)
 }
 
 function usage() {
@@ -1304,7 +1597,9 @@ function usage() {
     '  node file_office.js read_batch <path1> [path2 ...] [--path <p> ...] --root <目录> [--extra-root <别名>|<目录> ...] [--json]',
     '  node file_office.js list <dir> [--depth N] --root <目录> [--extra-root <别名>|<目录> ...] [--json]',
     '  node file_office.js search <词> [<dir>] [--name-only] [--regex] [--glob <通配>] [--ext <ext,...>] [--depth N] [--max-results N] [--index] [--rebuild-index] --root <目录> [--extra-root <别名>|<目录> ...] [--json]',
-    '  node file_office.js write <path> [--content <文本>] [--append] [--update] [--newsheet [名称]] --root <目录> [--extra-root <别名>|<目录> ...] [--json]'
+    '  node file_office.js write <path> [--content <文本>] [--append] [--update] [--newsheet [名称]] --root <目录> [--extra-root <别名>|<目录> ...] [--json]',
+    '  node file_office.js translate_docx extract <docx> [--offset N] [--limit N] --root <目录> [--json]',
+    '  node file_office.js translate_docx apply <docx> [--dst <输出路径>] [--lang <后缀>] --mapping \'{"0":"译文"}\' --root <目录> [--json]'
   ].join('\n')
 }
 

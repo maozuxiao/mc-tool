@@ -45,6 +45,8 @@ Build 模式支持**多个已授权目录**（主工作区 + 额外目录白名�
 | `list <dir> [--type file\|dir]` | 列目录 | ✅ 可用 |
 | `search <pattern> [<dir>] [--name-only] [--regex] [--glob <文件名通配>] [--ext <ext,...>] [--depth N] [--max-results N]` | 类 FileLocatorPro 保底搜索：正则/通配符/文件类型过滤 | ✅ 可用；用 `--regex` 并把多个料号用 `\|` 连成一条正则（如 `5190012100066\|1260030100035`）时，每个料号最多返回一条命中（按首次出现）并带 `matched` 字段，便于逐码判断「是否有记录」，不会因为大文件里某码命中很多行而把其他码挤出结果 |
 | `cmd <command>` | 执行命令 | ❌ 已取消（不在 Build 模式范围内） |
+| `translate_docx extract <docx> [--offset N] [--limit N]` | 抽取 docx 里**有文字的段落**（含表格单元格与页眉页脚），返回 `{id, part, style, text}` 清单供翻译 | ✅ 可用 |
+| `translate_docx apply <docx> [--dst <路径>] [--lang <后缀>] --mapping '<JSON>'` | 按 id 把译文写回，**只替换文字** | ✅ 可用；样式/字体/颜色/表格/图片/页眉页脚/编号/分栏全部保持原样 |
 
 ## 安全约束（重要）
 
@@ -71,7 +73,7 @@ Windows 中文环境常见 GBK 编码的 `.txt` / `.csv`，Node 原生只认 UTF
 | 格式 | 读取 | 写入 |
 |------|------|------|
 | `.md` `.txt` `.csv` `.json` `.log` `.yml` 等纯文本 | ✅ | ✅（覆盖写 / `--append` 追加） |
-| `.docx` | ✅ mammoth 提取文本 | ❌ 二进制格式不支持 |
+| `.docx` | ✅ mammoth 提取文本 | ✅ 生成：**content 给 Markdown**，产出真正的 .docx（标题/列表/粗体/表格齐全，UTF-8 任意语言）；已有文件需加 `--force` 覆盖。要**保留原布局只改文字**用 `translate_docx` |
 | `.xlsx` | ✅ exceljs 转 Markdown（公式取 result） | ✅ 生成 / `--update` 原地修改（保留样式）/ `--newsheet` 追加新工作表（保留原表样式）；新建用 `write`、改已有用 `write --update` 或 `write --newsheet`，禁止无 `--update`/`--newsheet` 重建 |
 | `.pptx` | ✅ jszip 提取 `<a:t>` 文本 | ❌ 二进制格式不支持 |
 | `.pdf` | ✅ pdfjs-dist（NodeCMapReaderFactory 解决中文丢失） | ❌ 二进制格式不支持 |
@@ -101,6 +103,33 @@ Windows 中文环境常见 GBK 编码的 `.txt` / `.csv`，Node 原生只认 UTF
 - 未识别的颜色会被**忽略且不上色**，并在返回里附 `unsupportedFills` 与 `supportedFills`，便于模型提示用户改用支持的颜色。
 - 注意：`.xls` 的 `update` 走 SheetJS 旧实现（不保留原表样式），新建/回填的填充色为尽力支持；需要精确样式时请使用 `.xlsx`。
 
+## 保布局翻译 docx（中文 → 其他语言）
+
+**适用场景**：用户要「把这份中文 docx 翻成土耳其语/英文的 docx」「保持原格式翻译」。
+**不要**用 `write` 重新生成 docx —— 那样会丢掉原文档的样式、表格、图片与页眉页脚。走下面两步：
+
+```bash
+# ① 抽取待翻译段落（只含有文字的段，纯图片段自动跳过）
+node file_office.js translate_docx extract "规格书.docx" --limit 300 --root <目录> --json
+# → { total, items: [{ id: 0, part: "document.xml", style: "table", text: "分辨率:1280H*800V" }, ...] }
+
+# ② 模型把每条 text 翻成目标语言，再按 id 写回（未提供的 id 保持原文）
+node file_office.js translate_docx apply "规格书.docx" --dst "规格书(土耳其语).docx" \
+  --mapping '{"0":"Çözünürlük:1280H*800V","1":"Ürün Özellikleri"}' --root <目录> --json
+```
+
+要点：
+
+- **布局为什么能不变**：docx = zip + OOXML，脚本**只替换 `<w:t>` 里的文字**，其余 XML 一字不动 →
+  字体、字号、颜色、表格、图片、页眉页脚、项目编号、分栏 100% 保留。
+- **一个段落的文字常被切成多个 run**（实测 51/61 段如此，且 run 之间样式不同）。因此按**整段**翻译：
+  译文写入该段第一个 `<w:t>`（继承它的字体/字号/加粗），其余文本节点清空。
+  代价：段内「部分加粗」会统一成首个 run 的样式 —— 这是为翻译质量做的取舍，
+  逐 run 翻译会把一句话切碎、术语和数字容易翻散。
+- 段数多时用 `--offset` / `--limit` 分批（默认一批 300 段）。
+- 只支持 `.docx`；`.doc` 老格式请先另存为 docx。
+- 正文之外，`word/header*.xml` 与 `word/footer*.xml` 里的文字也会一并抽取与写回。
+
 ## 依赖说明
 
 所有依赖均为**纯 JavaScript**（已验证打包后 `.node` 原生模块数量为 0），
@@ -110,8 +139,8 @@ Windows 中文环境常见 GBK 编码的 `.txt` / `.csv`，Node 原生只认 UTF
 |------|------|------|
 | `exceljs` | xlsx 读写 | |
 | `mammoth` | docx → 文本/HTML | |
-| `docx` | 生成 docx | |
-| `pptxgenjs` | 生成 pptx | |
+| `docx` | 生成 docx（write 写 .docx 时用） | 1.0.46 起已启用 |
+| `pptxgenjs` | 生成 pptx | 未启用（未打包） |
 | `jszip` | docx/pptx 的 XML 层修改 | |
 | `pdfjs-dist` | PDF 文本提取 | **固定 3.x**：4.x 的 legacy build 为纯 ESM，CommonJS 无法直接 require |
 | `xlsx` | 读取老版 `.xls`（SheetJS 社区版，纯 JS） | exceljs 已覆盖 .xlsx，此库专补 .xls |

@@ -1,10 +1,13 @@
+import { tmpdir } from 'os'
+import { unlinkSync, writeFileSync } from 'fs'
+import { join } from 'path'
 import { bareSkillId } from '@shared/ai-types'
 import type { AIAgentMode, AIExtraRoot } from '@shared/ai-types'
 import { MC_QUERY_TOOL_DEFINITION, runMcQuery, type McRunSink } from './mcSkill'
 import {
   FILE_TOOL_DEFINITIONS, fileSkillRead, runFileSkillCommand,
   FILE_READ_BATCH_TOOL_DEFINITION, FILE_OPEN_FOLDER_TOOL_DEFINITION,
-  FILE_DOWNLOAD_TOOL_DEFINITION, fileSkillDownload
+  FILE_DOWNLOAD_TOOL_DEFINITION, FILE_TRANSLATE_DOCX_TOOL_DEFINITION, fileSkillDownload
 } from './fileSkill'
 import {
   WJXT_SEARCH_TOOL_DEFINITION, WJXT_DOWNLOAD_TOOL_DEFINITION,
@@ -116,6 +119,37 @@ const REGISTRY: Record<string, ToolEntry> = {
       return runFileSkillCommand('write', args, ctx.allowedRoots, ctx.signal, 30000)
     }
   },
+  // 保布局翻译 docx（1.0.46）：只替换 <w:t> 文字，样式/表格/图片/页眉页脚/编号原样保留。
+  // mapping 走临时文件而不是命令行参数 —— 译文可能几十 KB，Windows 命令行上限约 32K 会截断。
+  translate_docx: {
+    definition: FILE_TRANSLATE_DOCX_TOOL_DEFINITION,
+    run: async (input, ctx) => {
+      const action = String(input?.action || '').trim()
+      const p = String(input?.path || '').trim()
+      if (!p) return { ok: false, error: 'MISSING_ARG', message: '缺少 path 参数' }
+      const args = [action, p]
+      if (action === 'extract') {
+        if (Number.isFinite(Number(input?.offset))) args.push('--offset', String(Number(input.offset)))
+        if (Number.isFinite(Number(input?.limit))) args.push('--limit', String(Number(input.limit)))
+        return runFileSkillCommand('translate_docx', args, ctx.allowedRoots, ctx.signal, 60000)
+      }
+      if (action !== 'apply') return { ok: false, error: 'BAD_ACTION', message: 'action 必须是 extract 或 apply' }
+      if (input?.dst) args.push('--dst', String(input.dst))
+      if (input?.lang) args.push('--lang', String(input.lang))
+      const mapping = input?.mapping
+      if (mapping === undefined || mapping === null) {
+        return { ok: false, error: 'MISSING_ARG', message: 'apply 缺少 mapping（id → 译文）' }
+      }
+      const tmp = join(tmpdir(), `mc-docx-mapping-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`)
+      try {
+        writeFileSync(tmp, typeof mapping === 'string' ? mapping : JSON.stringify(mapping), 'utf8')
+        args.push('--mapping-file', tmp)
+        return await runFileSkillCommand('translate_docx', args, ctx.allowedRoots, ctx.signal, 120000)
+      } finally {
+        try { unlinkSync(tmp) } catch { /* 临时文件删不掉不影响结果 */ }
+      }
+    }
+  },
   // 批量读取：一次读多个文件，只消耗 1 轮
   [FILE_READ_BATCH_TOOL_DEFINITION.function.name]: {
     definition: FILE_READ_BATCH_TOOL_DEFINITION,
@@ -216,6 +250,10 @@ function buildFileSummary(name: string, result: any): string {
     case 'file_write': return `已写入 ${result.relative || result.path}`
     case 'file_download': return `已下载 ${result.relative || result.savedPath || ''}（${result.size ?? 0} 字节）`
     case 'file_read_batch': return `已批量读取 ${result.count ?? 0} 个文件`
+    case 'translate_docx':
+      return result?.action === 'extract'
+        ? `已抽取 ${result.total ?? 0} 段待翻译（本次返回 ${result.returned ?? 0} 段）`
+        : `已写回 ${result.replaced ?? 0} 段，生成 ${result.path || ''}（布局保持原样）`
     case 'open_folder':
       return result.ok ? `已打开目录（别名 ${result.alias}）` : `打开目录被拒绝：${result.error || ''}`
     default:
