@@ -168,6 +168,8 @@ const mcApi = {
     mcpCancelPrepare: (id: string): Promise<any> => ipcRenderer.invoke(AI_IPC.MCP_PREPARE_CANCEL, id),
     mcpOpenLog: (id: string): Promise<any> => ipcRenderer.invoke(AI_IPC.MCP_OPEN_LOG, id),
     mcpSelectDir: (): Promise<any> => ipcRenderer.invoke(AI_IPC.MCP_SELECT_DIR),
+  // 生成本机运行配置：剔除他人 Cookie、把写死的别人家路径改指本机，并回写登记里的配置环境变量
+  mcpGenConfig: (id: string): Promise<any> => ipcRenderer.invoke(AI_IPC.MCP_GEN_CONFIG, id),
     onMcpEvent: (cb: (event: any) => void) => {
       const listener = (_e: any, event: any) => cb(event)
       ipcRenderer.on(AI_IPC.MCP_EVENT, listener)

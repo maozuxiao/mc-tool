@@ -76,6 +76,7 @@ export function McpModal({ open, onClose, skills }: Props): React.ReactElement |
   /** 最近一次安装过日志的服务 —— 让日志区在安装结束后仍可见（否则失败信息一闪而过） */
   const [lastLogId, setLastLogId] = useState<string | null>(null)
   const [testBusy, setTestBusy] = useState<string | null>(null)
+  const [genBusy, setGenBusy] = useState<string | null>(null)
   const [draft, setDraft] = useState<Draft | null>(null)
   const [importText, setImportText] = useState('')
   const [notice, setNotice] = useState('')
@@ -188,6 +189,38 @@ export function McpModal({ open, onClose, skills }: Props): React.ReactElement |
     if (!r?.ok) { setInstalling(null); setNotice(r?.error || t('aiRequestFailed')) }
   }
 
+  // 「生成本机运行配置」：技能包常把**作者本机的绝对路径**写进自带配置（实测 Tech-agent 写死
+  // `C:\Users\admin\.workbuddy\...`，本机没这个用户 → 登录时 mkdir 报 EPERM），还常带着他人的
+  // cookie_string。这里不改技能包，而是在 userData/mcp 生成一份本机配置并改指登记里的配置 env。
+  const doGenCfg = async (id: string) => {
+    setGenBusy(id)
+    setNotice('')
+    try {
+      const r: any = await window.mcApi.ai.mcpGenConfig(id)
+      if (!r?.ok) {
+        setNotice(
+          r?.reason === 'no-source' ? t('mcpGenCfgNoSource')
+            : r?.reason === 'not-found' ? t('mcpGenCfgNotFound')
+              : `${t('aiRequestFailed')}：${r?.error || ''}`
+        )
+        return
+      }
+      const lines: string[] = [t('mcpGenCfgOk', { path: r.configPath || '' })]
+      if ((r.rerooted || []).length) {
+        lines.push(t('mcpGenCfgRerooted'))
+        for (const x of r.rerooted as { from: string; to: string }[]) lines.push(`  ${x.from} → ${x.to}`)
+      }
+      if ((r.stripped || []).length) lines.push(t('mcpGenCfgStripped', { keys: (r.stripped as string[]).join(', ') }))
+      if ((r.createdDirs || []).length) lines.push(t('mcpGenCfgDirs', { dirs: (r.createdDirs as string[]).join(', ') }))
+      if (!r.envKey) lines.push(t('mcpGenCfgNoEnvKey'))
+      lines.push(t('mcpGenCfgReconnect'))
+      void window.mcApi.showMessage({ type: 'info', title: t('mcpGenCfgTitle'), message: lines.join('\n') })
+      void refresh()
+    } catch (e: any) {
+      setNotice(`${t('aiRequestFailed')}：${e?.message || String(e)}`)
+    } finally { setGenBusy(null) }
+  }
+
   const doDelete = async (id: string) => {
     const s = servers.find(x => x.id === id)
     const ok = await window.mcApi.showConfirm({
@@ -253,6 +286,9 @@ export function McpModal({ open, onClose, skills }: Props): React.ReactElement |
                   )}
                   <Button size="small" ghost onClick={() => void doPrepare(s.id)} disabled={installing === s.id}>
                     {installing === s.id ? t('mcpPreparing') : t('mcpPrepare')}
+                  </Button>
+                  <Button size="small" ghost onClick={() => void doGenCfg(s.id)} disabled={genBusy === s.id}>
+                    {t('mcpGenCfg')}
                   </Button>
                   <Button size="small" ghost onClick={() => void window.mcApi.ai.mcpOpenLog(s.id)}>{t('mcpLogs')}</Button>
                   <Button size="small" ghost onClick={() => startEdit(s)}>{t('edit')}</Button>

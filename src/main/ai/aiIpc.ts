@@ -21,6 +21,7 @@ import {
   importServersJson as importMcpServersJson,
   getServerRaw as getMcpServerRaw
 } from './mcpStore'
+import { generateLocalConfig as generateLocalMcpConfig } from './mcpConfigGen'
 import {
   connect as connectMcp,
   disconnect as disconnectMcp,
@@ -274,6 +275,17 @@ export function registerAIIPC(): void {
     if (!p || !existsSync(p)) return { ok: false, error: '日志文件还不存在（服务尚未启动过）' }
     shell.showItemInFolder(p)
     return { ok: true }
+  })
+  // 「生成本机运行配置」：技能包常把**作者本机的绝对路径**写进自带配置（实测 Tech-agent 写死
+  // `C:\Users\admin\.workbuddy\...`），还常常带着**他人的 cookie_string** —— 换台机器就是
+  // `EPERM: mkdir ...`（登录态写不进去，扫码都到不了）。这里不改技能包（重新导入会被覆盖），
+  // 而是在 userData/mcp/ 生成一份本机配置：剔除他人凭证 + 路径改指本机真实用户目录 + 建目录，
+  // 并把登记里指向配置的 env 改指过去。生成后断开旧进程，让用户点「测试连接」用新配置重连。
+  ipcMain.handle(AI_IPC.MCP_GEN_CONFIG, (_e, id: string) => {
+    const r = generateLocalMcpConfig(String(id || ''))
+    // 配置换了，旧进程还在用旧 env → 断开，避免「改了却没生效」
+    if (r.ok) disconnectMcp(String(id || ''), '运行配置已重新生成')
+    return r
   })
   // 为 MCP 服务选工作目录（MCP 的相对配置路径都基于它解析）
   ipcMain.handle(AI_IPC.MCP_SELECT_DIR, async e => {

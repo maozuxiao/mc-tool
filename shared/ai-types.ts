@@ -262,6 +262,8 @@ export const AI_IPC = {
   MCP_PREPARE_CANCEL: 'ai:mcp-prepare-cancel',
   MCP_OPEN_LOG: 'ai:mcp-open-log',
   MCP_SELECT_DIR: 'ai:mcp-select-dir',
+  // 生成本机运行配置（技能包里写死别人本机路径 / 带他人 Cookie 时的自救入口）
+  MCP_GEN_CONFIG: 'ai:mcp-gen-config',
   // MCP 状态 / 安装进度事件（主进程 → 渲染层，独立于 ai:event，避免混入消息流）
   MCP_EVENT: 'ai:mcp-event',
   EVENT: 'ai:event'
