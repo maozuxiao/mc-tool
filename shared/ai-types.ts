@@ -256,6 +256,7 @@ export const AI_IPC = {
   MCP_SET_ENABLED: 'ai:mcp-set-enabled',
   MCP_IMPORT_JSON: 'ai:mcp-import-json',
   MCP_TEST: 'ai:mcp-test',
+  MCP_DISCONNECT: 'ai:mcp-disconnect',
   MCP_STATUS: 'ai:mcp-status',
   MCP_PREPARE: 'ai:mcp-prepare',
   MCP_PREPARE_CANCEL: 'ai:mcp-prepare-cancel',

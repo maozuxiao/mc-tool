@@ -235,7 +235,9 @@ export function registerAIIPC(): void {
   ipcMain.handle(AI_IPC.MCP_IMPORT_JSON, (_e, text: string, skillKey?: string) =>
     importMcpServersJson(String(text || ''), String(skillKey || '')))
   ipcMain.handle(AI_IPC.MCP_STATUS, () => listMcpStatuses())
-  // 测试连接：连上并列出工具；测完即断开（避免留驻进程；真正使用时对话前会再连）
+  // 测试连接：连上并列出工具。**测完保持连接**（1.0.46 修正）：
+  // 以前测完即断开，界面徽标随即回到「未启动」，用户会以为「没启动/怎么启动」；
+  // 现在就是一次手动预热 —— 空闲 10 分钟自动回收，应用退出统一断开，不留残留进程。
   ipcMain.handle(AI_IPC.MCP_TEST, async (_e, id: string) => {
     const cfg = getMcpServerRaw(String(id || ''))
     if (!cfg) return { ok: false, error: '服务不存在' }
@@ -246,9 +248,13 @@ export function registerAIIPC(): void {
     } catch (err: any) {
       const dep = checkMcpDependencies(cfg)
       return { ok: false, error: err?.message || String(err), needsInstall: dep.needsInstall }
-    } finally {
-      disconnectMcp(cfg.id, '测试连接结束')
     }
+  })
+
+  // 手动断开（界面上给「已连接」状态一个收口入口）
+  ipcMain.handle(AI_IPC.MCP_DISCONNECT, (_e, id: string) => {
+    disconnectMcp(String(id || ''), '用户手动断开')
+    return { ok: true }
   })
   // 一键准备依赖：立即返回「已启动」，进度与结果经 MCP_EVENT 推送（install-log / install-done）
   ipcMain.handle(AI_IPC.MCP_PREPARE, (_e, id: string) => {

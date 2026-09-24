@@ -208,6 +208,8 @@ export function McpModal({ open, onClose, skills }: Props): React.ReactElement |
       <div className="ai-prompt-modal ai-mcp-modal" onClick={e => e.stopPropagation()}>
         <div className="ai-prompt-modal-head">{t('mcpTitle')}</div>
         <div className="ai-prompt-modal-body">
+          {/* 说明「怎么启动」：自动（勾选技能后发消息）/ 手动预热（测试连接，保持连接） */}
+          <div className="ai-mcp-start">{t('mcpStartHint')}</div>
           {/* ── 服务列表 ── */}
           {!servers.length && <div className="ai-skill-empty">{t('mcpEmpty')}</div>}
           {servers.map(s => {
@@ -238,9 +240,17 @@ export function McpModal({ open, onClose, skills }: Props): React.ReactElement |
                   <div className="ai-mcp-item__warn">{st(s.id)?.error || ''}</div>
                 )}
                 <div className="ai-mcp-item__ops">
-                  <Button size="small" ghost onClick={() => void doTest(s.id)} disabled={testBusy === s.id}>
-                    {testBusy === s.id ? t('mcpTesting') : t('mcpTest')}
-                  </Button>
+                  {/* 已连接时把「测试连接」换成「断开」：给一个明确的收口入口（空闲 10 分钟也会自动回收） */}
+                  {st(s.id)?.state === 'connected' ? (
+                    <Button size="small" ghost onClick={async () => {
+                      await window.mcApi.ai.mcpDisconnect(s.id)
+                      void refresh()
+                    }}>{t('mcpDisconnect')}</Button>
+                  ) : (
+                    <Button size="small" ghost onClick={() => void doTest(s.id)} disabled={testBusy === s.id}>
+                      {testBusy === s.id ? t('mcpTesting') : t('mcpTest')}
+                    </Button>
+                  )}
                   <Button size="small" ghost onClick={() => void doPrepare(s.id)} disabled={installing === s.id}>
                     {installing === s.id ? t('mcpPreparing') : t('mcpPrepare')}
                   </Button>

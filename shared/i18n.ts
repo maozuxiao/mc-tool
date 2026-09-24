@@ -299,6 +299,8 @@ export const I18N: Record<string, Record<string, string | string[]>> = {
     mcpInstallFailed: '✘ 依赖安装失败',
     mcpLogHead: '最近一次安装日志',
     mcpUnboundWarn: '未绑定技能：勾选任何技能都不会下发它的工具 —— 请点「编辑」绑定一个技能',
+    mcpDisconnect: '断开',
+    mcpStartHint: '启动方式：勾选绑定的技能后发送消息，应用会在对话前自动拉起本服务；这里点「测试连接」也可手动预热（会保持连接，空闲 10 分钟自动回收、退出应用统一断开）。',
     // 自检结果（弹窗只给「OA + edoc2 + 结论」三行；IAM / 备份 / 页面上下文等细节只进日志）
     aiDiagOaLine: '① OA 物料查询会话：{s}',
     aiDiagEdoc2Line: '② 鸿翼 edoc2 登录态：{s}',
@@ -697,6 +699,8 @@ export const I18N: Record<string, Record<string, string | string[]>> = {
     mcpInstallFailed: '✘ Dependency install failed',
     mcpLogHead: 'Last install log',
     mcpUnboundWarn: 'Unbound: its tools are never exposed to the AI — click "Edit" and bind a skill',
+    mcpDisconnect: 'Disconnect',
+    mcpStartHint: 'How it starts: it launches automatically before a message once the bound skill is checked; "Test connection" also pre-warms it (stays connected; auto-recycled after 10 min idle and closed on exit).',
     // Self-check result (the dialog shows only OA + edoc2 + verdict; IAM / backup / page-context details go to the log)
     aiDiagOaLine: '① OA material search session: {s}',
     aiDiagEdoc2Line: '② Streamax edoc2 sign-in: {s}',

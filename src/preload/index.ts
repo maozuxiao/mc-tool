@@ -161,6 +161,7 @@ const mcApi = {
     mcpImportJson: (text: string, skillKey?: string): Promise<any> =>
       ipcRenderer.invoke(AI_IPC.MCP_IMPORT_JSON, text, skillKey),
     mcpTest: (id: string): Promise<any> => ipcRenderer.invoke(AI_IPC.MCP_TEST, id),
+    mcpDisconnect: (id: string): Promise<any> => ipcRenderer.invoke(AI_IPC.MCP_DISCONNECT, id),
     mcpStatus: (): Promise<any> => ipcRenderer.invoke(AI_IPC.MCP_STATUS),
     // 依赖安装：立即返回「已启动」，进度与结果经 onMcpEvent 推送（install-log / install-done）
     mcpPrepare: (id: string): Promise<any> => ipcRenderer.invoke(AI_IPC.MCP_PREPARE, id),
