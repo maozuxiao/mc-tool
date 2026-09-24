@@ -821,6 +821,20 @@ export function ChatPanel({ disabled }: Props) {
     }
   }
 
+  // 「继续」按钮（1.0.46）：模型偶尔只回一句计划宣告就结束回合（实测「DS100 规格书」那轮：
+  // 33 字、0 个工具调用，用户只能手打「请继续」）。一键等效：空闲直接 send('继续')，生成中排队。
+  // 用 ref 包一层保持回调身份稳定 —— MessageItem 是 memo 组件，不能让每次渲染都把它打穿。
+  const continueRef = useRef<() => void>(() => {})
+  continueRef.current = () => {
+    const text = t('aiContinueText')
+    if (streaming) {
+      setQueue(q => [...q, { id: `q_${Date.now().toString(36)}_${q.length}`, text }])
+    } else if (!disabled) {
+      void send(text)
+    }
+  }
+  const onContinue = useCallback(() => continueRef.current(), [])
+
   // ── 附件 ──────────────────────────────────────────────────────
   const attachFromFiles = useCallback(async (files: FileList | File[] | null) => {
     const arr = files ? Array.from(files as File[]) : []
@@ -1238,6 +1252,7 @@ export function ChatPanel({ disabled }: Props) {
               // 最后一条助手消息还没收到任何内容时，显示「思考中…」而不是一个空气泡
               thinking={streaming && i === messages.length - 1 && m.role === 'assistant'}
               emptyHint={emptyMsgHints[m.id]}
+              onContinue={onContinue}
             />
           ))}
           <div ref={bottomRef} />
@@ -1865,7 +1880,7 @@ function fmtDate(ts?: number): string {
   return `${yyyy}/${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
 }
 
-const MessageItem = memo(function MessageItem({ message, thinking, emptyHint }: { message: AIMessage; thinking?: boolean; emptyHint?: 'stopped' | 'timeout' }) {
+const MessageItem = memo(function MessageItem({ message, thinking, emptyHint, onContinue }: { message: AIMessage; thinking?: boolean; emptyHint?: 'stopped' | 'timeout'; onContinue?: () => void }) {
   const t = useStore(s => s.t)
   const [copied, setCopied] = useState(false)
   const copyTimer = useRef<number | null>(null)
@@ -1940,6 +1955,14 @@ const MessageItem = memo(function MessageItem({ message, thinking, emptyHint }: 
             <Icon name={copied ? 'Check' : 'File'} size={13} />
             <span>{copied ? t('aiCopied') : t('aiCopy')}</span>
           </button>
+          {/* 「继续」：模型只回了句计划就停时，一键让它接着干（免手打「请继续」）。
+              只给助手消息、且思考占位态不显示（那时本来就在生成中）。 */}
+          {message.role === 'assistant' && !thinking && onContinue && (
+            <button type="button" className="ai-copy-btn" onClick={onContinue} title={t('aiContinueTip')}>
+              <Icon name="Play" size={13} />
+              <span>{t('aiContinueBtn')}</span>
+            </button>
+          )}
         </div>
       </div>
     </div>

@@ -991,6 +991,85 @@ function keywordTokens(kw: string): string[] {
 }
 
 /**
+ * 中文资料词 → 企业内容库里文件名常见的英文写法。
+ *
+ * 实测教训（DS100 规格书，2026-09-24）：文件名用的是全称 **Specification**，
+ * 而用户/模型搜的是「规格书」「spec」—— 分词检索下互不相中，两轮都没搜到目标文件；
+ * 最后靠 `filename:(DS100 AND Specification)` 才命中。
+ * 所以工具自己把这类词扩展掉，不再依赖模型想起来换英文。
+ * 同义词**只并入 filename 侧**：内容侧用原词即可，否则 RoHS/REACH 这类
+ * 「内容里提到规格」的周边文件会翻倍涌入，把目标文件淹没得更厉害。
+ */
+const FILENAME_SYNONYMS: Record<string, string[]> = {
+  规格书: ['Specification', 'Spec', 'Datasheet'],
+  规格: ['Specification', 'Spec'],
+  说明书: ['Manual', 'UM', 'Guide'],
+  手册: ['Manual', 'Guide'],
+  证书: ['Certificate', 'Certification', 'Cert'],
+  认证: ['Certificate', 'Certification'],
+  报告: ['Report'],
+  固件: ['Firmware'],
+  软件: ['Software'],
+  协议: ['Protocol'],
+  图纸: ['Drawing'],
+  清单: ['List', 'BOM']
+}
+
+/** 关键词里出现的资料词 → 其英文同义词（去重、大小写变体交给通配/分词层处理） */
+function synonymsFor(kw: string): string[] {
+  const k = String(kw || '')
+  const out = new Set<string>()
+  for (const [zh, ens] of Object.entries(FILENAME_SYNONYMS)) {
+    if (k.includes(zh)) ens.forEach(s => out.add(s))
+  }
+  return [...out]
+}
+
+/**
+ * filename 侧的表达式：原词 + 同义词（有同义词时）。
+ * 返回 undefined = 没有可扩展的同义词，filename 侧保持原词即可。
+ */
+function filenameExprWithSynonyms(kw: string, mode: WjxtMatchMode): string | undefined {
+  const syns = synonymsFor(kw)
+  if (!syns.length) return undefined
+  const terms = [kw, ...syns].map(t => {
+    const e = esEscape(t)
+    if (mode === 'contains') return caseVariants(t).map(v => '*' + esEscape(v) + '*').join(' OR ')
+    return e
+  })
+  return `(${terms.join(' OR ')})`
+}
+
+/** 整条子句：filename 侧带同义词（原词 + 同义词），filecontent 侧保持原词。无同义词时返回 undefined */
+function clauseWithSynFilename(kw: string, mode: WjxtMatchMode): string | undefined {
+  const synExpr = filenameExprWithSynonyms(kw, mode)
+  if (!synExpr) return undefined
+  const fc = mode === 'contains'
+    ? caseVariants(kw).map(v => '*' + esEscape(v) + '*').join(' OR ')
+    : esEscape(kw)
+  return `(${synExpr} OR filecontent:(${fc}))`
+}
+
+/**
+ * 本地重排：**文件名里命中查询词/同义词更多的排前面**（稳定排序，同分保持服务端相关度次序）。
+ * 动机同上：默认相关度排序会把「内容里提到 DS100」的 RoHS / REACH / Release Note 淹没掉
+ * 文件名就叫「DS100-P Specification.pdf」的目标文件；文件名命中数是最直观的相关性信号。
+ * 只在「按相关度」时生效 —— 用户显式要求按时间/大小/名字排时不抢控制权。
+ */
+function rerankByNameHits(files: WjxtFileInfo[], kw: string): WjxtFileInfo[] {
+  const syns = synonymsFor(kw)
+  const terms = [...String(kw || '').split(/[^0-9A-Za-z\u4e00-\u9fa5]+/).filter(t => t.length >= 2), ...syns]
+    .map(t => t.toLowerCase())
+    .filter(Boolean)
+  if (!terms.length) return files
+  const score = (name: string) => {
+    const n = String(name || '').toLowerCase()
+    return terms.reduce((acc, t) => acc + (n.includes(t) ? 1 : 0), 0)
+  }
+  return [...files].sort((a, b) => score(b.name) - score(a.name))
+}
+
+/**
  * 各「非 score」排序键是否被服务端支持（1.0.43 实测修正）。
  *
  * **实测结论**：本部署对 `sort:[{modifyTime:{order:'desc'}}]` 会**直接返回空结果集**
@@ -1034,7 +1113,7 @@ function sortClause(sort?: WjxtSort): Array<Record<string, any>> {
 export async function wjxtSearch(
   keyword: string,
   opts: { size?: number; query?: string; mode?: WjxtMatchMode; sort?: WjxtSort; from?: number } = {}
-): Promise<{ total: number; files: WjxtFileInfo[]; strategy?: string; sortMode?: string }> {
+): Promise<{ total: number; files: WjxtFileInfo[]; strategy?: string; sortMode?: string; nameReranked?: boolean }> {
   const size = Math.min(Math.max(Math.round(opts.size ?? 10), 1), MAX_SEARCH_SIZE)
   const from = Math.max(0, Math.round(Number(opts.from) || 0))
   const mode: WjxtMatchMode = opts.mode === 'contains' || opts.mode === 'exact' ? opts.mode : 'word'
@@ -1059,8 +1138,13 @@ export async function wjxtSearch(
   if (opts.query) {
     strategies.push({ name: 'custom', query: opts.query.trim() })
   } else {
-    strategies.push({ name: mode, query: base })
-    if (mode !== 'contains') strategies.push({ name: 'contains', query: keywordClause(keyword, 'contains') })
+    // 同义词只进 filename 侧（见 FILENAME_SYNONYMS 注释）；exact 模式是整串精确匹配，不做扩展
+    const synClause = mode === 'exact' ? undefined : clauseWithSynFilename(keyword, mode)
+    strategies.push({ name: synClause ? mode + '+syn' : mode, query: synClause || base })
+    if (mode !== 'contains') {
+      const c = mode === 'exact' ? keywordClause(keyword, 'contains') : (clauseWithSynFilename(keyword, 'contains') || keywordClause(keyword, 'contains'))
+      strategies.push({ name: 'contains', query: c })
+    }
     const toks = keywordTokens(keyword)
     if (toks.length) {
       const expr = toks.join(' OR ')
@@ -1212,6 +1296,18 @@ export async function wjxtSearch(
   if (!usedServerSort && sortKey !== 'score' && parsed.files.length) {
     parsed = { ...parsed, files: sortFilesLocally(parsed.files, sortKey) }
   }
+  // 按相关度时做「文件名命中优先」重排（DS100 教训：内容命中的 RoHS/REACH 会把
+  // 文件名就叫「DS100-P Specification.pdf」的目标文件挤出前几名）
+  let nameReranked = false
+  if (sortKey === 'score' && !opts.query && parsed.files.length > 1) {
+    const before = parsed.files.map(f => f.name)
+    const files = rerankByNameHits(parsed.files, keyword)
+    if (files.some((f, i) => f.name !== before[i])) {
+      parsed = { ...parsed, files }
+      nameReranked = true
+      wjxtLog('[search] reranked by filename hits (name-match files first)')
+    }
+  }
   const sortMode = sortKey === 'score' ? 'score' : (usedServerSort ? `server:${sortKey}` : `local:${sortKey}`)
 
   if (!parsed.files.length && res) {
@@ -1227,7 +1323,7 @@ export async function wjxtSearch(
       head: res.body.slice(0, 600)
     }))
   }
-  return { total: parsed.total, files: parsed.files, strategy: usedStrategy, sortMode }
+  return { total: parsed.total, files: parsed.files, strategy: usedStrategy, sortMode, nameReranked }
 }
 
 /**
@@ -1345,6 +1441,10 @@ export const WJXT_SEARCH_TOOL_DEFINITION = {
       '本工具**一次调用内部会自动换写法**（原模式 → 子串 → 拆词 → 范围前缀）直到命中：' +
       '返回里的 strategy 是命中的那条、note 会说明「原查询没命中、已自动改用 X 命中 N 条」——' +
       '看到 note 就直接用结果，**不要自己再换关键词重试**；' +
+      '资料类中文词（规格书/说明书/证书/报告…）会**自动扩展成文件名常见英文写法**（规格书→Specification/Spec/Datasheet 等）' +
+      '并入文件名检索，且**文件名命中的结果排在前面** —— 所以中文关键词也能搜到英文命名的文件，' +
+      '但**搜具体型号资料时，关键词里带上型号 + 英文资料词更准**（如「DS100 Specification」）；' +
+      '要严格限定「文件名必须含某词」时用 query 传 `filename:(词1 AND 词2)`。' +
       '每个结果都带 folderPath（**真实目录路径名**，如 企业文档库/AD PLUS 2.0/版本发布）、' +
       'folderUrl（点开可在应用内浏览该目录）、previewUrl（**预览**：点开在应用内窗口查看文件）与 ' +
       'downloadUrl（**下载**：点开弹「另存为」把原始文件存到本机）。' +
@@ -1540,7 +1640,7 @@ export async function runWjxtSearch(input: {
   const from = Math.max(0, Math.round(Number(input?.from) || 0))
   wjxtLog(`[search] keyword=${keyword} size=${input?.size ?? '-'} mode=${input?.mode || 'word'} sort=${input?.sort || 'score'} from=${from} query=${input?.query ? 'yes' : 'no'}`)
   try {
-    const { total, files, strategy, sortMode } = await wjxtSearch(keyword, {
+    const { total, files, strategy, sortMode, nameReranked } = await wjxtSearch(keyword, {
       size: input?.size,
       query: input?.query,
       mode: input?.mode,
@@ -1553,6 +1653,11 @@ export async function runWjxtSearch(input: {
     // 免得它再自己一轮轮换词试（实测那样会烧掉几十次调用）
     if (files.length && strategy && strategy !== asked) {
       notes.push(`原 ${asked} 查询没命中，已自动改用「${strategy}」查询并命中 ${files.length} 条（无需再换词重试）`)
+    }
+    // 同义词扩展（DS100 教训）：中文资料词的英文写法已并入文件名检索，说清楚免得模型自己再换英文重搜
+    const syns = synonymsFor(keyword)
+    if (files.length && syns.length) {
+      notes.push(`已把资料词自动扩展为文件名常见英文写法（${syns.join(' / ')}）一并检索；文件名命中的已排前面`)
     }
     // 服务端不支持该排序键时工具已改本地排序：说清楚，免得模型以为排序没生效又去折腾
     if (files.length && sortMode?.startsWith('local:')) {
