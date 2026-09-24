@@ -517,11 +517,6 @@
   box-shadow: none;
 }
 .ai-tool-run-collapse > button > span:nth-child(2) { font-size: 12px; font-weight: 600; }
-/* 藏掉库 Collapse 的 FAQ 叶子装饰（button 里第三个 span = leafDecoration，内含 20px 的 Fish 图标，
-   取色 var(--animal-primary-color)）。它是给 FAQ 卡片做的「展开提示」，在聊天气泡的工具卡里
-   毫无信息量，还会在行尾显示成一个深色小色块，看起来像冒出来的终端图标（用户反馈过）。
-   展开状态本来就有第一个 span 的 +／− 表达，删掉不影响任何功能。 */
-.ai-tool-run-collapse > button > span:last-child { display: none; }
 /* 详情区：左右内边距收窄，展开时再补下内边距（收起态不加，避免留下空隙） */
 .ai-tool-run-collapse [role="region"] > div { padding: 0 10px; }
 .ai-tool-run-collapse button[aria-expanded="true"] + [role="region"] > div { padding-bottom: 10px; }
