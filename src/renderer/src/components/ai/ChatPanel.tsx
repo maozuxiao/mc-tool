@@ -644,9 +644,15 @@ export function ChatPanel({ disabled }: Props) {
       if (conversationIdRef.current && messagesRef.current) {
         scrollPositionsRef.current.set(conversationIdRef.current, messagesRef.current.scrollTop)
       }
-      const data = await window.mcApi.ai.getConversation(id)
+      const data: any = await window.mcApi.ai.getConversation(id)
       setActiveConversation(id)
       setMessages(data.messages)
+      // 恢复该会话上次的勾选（1.0.47）：只在内存里还没有这条会话的记录时用库里的值 ——
+      // 同一进程内用户刚改过的勾选以内存为准，不能被旧值覆盖回去。
+      const saved = data?.conversation?.enabledSkills
+      if (Array.isArray(saved)) {
+        setSkillSel(prev => (prev[id] ? prev : { ...prev, [id]: saved.map(String) }))
+      }
       pendingScrollRef.current = { id }
       // 注意：AI 配置（服务商 / 模型）是全局的，不随会话切换而改变。
       // 历史会话仍然用它当时记录的服务商与模型，只有「当前工具栏选择」保持全局。
@@ -926,28 +932,36 @@ export function ChatPanel({ disabled }: Props) {
   )
   // 下发给主进程的是「来源:id」（内置与导入同名时靠它区分注入哪一份）
   const enabledSkills = useMemo(() => enabledSkillInfos.map(s => skillKey(s)), [enabledSkillInfos])
+  // 勾选落库（1.0.47）：按会话持久化，重启/切回旧会话能恢复。'__new__' 还没有会话 id，跳过，
+  // 等会话创建后由下面的迁移 effect 补落。落库失败不影响本次勾选。
+  const persistSkillSel = useCallback((convId: string | null, keys: string[]) => {
+    if (!convId || convId === '__new__') return
+    try { void window.mcApi.ai.setConvSkills(convId, keys) } catch { /* 落库失败不阻塞 */ }
+  }, [])
   const toggleSkill = (key: string, enabled: boolean) => {
-    setSkillSel(prev => {
-      const cur = new Set(prev[convKey] || [])
-      if (enabled) cur.add(key)
-      else cur.delete(key)
-      return { ...prev, [convKey]: [...cur] }
-    })
+    const cur = new Set(selectedSkillKeys)
+    if (enabled) cur.add(key)
+    else cur.delete(key)
+    const next = [...cur]
+    setSkillSel(prev => ({ ...prev, [convKey]: next }))
+    // 落库放在 setState 外面：state updater 必须是纯函数（StrictMode 下会被调用两次）
+    persistSkillSel(conversationId, next)
   }
   // 新会话第一次拿到 id 时，把 '__new__' 槽的勾选迁到这条会话上（否则发送后技能会被悄悄丢掉），
   // 并清空 '__new__' —— 这样「下一条新会话」又是从零开始，正是本次要修的行为
+  const skillSelRef = useRef(skillSel)
+  skillSelRef.current = skillSel
   const prevConvIdRef = useRef<string | null>(null)
   useEffect(() => {
     const prev = prevConvIdRef.current
     prevConvIdRef.current = conversationId
-    if (!prev && conversationId) {
-      setSkillSel(s => {
-        const pending = s['__new__'] || []
-        if (!pending.length) return s
-        return { ...s, [conversationId]: pending, __new__: [] }
-      })
-    }
-  }, [conversationId])
+    if (prev || !conversationId) return
+    const pending = skillSelRef.current['__new__'] || []
+    if (!pending.length) return
+    setSkillSel(s => (s[conversationId] ? s : { ...s, [conversationId]: pending, __new__: [] }))
+    // 迁移的同时落库：会话刚创建，把新会话的勾选写进它的记录，重启/切回才能恢复
+    persistSkillSel(conversationId, pending)
+  }, [conversationId, persistSkillSel])
   // 「诊断」：一键体检三条会话线（OA / IAM / 鸿翼 edoc2），结论弹窗、明细同时写进 wjxt.log。
   // 用途：用户报「搜不到文件 / 让登录」时，让 TA 点一下就能拿到「到底是哪一条线断了」。
   const runDiag = async () => {

@@ -9,7 +9,7 @@ import { listProviders, saveProvider, getSuggestedModels, getPreferences, savePr
 import { dirBlockReason, makeAlias } from './rootGuard'
 import {
   createConversation, deleteConversation, getConversation,
-  listConversations, renameConversation
+  listConversations, renameConversation, setConversationSkills
 } from './historyStore'
 import { sendMessage, stopMessage } from './chatService'
 import { listPrompts, savePrompt, updatePrompt, deletePrompt } from './promptStore'
@@ -96,6 +96,11 @@ export function registerAIIPC(): void {
   ipcMain.handle(AI_IPC.GET_CONVERSATION, (_e, id: string) => getConversation(id))
   ipcMain.handle(AI_IPC.RENAME_CONVERSATION, (_e, id: string, title: string) => renameConversation(id, title))
   ipcMain.handle(AI_IPC.DELETE_CONVERSATION, (_e, id: string) => deleteConversation(id))
+  // 记住本会话启用的技能（1.0.47）：勾选仍按会话独立，但要跨重启/切回保留（见 historyStore 注释）
+  ipcMain.handle(AI_IPC.SET_CONV_SKILLS, (_e, id: string, keys: string[]) => {
+    setConversationSkills(String(id || ''), Array.isArray(keys) ? keys.map(k => String(k)) : [])
+    return { ok: true }
+  })
 
   ipcMain.handle(AI_IPC.SEND_MESSAGE, async (_e, payload: any) => {
     try {

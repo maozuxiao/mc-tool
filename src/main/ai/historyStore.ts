@@ -153,6 +153,24 @@ export function updateMessage(id: string, patch: { content?: string; reasoning?:
   persist()
 }
 
+/**
+ * 记住某会话启用的技能键（1.0.47）。
+ *
+ * 背景：技能勾选是「按会话独立」的（新会话从零开始），但此前只活在渲染层内存里 ——
+ * 进程重启即清空，而会话历史还在。用户在同一条会话里继续提问时会被回「技能未启用」，
+ * 界面上却看不出勾选已经没了（实测：重启后接着问规格书，模型说「鸿雁未启用」）。
+ * 存进会话记录即可「重启 / 切回旧会话恢复原样」，且不改变「按会话独立」的语义。
+ *
+ * 刻意不动 updatedAt：只是调整勾选，不该把会话顶到列表最前面。
+ */
+export function setConversationSkills(id: string, keys: string[]): void {
+  const data = load()
+  const c = data.conversations.find(x => x.id === id)
+  if (!c) return
+  c.enabledSkills = [...new Set((keys || []).map(k => String(k)).filter(Boolean))]
+  persist()
+}
+
 export function renameConversation(id: string, title: string): void {
   const data = load()
   const c = data.conversations.find(x => x.id === id)

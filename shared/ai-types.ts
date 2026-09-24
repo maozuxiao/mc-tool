@@ -61,6 +61,15 @@ export interface AIConversation {
   modelId: string
   createdAt: number
   updatedAt: number
+  /**
+   * 本会话启用的技能键（`来源:id`），1.0.47 起**按会话持久化**。
+   *
+   * 为什么存这里：勾选一直是「按会话独立」的（新会话从零开始，见 skillRegistry 注释），
+   * 但此前只存在渲染层内存里 —— **进程重启后全部清空**，而会话历史还在。用户在同一条会话里
+   * 继续提问时会突然被回「该技能未启用，请去 Skills 勾选」，而界面上看不出勾选已经没了。
+   * 存进会话记录既不破坏「按会话独立」，又能做到「重启 / 切回旧会话恢复原样」。
+   */
+  enabledSkills?: string[]
 }
 
 export type AIMessageRole = 'user' | 'assistant' | 'tool'
@@ -229,6 +238,8 @@ export const AI_IPC = {
   GET_CONVERSATION: 'ai:get-conversation',
   RENAME_CONVERSATION: 'ai:rename-conversation',
   DELETE_CONVERSATION: 'ai:delete-conversation',
+  // 记住某会话启用的技能（1.0.47）：勾选按会话独立，但要跨重启/切回保留
+  SET_CONV_SKILLS: 'ai:set-conv-skills',
   SEND_MESSAGE: 'ai:send-message',
   STOP_MESSAGE: 'ai:stop-message',
   // Build 模式的工作区根目录：由主进程弹系统目录选择框，避免渲染层直接操作 fs
