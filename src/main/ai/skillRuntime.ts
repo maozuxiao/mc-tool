@@ -60,10 +60,11 @@ export function abortable<T>(promise: Promise<T>, signal?: AbortSignal): Promise
 export async function getNodePath(skillRoot: string, signal?: AbortSignal): Promise<string> {
   if (process.platform === 'win32') {
     try {
+      // windowsHide 同 mcSkill.getNodePath：技能首次自举 Node 时不能闪出黑色控制台窗口
       const out = await abortable(execFileAsync('powershell.exe', [
         '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
         join(skillRoot, 'scripts', 'ensure_node.ps1')
-      ], { timeout: 120000 }), signal)
+      ], { timeout: 120000, windowsHide: true }), signal)
       const lines = String(out.stdout).trim().split(/\r?\n/)
       const nodePath = lines.filter(Boolean).pop()
       if (nodePath && existsSync(nodePath)) return nodePath

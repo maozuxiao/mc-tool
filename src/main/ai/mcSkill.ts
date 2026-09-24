@@ -163,10 +163,12 @@ function abortable<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
 async function getNodePath(signal?: AbortSignal): Promise<string> {
   if (process.platform === 'win32') {
     try {
+      // windowsHide 必须给：首次调用技能会走这里自举 Node，缺了它 Windows 上会**闪一个黑色控制台窗口**
+      // （用户反馈过「用着用着冒出一个终端」）。其余 spawn 调用（skillRuntime / mcpClient / skillRegistry）都已带上。
       const out = await abortable(execFileAsync('powershell.exe', [
         '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
         join(getSkillRoot(), 'scripts', 'ensure_node.ps1')
-      ], { timeout: 120000 }), signal)
+      ], { timeout: 120000, windowsHide: true }), signal)
       const lines = String(out.stdout).trim().split(/\r?\n/)
       const nodePath = lines.filter(Boolean).pop()
       if (nodePath && existsSync(nodePath)) return nodePath
