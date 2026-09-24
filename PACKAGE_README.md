@@ -12,14 +12,14 @@
 
 ## 2. 修改版本号步骤
 
-以发布 `1.0.46` 为例（仓库根即应用根，路径都以 `mc-tool/` 为基准）：
+以发布 `1.0.47` 为例（仓库根即应用根，路径都以 `mc-tool/` 为基准）：
 
 ```text
 1. 打开 package.json
-   把 "version": "1.0.45" 改为 "version": "1.0.46"
+   把 "version": "1.0.46" 改为 "version": "1.0.47"
 
 2. 打开 electron-builder.yml
-   把 buildVersion: 1.0.45.0 改为 buildVersion: 1.0.46.0
+   把 buildVersion: 1.0.46.0 改为 buildVersion: 1.0.47.0
 
 3. 不需要改 store.ts（已改为自动读取）
 ```
@@ -91,8 +91,8 @@ Windows 任务栏右键菜单第一项（窗口名称）由主窗口 `title` 与
 ### 当前基线版本
 
 ```text
-package.json version:          1.0.45
-electron-builder buildVersion: 1.0.45.0
+package.json version:          1.0.46
+electron-builder buildVersion: 1.0.46.0
 ```
 
 打包命令：
@@ -101,15 +101,15 @@ electron-builder buildVersion: 1.0.45.0
 npm run pack:win
 ```
 
-### 生成 1.0.46 更新安装包
+### 生成 1.0.47 更新安装包
 
-按常规发布流程，把产品版本与文件版本统一进一位即可。注意 `package.json` 的 `version` 必须为合法 SemVer（三段），不能写成 `1.0.46.0`；文件版本 `buildVersion` 才是四位。
+按常规发布流程，把产品版本与文件版本统一进一位即可。注意 `package.json` 的 `version` 必须为合法 SemVer（三段），不能写成 `1.0.47.0`；文件版本 `buildVersion` 才是四位。
 
 步骤：
 
 ```text
-1. package.json         -> "version": "1.0.46"
-2. electron-builder.yml -> buildVersion: 1.0.46.0
+1. package.json         -> "version": "1.0.47"
+2. electron-builder.yml -> buildVersion: 1.0.47.0
 3. npm run pack:win
 ```
 
@@ -118,13 +118,13 @@ npm run pack:win
 ```text
 dist/
 ├── latest.yml
-├── MC物料查询 Setup 1.0.46.exe
-├── MC物料查询 Setup 1.0.46.exe.blockmap
-└── MC物料查询 1.0.46.exe
+├── MC物料查询 Setup 1.0.47.exe
+├── MC物料查询 Setup 1.0.47.exe.blockmap
+└── MC物料查询 1.0.47.exe
 ```
 
 发布时用 `.\build_now.ps1 -Publish` 把 `latest.yml` + 两个 exe + blockmap 上传为该版本的 Release 附件，
-再把 draft 改为 **Published**；客户端（如 1.0.45）启动后即会检测到 `1.0.46` 并提示更新。
+再把 draft 改为 **Published**；客户端（如 1.0.46）启动后即会检测到 `1.0.47` 并提示更新。
 
 ### 仅改文件版本号（四位）的测试包
 
@@ -140,12 +140,12 @@ nsis.artifactName: MC物料查询-${buildVersion}-Setup.${ext}
 
 为避免测试包污染正式 `dist/`，可将产物临时输出到独立子目录，打包后再还原输出目录。
 
-**以 1.0.46 升级测试包为例：**
+**以 1.0.47 升级测试包为例：**
 
 1. 升版本号：
    ```text
-   package.json          -> "version": "1.0.46"
-   electron-builder.yml  -> buildVersion: 1.0.46.0
+   package.json          -> "version": "1.0.47"
+   electron-builder.yml  -> buildVersion: 1.0.47.0
    ```
 
 2. 临时把输出目录改为独立文件夹（改完记得还原）：
@@ -166,15 +166,15 @@ nsis.artifactName: MC物料查询-${buildVersion}-Setup.${ext}
 
 ```text
 dist/update test/
-├── latest.yml                            # 指向 1.0.46
-├── MC物料查询 Setup 1.0.46.exe            # NSIS 安装包
-├── MC物料查询 Setup 1.0.46.exe.blockmap   # 增量更新块映射
-├── MC物料查询 1.0.46.exe                  # 便携版
+├── latest.yml                            # 指向 1.0.47
+├── MC物料查询 Setup 1.0.47.exe            # NSIS 安装包
+├── MC物料查询 Setup 1.0.47.exe.blockmap   # 增量更新块映射
+├── MC物料查询 1.0.47.exe                  # 便携版
 └── win-unpacked/                         # 免安装解压版
 ```
 
 测试方式：把该目录下的 `latest.yml` + `*.exe` + `*.exe.blockmap` 作为**草稿 Release** 的附件上传（`gh release create --draft`，
-或直接 `.\build_now.ps1 -Publish` 后先别发布），已安装的旧版本（如 1.0.43/1.0.45）客户端即可检测到 1.0.46 升级；
+或直接 `.\build_now.ps1 -Publish` 后先别发布），已安装的旧版本（如 1.0.43/1.0.46）客户端即可检测到 1.0.47 升级；
 验证完记得清理该草稿 Release（草稿不会被客户端看到，正式发布前不要把测试包设为 Published）。
 
 ### 更新进度优化（1.0.3 起）

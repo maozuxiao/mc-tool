@@ -22,7 +22,7 @@
 
 ---
 
-## 一、发布一个新版本（以 1.0.45 为例）
+## 一、发布一个新版本（以 1.0.46 为例）
 
 ### 1. 同步代码并提交
 
@@ -47,17 +47,17 @@ git push origin master
 
 | 文件 | 字段 | 格式 | 示例 |
 |---|---|---|---|
-| `package.json` | `version` | SemVer **三段** | `"1.0.45"` |
-| `electron-builder.yml` | `buildVersion` | **四位**文件版本 | `1.0.45.0` |
+| `package.json` | `version` | SemVer **三段** | `"1.0.46"` |
+| `electron-builder.yml` | `buildVersion` | **四位**文件版本 | `1.0.46.0` |
 
 ```jsonc
 // package.json
-{ "version": "1.0.45" }
+{ "version": "1.0.46" }
 ```
 
 ```yaml
 # electron-builder.yml
-buildVersion: 1.0.45.0
+buildVersion: 1.0.46.0
 ```
 
 > **两处必须同步**。
@@ -72,14 +72,14 @@ buildVersion: 1.0.45.0
 在 `MC Tool Release Notes.md` 的表格末尾追加一行：
 
 ```markdown
-| 1.0.45 | 1.0.45.0 | 本次改动说明 |
+| 1.0.46 | 1.0.46.0 | 本次改动说明 |
 ```
 
 提交版本号与 notes：
 
 ```bash
 git add -A
-git commit -m "chore: bump to 1.0.45"
+git commit -m "chore: bump to 1.0.46"
 git push origin master
 ```
 
@@ -107,9 +107,9 @@ npm run pack:win   # = electron-vite build && electron-builder --win --config el
 ```text
 dist/
 ├─ latest.yml                            # 自动更新元数据（关键）
-├─ MC物料查询 Setup 1.0.45.exe            # NSIS 安装包
-├─ MC物料查询 Setup 1.0.45.exe.blockmap  # 增量更新块映射
-└─ MC物料查询 1.0.45.exe                  # 便携版
+├─ MC物料查询 Setup 1.0.46.exe            # NSIS 安装包
+├─ MC物料查询 Setup 1.0.46.exe.blockmap  # 增量更新块映射
+└─ MC物料查询 1.0.46.exe                  # 便携版
 ```
 
 > `dist/` 已被 `.gitignore` 忽略，**不要 commit**。
@@ -126,6 +126,7 @@ dist/
 > 6. Skills 面板底部点「🩺 诊断」：结论与明细都应是**界面语言**（切到英文界面应全英文）；英文界面下面板宽高自适应、底栏 `🗃️/📂/🩺` 三个按钮一行放得下、技能列表独立滚动（不再挤成一小条）。
 > 7. 问一次「帮我找 XX 文件」：**第一次工具调用应是 `wjxt_search`**（不应先出现 `file_search`）；若只给文件名、没说在哪，模型应先问「是找公司内容库里的，还是你本机上的？」。
 > 8. 挑一个会跑多轮工具的提问（例如让 AI 连续读几个文件），在它「思考中 / 正在读文件」时点 **停止**：应当**当轮立即停下**、不再启动下一个工具；同时 `userData/debug-ai.log` 里应出现 `[AI] stop …` 紧跟 `[AI] aborted …`（只有 stop 没有 aborted = 没停住，需排查）。
+> 9. MCP（1.0.46）：Skills 面板 →「🔌 MCP 服务」→ 点「填入示例」导入 tech-agent 服务（或手工登记 `node src/index.js`，工作目录指向技能 runtime 目录）→「准备依赖」→「测试连接」应列出 `chat_tech_agent` / `status_tech_agent` / `mcp_auth_tech_agent` / `reset_tech_agent` 四个工具；勾选对应技能后模型可调用（未登录会走 `mcp_auth` 拉起 Chrome 扫码），取消勾选即收回；应用退出后任务管理器中无残留 node 子进程。
 
 ### 6. 发布到 GitHub Release
 
@@ -153,7 +154,7 @@ npx electron-builder --win --config electron-builder.yml --publish=always
 该命令会：
 
 1. 重新构建并打包到 `dist/`；
-2. 自动创建 git tag `v1.0.45`；
+2. 自动创建 git tag `v1.0.46`；
 3. 创建 GitHub Release；
 4. 上传 `latest.yml`、安装包、`.blockmap`。
 
@@ -169,7 +170,7 @@ npx electron-builder --win --config electron-builder.yml --publish=always
 $token = '你的token'
 $h = @{Authorization="Bearer $token"; "Content-Type"="application/json"}
 $rel = Invoke-RestMethod -Uri 'https://api.github.com/repos/maozuxiao/mc-tool/releases' -Headers $h
-$v = $rel | Where-Object { $_.tag_name -eq 'v1.0.45' }
+$v = $rel | Where-Object { $_.tag_name -eq 'v1.0.46' }
 $body = @{draft=$false} | ConvertTo-Json
 Invoke-RestMethod -Method PATCH -Uri "https://api.github.com/repos/maozuxiao/mc-tool/releases/$($v.id)" -Headers $h -Body $body
 ```
@@ -266,7 +267,7 @@ nsis:
   artifactName: MC物料查询-${buildVersion}-Setup.${ext}
 ```
 
-产物为 `MC物料查询-1.0.45.0-Setup.exe`，但 `latest.yml` 里产品版本仍是 `1.0.45`。仅用于测试，正式发布请改回统一命名。
+产物为 `MC物料查询-1.0.46.0-Setup.exe`，但 `latest.yml` 里产品版本仍是 `1.0.46`。仅用于测试，正式发布请改回统一命名。
 
 ---
 
@@ -276,7 +277,7 @@ nsis:
 npm run pack:mac
 ```
 
-- 产物：`dist/MC物料查询-1.0.45-<arch>.dmg`（命名来自 `mac.artifactName`）。
+- 产物：`dist/MC物料查询-1.0.46-<arch>.dmg`（命名来自 `mac.artifactName`）。
 - **签名与公证**：当前 `electron-builder.yml` 未配置 `identity` / `notarize`，打出的 DMG 未签名，macOS 会拦截（Gatekeeper）。若要正式分发 macOS 版，需补 Apple Developer 证书与公证配置。
 - **不建议在 Windows 上交叉编译 DMG**，请在 macOS 上执行。
 

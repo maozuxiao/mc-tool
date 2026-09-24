@@ -11,6 +11,8 @@ import { initAutoUpdater, isUpdateDownloaded, startUpdateDownload } from './upda
 import { registerAIIPC } from './ai/aiIpc'
 import { setWjxtLoginOpener, setWjxtBootstrap, setWjxtLoginCloser, wjxtResolveOriginUrl, wjxtH5Login, wjxtDiag, clearWjxtCreds, WJXT_ORIGIN } from './ai/wjxtSkill'
 import { translate, type Lang } from '@shared/i18n'
+import { listSkills } from './ai/skillRegistry'
+import { listStatuses as listMcpStatuses } from './ai/mcpClient'
 // 使用持久化 partition，让 OA 登录 Cookie 自动写入磁盘并跨启动保留。
 // 这是最可靠的方案：Electron 会为每个 persist:* partition 维护独立的
 // Cookie/Storage 目录，进程退出后依然保留，无需手动文件备份。
@@ -2405,6 +2407,22 @@ ipcMain.handle('mc-wjxt-diagnose', async (_e, langRaw?: string) => {
     lines.push(tr('aiDiagEdoc2Line', { s: tr('aiDiagStUnknown') }))
     diagLog.push('edoc2=probe-failed:' + (e?.message || e))
   }
+
+  // ③ MCP 服务（1.0.46）：已登记就报告连接状态；「需 MCP」的技能没绑定服务时给出登记指引
+  try {
+    const mcpSts = listMcpStatuses()
+    const needMcp = listSkills().filter(s => s.needsMcp && !s.mcpBound)
+    if (mcpSts.length) {
+      const parts = mcpSts.map(s =>
+        `${s.name}=${s.state === 'connected' ? `已连接(${s.toolCount}工具)` : s.state === 'failed' ? `失败(${s.error || '?'})` : '未启动'}`
+      )
+      lines.push(tr('aiDiagMcpLine', { s: parts.join('；') }))
+      diagLog.push(`mcp=${mcpSts.map(s => `${s.name}:${s.state}:${s.toolCount}`).join(',')}`)
+    } else if (needMcp.length) {
+      lines.push(tr('aiDiagMcpLine', { s: `未登记 —— ${needMcp.map(s => s.name).join('、')} 需要 MCP，请到 Skills → MCP 服务 登记` }))
+      diagLog.push('mcp=unbound')
+    }
+  } catch { /* 诊断不因 MCP 异常而失败 */ }
 
   // 结论：按「先修哪一条」的顺序给可执行建议
   let verdict: string

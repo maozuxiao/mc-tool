@@ -132,6 +132,10 @@ export interface AISkillInfo {
   source: 'builtin' | 'user'
   /** 技能目录（内置在 resources/skills，导入在 userData/skills） */
   dir: string
+  /** 该技能的 SKILL.md 提到 MCP 工具（如 chat_* / mcp_auth_*），需要登记 MCP 服务才能用（1.0.46） */
+  needsMcp?: boolean
+  /** 是否已有登记并绑定到该技能的 MCP 服务 */
+  mcpBound?: boolean
 }
 
 /**
@@ -245,5 +249,75 @@ export const AI_IPC = {
   SKILL_REMOVE: 'ai:skill-remove',
   // 增强提示词：用当前供应商把草稿改写成更明确的提示词（一次性请求，不落历史）
   OPTIMIZE_PROMPT: 'ai:optimize-prompt',
+  // MCP 服务（1.0.46）：登记 stdio 服务 → 自动拉起 → 工具下发给模型 → tools/call 转发
+  MCP_LIST: 'ai:mcp-list',
+  MCP_SAVE: 'ai:mcp-save',
+  MCP_DELETE: 'ai:mcp-delete',
+  MCP_SET_ENABLED: 'ai:mcp-set-enabled',
+  MCP_IMPORT_JSON: 'ai:mcp-import-json',
+  MCP_TEST: 'ai:mcp-test',
+  MCP_STATUS: 'ai:mcp-status',
+  MCP_PREPARE: 'ai:mcp-prepare',
+  MCP_PREPARE_CANCEL: 'ai:mcp-prepare-cancel',
+  MCP_OPEN_LOG: 'ai:mcp-open-log',
+  MCP_SELECT_DIR: 'ai:mcp-select-dir',
+  // MCP 状态 / 安装进度事件（主进程 → 渲染层，独立于 ai:event，避免混入消息流）
+  MCP_EVENT: 'ai:mcp-event',
   EVENT: 'ai:event'
 } as const
+
+// ── MCP 服务（1.0.46）────────────────────────────────────────────────────────────
+
+/** 一个已登记的 stdio MCP 服务 */
+export interface McpServerConfig {
+  id: string
+  /** 展示名（也是日志文件名的一部分） */
+  name: string
+  /** 绑定的技能键（来源:id）。空字符串 = 不绑定（仅手动「测试连接」用，不随技能下发） */
+  skillKey: string
+  transport: 'stdio'
+  /** 启动命令。填 `node` 时由主进程解析真实 node（自举的 Node 22 或 Electron 伪装） */
+  command: string
+  args: string[]
+  /** 敏感值以 enc: / plain: 前缀存储（沿用 providerStore 的约定），读取时解密 */
+  env: Record<string, string>
+  /** 服务工作目录（MCP 的相对配置路径都基于它解析） */
+  cwd: string
+  enabled: boolean
+  /** 可选：覆盖默认安装参数（默认 ['install','--no-audit','--no-fund']） */
+  installArgs?: string[]
+  /** 可选：单次 tools/call 超时（毫秒），默认 60000 */
+  timeoutMs?: number
+  createdAt?: number
+}
+
+export type McpState = 'stopped' | 'connecting' | 'connected' | 'failed'
+
+export interface McpStatus {
+  id: string
+  name: string
+  skillKey: string
+  enabled: boolean
+  state: McpState
+  toolCount: number
+  /** 暴露给模型的工具名（已处理重名加前缀） */
+  tools?: string[]
+  /** 失败原因（含「疑似缺少依赖」判定） */
+  error?: string
+  /** 工作目录有 package.json 但没有 node_modules → 提示一键准备 */
+  needsInstall?: boolean
+}
+
+/** 粘贴 JSON 导入的结果 */
+export interface McpImportResult {
+  ok: boolean
+  message?: string
+  imported?: number
+  servers?: McpServerConfig[]
+}
+
+/** MCP 事件（主进程 → 渲染层） */
+export type McpEvent =
+  | { type: 'status'; id: string; status: McpStatus }
+  | { type: 'install-log'; id: string; line: string }
+  | { type: 'install-done'; id: string; ok: boolean; error?: string }

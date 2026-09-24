@@ -152,6 +152,27 @@ const mcApi = {
     // 增强提示词：用当前供应商把草稿改写成更明确的提示词
     optimizePrompt: (input: { providerId: string; modelId?: string; text: string; lang?: string }): Promise<any> =>
       ipcRenderer.invoke(AI_IPC.OPTIMIZE_PROMPT, input),
+    // ── MCP 服务（1.0.46）：登记 / 启停 / 测试连接 / 一键准备依赖 / 日志 ──
+    mcpList: (): Promise<any> => ipcRenderer.invoke(AI_IPC.MCP_LIST),
+    mcpSave: (input: any): Promise<any> => ipcRenderer.invoke(AI_IPC.MCP_SAVE, input),
+    mcpDelete: (id: string): Promise<any> => ipcRenderer.invoke(AI_IPC.MCP_DELETE, id),
+    mcpSetEnabled: (id: string, enabled: boolean): Promise<any> =>
+      ipcRenderer.invoke(AI_IPC.MCP_SET_ENABLED, id, enabled),
+    mcpImportJson: (text: string, skillKey?: string): Promise<any> =>
+      ipcRenderer.invoke(AI_IPC.MCP_IMPORT_JSON, text, skillKey),
+    mcpTest: (id: string): Promise<any> => ipcRenderer.invoke(AI_IPC.MCP_TEST, id),
+    mcpStatus: (): Promise<any> => ipcRenderer.invoke(AI_IPC.MCP_STATUS),
+    // 依赖安装：立即返回「已启动」，进度与结果经 onMcpEvent 推送（install-log / install-done）
+    mcpPrepare: (id: string): Promise<any> => ipcRenderer.invoke(AI_IPC.MCP_PREPARE, id),
+    mcpCancelPrepare: (id: string): Promise<any> => ipcRenderer.invoke(AI_IPC.MCP_PREPARE_CANCEL, id),
+    mcpOpenLog: (id: string): Promise<any> => ipcRenderer.invoke(AI_IPC.MCP_OPEN_LOG, id),
+    mcpSelectDir: (): Promise<any> => ipcRenderer.invoke(AI_IPC.MCP_SELECT_DIR),
+    onMcpEvent: (cb: (event: any) => void) => {
+      const listener = (_e: any, event: any) => cb(event)
+      ipcRenderer.on(AI_IPC.MCP_EVENT, listener)
+      // cleanup 返回 void（EffectCallback 约束，见 onEvent 的注释）
+      return () => { ipcRenderer.removeListener(AI_IPC.MCP_EVENT, listener) }
+    },
     onEvent: (cb: (event: any) => void) => {
       const listener = (_e: any, event: any) => cb(event)
       ipcRenderer.on(AI_IPC.EVENT, listener)

@@ -9,6 +9,7 @@ import { opencodeSessionHeaders } from './providerApi'
 import { mcSkillSystemPrompt } from './mcSkill'
 import { skillsPromptBlock } from './skillRegistry'
 import { dispatchTool, toolsForMode, type OpenFolderResult } from './toolRegistry'
+import { cachedToolNames as mcpCachedToolNames, isMcpTool, prepareForSkills as mcpPrepare } from './mcpClient'
 import { isInside, dirBlockReason, makeAlias, systemRoots } from './rootGuard'
 import {
   appendMessage, appendToolRun, completeToolRun, createConversation,
@@ -256,6 +257,21 @@ async function streamOpenAICompatible(input: {
   // 最后一轮仍强制不带 tools，让模型基于已收集信息总结，而非把错误抛给用户。
   const MAX_ROUNDS = 24
   let conversation = [...messages]
+
+  // MCP（1.0.46）：进入轮次循环前，把「已勾选技能」绑定的服务连上（单飞、总时长有上限）。
+  // 必须在这里做：tools 数组是每轮**同步**组装的，工具定义要先就绪。
+  // 失败不阻断对话 —— 该服务本轮不下发工具，原因写进 debug-ai.log（并会进「诊断」）。
+  try {
+    const prep = await mcpPrepare(payload.enabledSkills || [], 20000)
+    const mcpNames = mcpCachedToolNames(payload.enabledSkills || [])
+    if (prep.failed.length) {
+      aiLog(`[AI] mcp prepare failed: ${prep.failed.map(f => `${f.name}(${f.error || '未知原因'})`).join('; ')}`)
+    }
+    if (mcpNames.length) aiLog(`[AI] mcp tools: ${mcpNames.join(', ')}`)
+  } catch (e: any) {
+    aiLog('[AI] mcp prepare error: ' + (e?.message || e))
+  }
+
   for (let round = 0; round < MAX_ROUNDS; round++) {
     // 每轮开始先查一次是否已被停止：停止很可能落在上一轮的工具执行 / 两轮间隙里，
     // 那时没有在途 fetch，只有这里查一次才能真正中断（否则会一路跑到 24 轮）
@@ -405,7 +421,10 @@ async function streamOpenAICompatible(input: {
         throwIfAborted(controller.signal)
         let parsed: any
         try { parsed = JSON.parse(call.function.arguments || '{}') } catch { parsed = {} }
-        const runType = call.function.name.startsWith('file_') || call.function.name === 'open_folder' ? 'file' : 'material'
+        // MCP 工具单独归类（1.0.46），卡片上与 物料 / 文件 区分
+        const runType = isMcpTool(call.function.name)
+          ? 'mcp'
+          : call.function.name.startsWith('file_') || call.function.name === 'open_folder' ? 'file' : 'material'
         const runningRun = appendToolRun(assistantMessageId, {
           type: runType,
           toolName: call.function.name,
@@ -418,6 +437,7 @@ async function streamOpenAICompatible(input: {
           const result = await dispatchTool(call.function.name, parsed, {
             signal: toolController.signal,
             allowedRoots,
+            enabledSkills: payload.enabledSkills || [],
             requestRoot: (pp: string) => requestRoot(conversationId, pp),
             onRun: persistedRun => {
               // runMcQuery 会回调两次：开始时登记 running 态、结束时回传终态。

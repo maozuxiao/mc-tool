@@ -6,6 +6,7 @@ import {
 import { basename, join } from 'path'
 import { bareSkillId, skillKey } from '@shared/ai-types'
 import type { AISkillInfo } from '@shared/ai-types'
+import { listServers as listMcpServers } from './mcpStore'
 
 /**
  * 技能注册表（1.0.43）。
@@ -77,6 +78,9 @@ function listDirDirs(root: string): string[] {
 
 /** 全部技能（内置在前、导入在后）。启用状态由渲染层按会话维护，这里不返回 */
 export function listSkills(): AISkillInfo[] {
+  // 「需 MCP」判定（1.0.46）：SKILL.md 提到 MCP 工具（chat_* / mcp_auth / mcpServers…）
+  // 但工具并不在本应用里 —— 必须在「MCP 服务」里登记并绑定后才能用，供 UI 徽标与诊断引导
+  const boundKeys = new Set(listMcpServers().map(s => s.skillKey).filter(Boolean))
   const out: AISkillInfo[] = []
   for (const [source, root] of [['builtin', builtinRoot()], ['user', userSkillRoot()]] as const) {
     for (const id of listDirDirs(root)) {
@@ -86,12 +90,17 @@ export function listSkills(): AISkillInfo[] {
       const dir = join(root, id)
       const meta = readSkillMeta(dir)
       if (!meta) continue
+      let skillMd = ''
+      try { skillMd = readFileSync(join(dir, SKILL_MD), 'utf8') } catch { /* 没有 SKILL.md 的目录已在上游过滤 */ }
+      const needsMcp = /mcp[-_ ]?(server|service|tool)|chat_[a-z0-9_]+\(|mcp_auth|mcp\.json|mcpServers/i.test(skillMd)
       out.push({
         id,
         name: meta.name,
         description: meta.description,
         source,
-        dir
+        dir,
+        needsMcp,
+        mcpBound: boundKeys.has(`${source}:${id}`)
       })
     }
   }

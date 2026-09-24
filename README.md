@@ -4,7 +4,7 @@
 
 - 仓库：https://github.com/maozuxiao/mc-tool
 - 技术栈：Electron 33 + electron-vite + React 18 + TypeScript + Zustand，UI 组件库 [`animal-island-ui`](https://www.npmjs.com/package/animal-island-ui)；AI 面板里的操作类小图标用 [`naive-icons`](https://www.npmjs.com/package/naive-icons)（同为手绘 naive 风，按需引 `svg/*.svg?raw` 并改色跟随主题，见 `src/renderer/src/components/NaiveIcon.tsx`）
-- 当前版本：`1.0.45`（`package.json` 的 `version` 为准）
+- 当前版本：`1.0.46`（`package.json` 的 `version` 为准）
 
 ---
 
@@ -36,7 +36,7 @@
 | 📎 **规格文件查询** | 按料号列出附件并**在应用内下载**（复用已登录会话，不会跳到浏览器提示未登录）。 |
 | 📤 **CSV 导出** | 任意结果表一键导出 CSV（含 BOM，便于 Excel 打开）。 |
 | 🤖 **AI 助手** | 内置对话页，接 OpenAI 兼容 / Anthropic 协议的大模型；**对话 / 物料 / Build 三模式下拉切换**，支持附件（粘贴截图 / 拖拽文件）、待发队列、增强提示词、工具调用卡片、回到底部 / 跳到最新输出、多会话历史。 |
-| 🛠 **技能（Skills）** | 技能＝给 AI 的专项能力包：**默认不勾选**、按会话生效、支持导入（`.zip` / 文件夹）。内置 **MC 查询**、**鸿翼文件查询下载**、**文件读写**（Build），勾选后输入框上方出现技能 chip，点 `×` 即停用。 |
+| 🛠 **技能（Skills）** | 技能＝给 AI 的专项能力包：**默认不勾选**、按会话生效、支持导入（`.zip` / 文件夹）。内置 **MC 查询**、**鸿翼文件查询下载**、**文件读写**（Build），勾选后输入框上方出现技能 chip，点 `×` 即停用。导入技能若自带 MCP 工具，在「🔌 MCP 服务」里登记并绑定后即可使用。 |
 | 📚 **鸿翼文件查询下载** | 在企业内容库（`wj.streamax.com`）里检索文件并**预览 / 下载原始文件**：下载走系统「另存为」并**边下边写**（显示百分比），预览在应用内窗口打开；登录走「静默自愈 → 已保存账号自动续登 → 弹出账号密码窗口」三步，越靠前越无感；Skills 面板底部「🩺 诊断」可**一键自检** OA / IAM / 鸿翼三条会话线并给出一行结论。 |
 | 🆕 **自动更新** | 启动 3 秒后后台检查 GitHub Releases，顶部更新条显示下载进度，下载完成后以 NSIS 向导模式非静默安装。 |
 | ⚙️ **设置与托盘** | 右上「设置」面板可切换语言、**选择主题**、开关「最小化到托盘后台运行」、设置关闭按钮行为（最小化到托盘 / 直接退出）、开机自启；开启后应用常驻系统托盘，左键单击恢复、右键菜单快速切换 MC / AI 视图或检查更新。 |
@@ -164,7 +164,8 @@
 - 勾选后输入框上方出现**技能 chip**：点名称打开面板继续管理，点 `×` 立即停用该技能。
 - **导入自己的技能**：面板里「导入」支持 `.zip` 与文件夹两种入口，技能正文与脚本会复制到 `userData/skills/`；同名导入＝更新，内置与导入同名时两条都列出（勾选状态各自独立）。
 - 未勾选任何技能时，模型仍知道这些能力存在 —— 需求命中时会提示你「到 Skills 里勾选启用」，而不是回答「我做不到」。
-- **面板底栏三个按钮**：`🗃️ 导入 zip` / `📂 导入文件夹` / `🩺 诊断`（一键自检，见 ⑤）。面板宽高跟随窗口（`min(430px, 100vw-48px)` / `min(460px, 62vh)`），**头与底栏固定、只有技能列表滚动**，技能再多也不会把按钮顶出可视区；按钮用 `size="small"`，所以英文界面下也不显小。
+- **面板底栏四个按钮**：`🗃️ 导入 zip` / `📂 导入文件夹` / `🩺 诊断`（一键自检，见 ⑤）/ `🔌 MCP 服务`（见下）。面板宽高跟随窗口（`min(430px, 100vw-48px)` / `min(460px, 62vh)`），**头与底栏固定、只有技能列表滚动**，技能再多也不会把按钮顶出可视区；按钮用 `size="small"`，所以英文界面下也不显小。
+- **MCP 服务（1.0.46）**：点 `🔌 MCP 服务` 登记 stdio MCP 服务并**绑定技能**——勾选该技能后，应用在对话前自动拉起服务、把它的工具下发给 AI（取消勾选即收回）。配置可从技能文档复制「MCP JSON」直接粘贴导入（弹窗内置 tech-agent-skill 示例）；缺依赖时点「准备依赖」自动 `npm install`（进度可看、可取消，不静默下载）；SKILL.md 声明了 MCP 工具但未绑定的技能会显示「需 MCP」徽标，点它直达登记。服务日志在 `userData\mcp\<服务id>.log`，敏感环境变量加密保存、界面与日志打码。
 - ⚠️ 技能带脚本时，脚本会以 `node` 在本机运行，**只导入可信来源**；MC 查询技能首次调用会自动准备 Node 22 运行时（`resources/skills/.../ensure_node.ps1`，需联网下载一次，约 1~2 分钟）。
 
 **④ 让 AI 读写 / 修改文件（Build 模式）**
@@ -254,6 +255,9 @@ mc-tool/
 │  │     ├─ fileDownload.ts     # 下载核心：**流式** downloadToPath（先写 .part、完成改名、
 │  │     │                      #        空闲超时，失败清理）+ downloadToDir（AI 写盘用）
 │  │     ├─ fileSkill.ts        # 内置「文件读写」技能：file_office / file_read / file_search 等
+│  │     ├─ mcpClient.ts        # MCP 客户端（1.0.46）：stdio JSON-RPC，按技能勾选拉起服务、
+│  │     │                      #        tools/list 缓存、tools/call 转发、依赖一键准备
+│  │     ├─ mcpStore.ts         # MCP 服务登记持久化（userData/mcp-servers.json，env 加密）
 │  │     └─ mcSkill.ts          # 内置 MC 查询工具（调用 resources/skills 的脚本）
 │  ├─ preload/index.ts          # contextBridge 桥接，向渲染层暴露 window.mcApi
 │  └─ renderer/                 # 渲染进程（React）
@@ -279,6 +283,7 @@ mc-tool/
 │        │  ├─ ai/ChatPanel.tsx     # AI 对话页（会话列表、模型选择、Markdown 渲染）
 │        │  ├─ ai/ai-chat.css
 │        │  ├─ NaiveIcon.tsx        # naive-icons 小图标封装（按需引 SVG + 改色跟随主题）
+│        │  ├─ McpModal.tsx         # MCP 服务管理弹窗（1.0.46：登记/绑定/测试连接/依赖准备）
 │        │  └─ nookIcon.ts          # NOOK 图标
 │        └─ assets/nook.svg + icon-leaf.png   # NOOK 图标 / 选中 Tab 的小叶子
 ├─ shared/                      # 主进程 / 渲染进程共享（纯逻辑，无副作用）
@@ -377,9 +382,9 @@ npm run pack:all   # 全平台
 ```
 dist/
 ├─ latest.yml                            # 自动更新元数据
-├─ MC物料查询 Setup 1.0.45.exe            # NSIS 安装包
-├─ MC物料查询 Setup 1.0.45.exe.blockmap  # 增量更新块映射
-└─ MC物料查询 1.0.45.exe                  # 便携版
+├─ MC物料查询 Setup 1.0.46.exe            # NSIS 安装包
+├─ MC物料查询 Setup 1.0.46.exe.blockmap  # 增量更新块映射
+└─ MC物料查询 1.0.46.exe                  # 便携版
 ```
 
 > macOS 交叉编译在 Windows 上不可靠，DMG 请在 macOS 上打包。

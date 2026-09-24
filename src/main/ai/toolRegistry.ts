@@ -10,6 +10,7 @@ import {
   WJXT_SEARCH_TOOL_DEFINITION, WJXT_DOWNLOAD_TOOL_DEFINITION,
   runWjxtSearch, runWjxtDownload
 } from './wjxtSkill'
+import { cachedToolDefinitions, cachedToolNames, callTool as mcpCallTool, getMcpToolRoute, isMcpTool, setReservedNames } from './mcpClient'
 
 export interface OpenFolderResult {
   ok: boolean
@@ -28,6 +29,11 @@ export interface ToolContext {
   signal: AbortSignal
   /** Build 模式的已授权目录白名单（多根）：文件/命令工具据此限制范围 */
   allowedRoots: AIExtraRoot[]
+  /**
+   * 本会话已启用的技能键（来源:id）。MCP 工具据此校验归属：
+   * 服务可能因上一个会话仍连着，不能让模型调用「技能未启用」的 MCP 工具（1.0.46）。
+   */
+  enabledSkills?: string[]
   /**
    * 打开目录的控制回调（会话级）。open_folder 工具调用它做校验 + 用户确认，
    * 并把新目录加入本会话的白名单。由 chatService 注入（需 conversationId）。
@@ -146,6 +152,9 @@ const REGISTRY: Record<string, ToolEntry> = {
  * 只有「该会话启用了此技能」且处于 build 模式时，这些工具才下发给模型；
  * 提示词侧由 skillRegistry 注入对应 SKILL.md（见 skillsPromptBlock）。新增内置技能时在这里登记一行。
  */
+// MCP 工具重名让位：把内置工具名注入 mcpClient —— MCP 侧同名工具下发时会自动加 `<服务id>_` 前缀
+setReservedNames(Object.keys(REGISTRY))
+
 const SKILL_TOOLS: Record<string, string[]> = {
   'wjxt-file-download': ['wjxt_search', 'wjxt_download']
 }
@@ -160,12 +169,17 @@ function skillToolNames(enabledSkills?: string[]): string[] {
   for (const key of enabledSkills || []) {
     for (const name of SKILL_TOOLS[bareSkillId(key)] || []) set.add(name)
   }
+  // 导入技能带来的 MCP 工具（1.0.46）：仅在「绑定的技能被勾选」且服务已连接时才有名字
+  for (const name of cachedToolNames(enabledSkills || [])) set.add(name)
   return [...set]
 }
 
-/** 已启用技能带来的工具定义（顺序与 skillToolNames 一致） */
+/** 已启用技能带来的工具定义（顺序与 skillToolNames 一致；内置查 REGISTRY，MCP 查连接缓存） */
 function skillToolDefinitions(enabledSkills?: string[]): any[] {
-  return skillToolNames(enabledSkills).map(name => REGISTRY[name]?.definition).filter(Boolean)
+  const mcpByName = new Map(cachedToolDefinitions(enabledSkills || []).map(d => [d.function.name, d]))
+  return skillToolNames(enabledSkills)
+    .map(name => REGISTRY[name]?.definition || mcpByName.get(name))
+    .filter(Boolean)
 }
 
 /** 该模式下允许调用的工具名，用于兜底拦截模型臆造的工具调用 */
@@ -204,7 +218,13 @@ function buildFileSummary(name: string, result: any): string {
     case 'file_read_batch': return `已批量读取 ${result.count ?? 0} 个文件`
     case 'open_folder':
       return result.ok ? `已打开目录（别名 ${result.alias}）` : `打开目录被拒绝：${result.error || ''}`
-    default: return `已完成 ${name}`
+    default:
+      // MCP 工具：摘要带上返回体量，便于一眼看出「调用成功但内容为空」
+      if (result?.source === 'mcp') {
+        const text = String(result.text || '')
+        return text ? `已返回 ${text.length} 字` : '已完成（无文本返回）'
+      }
+      return `已完成 ${name}`
   }
 }
 
@@ -217,7 +237,8 @@ function buildFileSummary(name: string, result: any): string {
  */
 export async function dispatchTool(name: string, input: any, ctx: ToolContext): Promise<any> {
   const entry = REGISTRY[name]
-  if (!entry) return { error: `不支持的工具：${name}` }
+  // MCP 工具（1.0.46）：不在 REGISTRY 里，按对外名路由到对应服务转发执行
+  if (!entry && !isMcpTool(name)) return { error: `不支持的工具：${name}` }
   const start = Date.now()
   const finish = (result: any, status: 'done' | 'error') => {
     if (ctx.onRun && name !== 'mc_query') {
@@ -232,7 +253,25 @@ export async function dispatchTool(name: string, input: any, ctx: ToolContext): 
     }
   }
   try {
-    const result = await entry.run(input, ctx)
+    let result: any
+    if (!entry) {
+      // 归属校验：服务可能因上一个会话仍连着，模型不能调用「技能未启用」的 MCP 工具
+      const route = getMcpToolRoute(name)
+      if (route?.skillKey && ctx.enabledSkills && !ctx.enabledSkills.includes(route.skillKey)) {
+        return {
+          ok: false,
+          error: `MCP 工具 ${name} 所属的技能未在本会话启用（已启用：${ctx.enabledSkills.join(', ') || '无'}），请先在 Skills 面板勾选`,
+          source: 'mcp'
+        }
+      }
+      // MCP 转发：content 文本合并后回给模型；isError 的返回按失败处理（模型会自行改策略或提示登录）
+      const r = await mcpCallTool(name, input, ctx.signal)
+      result = r.ok
+        ? { ok: true, text: r.text, source: 'mcp' }
+        : { ok: false, error: r.text || 'MCP 工具执行失败', source: 'mcp' }
+    } else {
+      result = await entry.run(input, ctx)
+    }
     finish(result, result && result.ok === false ? 'error' : 'done')
     return result
   } catch (e: any) {

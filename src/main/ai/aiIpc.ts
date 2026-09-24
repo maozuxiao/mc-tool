@@ -1,4 +1,5 @@
-import { ipcMain, BrowserWindow, dialog } from 'electron'
+import { ipcMain, BrowserWindow, dialog, shell } from 'electron'
+import { existsSync } from 'fs'
 import { homedir } from 'os'
 import { resolve } from 'path'
 import { AI_IPC } from '@shared/ai-types'
@@ -12,6 +13,24 @@ import {
 } from './historyStore'
 import { sendMessage, stopMessage } from './chatService'
 import { listPrompts, savePrompt, updatePrompt, deletePrompt } from './promptStore'
+import {
+  listServers as listMcpServers,
+  saveServer as saveMcpServer,
+  deleteServer as deleteMcpServer,
+  setEnabled as setMcpEnabled,
+  importServersJson as importMcpServersJson,
+  getServerRaw as getMcpServerRaw
+} from './mcpStore'
+import {
+  connect as connectMcp,
+  disconnect as disconnectMcp,
+  listStatuses as listMcpStatuses,
+  checkDependencies as checkMcpDependencies,
+  installDependencies as installMcpDependencies,
+  cancelInstall as cancelMcpInstall,
+  onMcpEvent,
+  logPath as mcpLogPath
+} from './mcpClient'
 
 export function registerAIIPC(): void {
   ipcMain.handle(AI_IPC.GET_PROVIDERS, () => {
@@ -189,4 +208,75 @@ export function registerAIIPC(): void {
   // 增强提示词：一次性请求当前供应商改写草稿，不落历史
   ipcMain.handle(AI_IPC.OPTIMIZE_PROMPT, (_e, input: { providerId: string; modelId?: string; text: string; lang?: string }) =>
     optimizePrompt(input))
+
+  // ── MCP 服务（1.0.46）────────────────────────────────────────────
+  // 登记 stdio MCP 服务 → 对话前自动拉起 → 工具下发给模型（仅当绑定的技能被勾选）。
+  // 依赖安装**不静默执行**：UI 先征求同意，再走 MCP_PREPARE（进度经 MCP_EVENT 推送、可取消）。
+  const pushMcpEvent = (payload: unknown) => {
+    for (const w of BrowserWindow.getAllWindows()) {
+      if (!w.isDestroyed()) w.webContents.send(AI_IPC.MCP_EVENT, payload)
+    }
+  }
+  onMcpEvent(e => pushMcpEvent(e))
+
+  ipcMain.handle(AI_IPC.MCP_LIST, () => listMcpServers())
+  ipcMain.handle(AI_IPC.MCP_SAVE, (_e, input: any) => saveMcpServer(input || {}))
+  ipcMain.handle(AI_IPC.MCP_DELETE, (_e, id: string) => {
+    const gid = String(id || '')
+    disconnectMcp(gid, '删除服务')
+    return { ok: deleteMcpServer(gid) }
+  })
+  ipcMain.handle(AI_IPC.MCP_SET_ENABLED, (_e, id: string, enabled: boolean) => {
+    const saved = setMcpEnabled(String(id || ''), !!enabled)
+    // 停用即断开并收回工具；启用不主动连接（等下一次对话前的 prepareForSkills）
+    if (saved && !enabled) disconnectMcp(String(id || ''), '服务被停用')
+    return { ok: !!saved, server: saved }
+  })
+  ipcMain.handle(AI_IPC.MCP_IMPORT_JSON, (_e, text: string, skillKey?: string) =>
+    importMcpServersJson(String(text || ''), String(skillKey || '')))
+  ipcMain.handle(AI_IPC.MCP_STATUS, () => listMcpStatuses())
+  // 测试连接：连上并列出工具；测完即断开（避免留驻进程；真正使用时对话前会再连）
+  ipcMain.handle(AI_IPC.MCP_TEST, async (_e, id: string) => {
+    const cfg = getMcpServerRaw(String(id || ''))
+    if (!cfg) return { ok: false, error: '服务不存在' }
+    try {
+      await connectMcp(cfg)
+      const st = listMcpStatuses().find(s => s.id === cfg.id)
+      return { ok: true, tools: st?.tools || [], toolCount: st?.toolCount || 0 }
+    } catch (err: any) {
+      const dep = checkMcpDependencies(cfg)
+      return { ok: false, error: err?.message || String(err), needsInstall: dep.needsInstall }
+    } finally {
+      disconnectMcp(cfg.id, '测试连接结束')
+    }
+  })
+  // 一键准备依赖：立即返回「已启动」，进度与结果经 MCP_EVENT 推送（install-log / install-done）
+  ipcMain.handle(AI_IPC.MCP_PREPARE, (_e, id: string) => {
+    const cfg = getMcpServerRaw(String(id || ''))
+    if (!cfg) return { ok: false, error: '服务不存在' }
+    void installMcpDependencies(cfg, line => pushMcpEvent({ type: 'install-log', id: cfg.id, line }))
+      .then(r => pushMcpEvent({ type: 'install-done', id: cfg.id, ok: r.ok, error: r.error }))
+      .catch((err: any) => pushMcpEvent({ type: 'install-done', id: cfg.id, ok: false, error: err?.message || String(err) }))
+    return { ok: true, started: true }
+  })
+  ipcMain.handle(AI_IPC.MCP_PREPARE_CANCEL, (_e, id: string) => {
+    cancelMcpInstall(String(id || ''))
+    return { ok: true }
+  })
+  ipcMain.handle(AI_IPC.MCP_OPEN_LOG, (_e, id: string) => {
+    const p = mcpLogPath(String(id || ''))
+    if (!p || !existsSync(p)) return { ok: false, error: '日志文件还不存在（服务尚未启动过）' }
+    shell.showItemInFolder(p)
+    return { ok: true }
+  })
+  // 为 MCP 服务选工作目录（MCP 的相对配置路径都基于它解析）
+  ipcMain.handle(AI_IPC.MCP_SELECT_DIR, async e => {
+    const win = BrowserWindow.fromWebContents(e.sender) || undefined
+    const picked = await dialog.showOpenDialog(win as any, {
+      title: '选择 MCP 服务工作目录',
+      properties: ['openDirectory']
+    })
+    if (picked.canceled || !picked.filePaths.length) return { ok: false, canceled: true }
+    return { ok: true, cwd: picked.filePaths[0] }
+  })
 }

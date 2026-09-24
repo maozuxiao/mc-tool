@@ -81,7 +81,7 @@ export async function getNodePath(skillRoot: string, signal?: AbortSignal): Prom
  * 它启动的孙进程（node / npm）会变成孤儿继续运行，
  * 必须 taskkill /t 才能连根拔掉。
  */
-function killTree(child: ReturnType<typeof spawn>) {
+export function killTree(child: ReturnType<typeof spawn>) {
   const pid = child.pid
   if (!pid || child.killed) return
   if (process.platform === 'win32') {
@@ -178,4 +178,67 @@ export async function runSkill(opts: RunSkillOptions): Promise<SkillResult> {
   }
 
   return { json, stdout: log, stderr, exitCode }
+}
+
+// ── Node / npm 运行时解析（1.0.46，供 MCP 服务进程使用）──────────────────────────
+/** 内置 mc 技能 ensure_node.ps1 的默认落地目录（Node 22，自带完整 npm） */
+const BOOTSTRAP_NODE_EXE = join(
+  process.env.USERPROFILE || '',
+  '.qwenworkcn', 'binaries', 'node', 'versions', '22.22.2',
+  process.platform === 'win32' ? 'node.exe' : join('bin', 'node')
+)
+
+export interface NodeBinary {
+  /** node 可执行文件路径 */
+  path: string
+  /** true = 用 Electron 主程序 + ELECTRON_RUN_AS_NODE 伪装 node（此时没有 npm） */
+  electronAsNode: boolean
+}
+
+/**
+ * 解析一个**真实可用的 node**：
+ * 1) 内置 mc 技能已经自举过的 Node 22（`%USERPROFILE%\.qwenworkcn\...`，自带完整 npm）；
+ * 2) 回退 Electron 主程序 + `ELECTRON_RUN_AS_NODE=1`（没有 npm，只能跑不能装）。
+ */
+export function resolveNodeBinary(): NodeBinary {
+  try {
+    if (existsSync(BOOTSTRAP_NODE_EXE)) return { path: BOOTSTRAP_NODE_EXE, electronAsNode: false }
+  } catch { /* 路径不可读时走回退 */ }
+  return { path: process.execPath, electronAsNode: true }
+}
+
+/** npm-cli.js 路径（随 Node 发行版自带）。不存在（如 Electron 伪装 node）返回 undefined */
+export function resolveNpmCli(): string | undefined {
+  const node = resolveNodeBinary()
+  if (node.electronAsNode) return undefined
+  try {
+    const p = join(node.path, '..', 'node_modules', 'npm', 'bin', 'npm-cli.js')
+    if (existsSync(p)) return p
+  } catch { /* ignore */ }
+  return undefined
+}
+
+/**
+ * 确保「真实 node + npm」可用：没有自举目录时，借内置 mc 技能的 ensure_node.ps1 下载一次
+ * （幂等：目录已存在且版本满足会直接返回）。返回 undefined = 只能拿到 Electron 伪装 node
+ * （自举失败且无已下载目录），调用方应把「一键准备依赖」置灰并说明原因。
+ */
+export async function ensureNodeWithNpm(signal?: AbortSignal): Promise<NodeBinary | undefined> {
+  const existing = resolveNodeBinary()
+  if (!existing.electronAsNode) return existing
+  try {
+    const ps1 = getSkillScript(SKILL_MATERIAL, 'ensure_node.ps1')
+    if (existsSync(ps1)) {
+      const out = await abortable(execFileAsync('powershell.exe', [
+        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ps1
+      ], { timeout: 300000, windowsHide: true }), signal)
+      const lines = String(out.stdout).trim().split(/\r?\n/).filter(Boolean)
+      const nodePath = lines.pop()
+      if (nodePath && existsSync(nodePath)) return { path: nodePath, electronAsNode: false }
+    }
+  } catch (e: any) {
+    if (e?.name === 'AbortError') throw e
+    // 自举失败不抛：调用方据此给出「请手动安装依赖」的指引
+  }
+  return undefined
 }

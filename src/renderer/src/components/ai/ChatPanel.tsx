@@ -13,6 +13,7 @@ import { Button, CodeBlock, Collapse, Icon, Tooltip } from 'animal-island-ui'
 // 封装见 components/NaiveIcon.tsx（按需引原始 SVG 资源 + 改色跟随主题，见该文件顶部说明）。
 import { NaiveIcon } from '../NaiveIcon'
 import { McSelect } from '../McSelect'
+import { McpModal } from './McpModal'
 
 interface ProviderBundle {
   providers: AIProviderConfig[]
@@ -247,6 +248,8 @@ export function ChatPanel({ disabled }: Props) {
   const [skillBusy, setSkillBusy] = useState(false)
   // 「诊断」按钮的忙碌态：一键自检会真的探测三条会话线（几秒），期间禁用防连点
   const [diagBusy, setDiagBusy] = useState(false)
+  // MCP 服务管理弹窗（1.0.46）：登记 stdio 服务并绑定技能，勾选技能后其工具才会下发
+  const [mcpOpen, setMcpOpen] = useState(false)
   const skillPanelRef = useRef<HTMLDivElement | null>(null)
   // ── 附件（粘贴 / 拖拽 / 选择文件）──
   const [attachments, setAttachments] = useState<AIAttachment[]>([])
@@ -1460,6 +1463,16 @@ export function ChatPanel({ disabled }: Props) {
                                 <span className={`ai-skill-item__tag${s.source === 'user' ? ' is-user' : ''}`}>
                                   {s.source === 'user' ? t('aiSkillUser') : t('aiSkillBuiltin')}
                                 </span>
+                                {/* 「需 MCP」徽标（1.0.46）：SKILL.md 声明了 MCP 工具但还没绑定服务 ——
+                                    勾了也用不了，点它直达 MCP 服务登记，避免再次踩「勾了但用不了」 */}
+                                {s.needsMcp && !s.mcpBound && (
+                                  <button
+                                    type="button"
+                                    className="ai-skill-item__badge"
+                                    title={t('mcpNeedsTip')}
+                                    onClick={() => { setSkillPanelOpen(false); setMcpOpen(true) }}
+                                  >{t('mcpNeedsBadge')}</button>
+                                )}
                               </span>
                               <span className="ai-skill-item__desc">{s.description || s.id}</span>
                             </span>
@@ -1503,6 +1516,13 @@ export function ChatPanel({ disabled }: Props) {
                           onClick={() => void runDiag()}
                           disabled={diagBusy}
                         >{diagBusy ? t('aiDiagRunning') : t('aiDiagBtn')}</Button>
+                        {/* MCP 服务管理（1.0.46）：登记 stdio 服务并绑定技能，勾选技能后其工具才下发 */}
+                        <Button
+                          size="small"
+                          ghost
+                          icon={<span className="ai-skill-btn-ico" aria-hidden="true">🔌</span>}
+                          onClick={() => setMcpOpen(true)}
+                        >{t('mcpTitle')}</Button>
                       </div>
                       <div className="ai-skill-panel__hint">{t('aiSkillHint')}</div>
                     </div>
@@ -1518,8 +1538,10 @@ export function ChatPanel({ disabled }: Props) {
           </div>
         </div>
       </section>
+      {/* MCP 服务管理弹窗（Skills 面板底栏「🔌 MCP」打开） */}
+      <McpModal open={mcpOpen} onClose={() => setMcpOpen(false)} skills={skills} />
       {addProviderOpen && (
-        <div className="ai-prompt-modal-overlay" onClick={closeAddProvider}>
+      <div className="ai-prompt-modal-overlay" onClick={closeAddProvider}>
           <div className="ai-prompt-modal" onClick={e => e.stopPropagation()}>
             <div className="ai-prompt-modal-head">{t('aiAddCustom')}</div>
             <div className="ai-prompt-modal-body">
