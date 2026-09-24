@@ -258,6 +258,12 @@ export async function connect(cfg: McpServerConfig): Promise<void> {
     const useResolved = !cfg.command || /^(node|node\.exe)$/i.test(cfg.command.trim())
     const command = useResolved ? node.path : expandVars(cfg.command)
     const env: Record<string, string> = { ...(process.env as Record<string, string>) }
+    // 显式带上真实用户目录：不少 MCP 运行时用 os.homedir() / USERPROFILE 拼缓存路径，
+    // 万一应用是在异常的用户上下文里被拉起（实测见过 MCP 把家目录算成不存在的 C:\Users\admin），
+    // 子进程也应拿到真实用户目录，而不是继承到错的那个。
+    if (process.env.USERPROFILE) env.USERPROFILE = process.env.USERPROFILE
+    if (process.env.HOME) env.HOME = process.env.HOME
+    if (process.env.APPDATA) env.APPDATA = process.env.APPDATA
     if (useResolved && node.electronAsNode) env.ELECTRON_RUN_AS_NODE = '1'
     for (const [k, v] of Object.entries(cfg.env || {})) env[k] = expandVars(v)
 
