@@ -1495,8 +1495,13 @@ export const WJXT_DOWNLOAD_TOOL_DEFINITION = {
   type: 'function',
   function: {
     name: 'wjxt_download',
-    description: '把鸿翼文件系统里的**原始文件**下载到指定目录（不转码、不改格式，字节数与服务器一致）。' +
-      'fileGuids 取自 wjxt_search 的返回（可一次传多个批量下载）；dir 必须是已授权工作区内的目录' +
+    description: '把鸿翼文件系统（企业内容库）里的**原始文件**下载到指定目录（不转码、不改格式，字节数与服务器一致）。' +
+      'fileGuids 取自 wjxt_search 的返回（可一次传多个批量下载）；' +
+      '**也可以直接使用预览/下载链接里的 `fileid=` 值**（如 `preview.html?fileid=xxxx-…` → fileGuid 就是 `xxxx-…`），' +
+      '不必先搜一遍；' +
+      '**企业内容库（wj.streamax.com）的文件只能用它下载**：通用 file_download 拿不到站点登录态，' +
+      '只会返回约 1KB 的 HTML 外壳（随后 file_read 报 Invalid PDF structure）—— 遇到这种情况改用本工具，' +
+      '不要下结论说「这些文件下载不了」。dir 必须是已授权工作区内的目录' +
       '（绝对路径或「别名/路径」，如 desktop/下载 或 工作区子目录），目录不存在会自动创建；' +
       '同名文件会自动重命名为「名称(1).ext」而不会覆盖。' +
       '批量下载超过 10 个文件时建议先与用户确认，避免一次拉太多。',

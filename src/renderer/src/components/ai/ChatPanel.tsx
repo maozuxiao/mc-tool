@@ -1965,18 +1965,19 @@ const MessageItem = memo(function MessageItem({ message, thinking, emptyHint, on
         </div>
         <div className="ai-message-actions">
           <span className="ai-msg-time">{fmtDate(message.createdAt)}</span>
-          <button className="ai-copy-btn" onClick={handleCopy} disabled={!message.content}>
-            <Icon name={copied ? 'Check' : 'File'} size={13} />
-            <span>{copied ? t('aiCopied') : t('aiCopy')}</span>
-          </button>
           {/* 「继续」：模型只回了句计划就停时，一键让它接着干（免手打「请继续」）。
-              只给助手消息、且思考占位态不显示（那时本来就在生成中）。 */}
+              放在「复制」左边（1.0.47 用户反馈：两个按钮相邻且都是小胶囊，继续在右端时
+              想点复制容易误触到它）；只给助手消息、且思考占位态不显示（那时本来就在生成中）。 */}
           {message.role === 'assistant' && !thinking && onContinue && (
             <button type="button" className="ai-copy-btn" onClick={onContinue} title={t('aiContinueTip')}>
               <Icon name="Play" size={13} />
               <span>{t('aiContinueBtn')}</span>
             </button>
           )}
+          <button className="ai-copy-btn" onClick={handleCopy} disabled={!message.content}>
+            <Icon name={copied ? 'Check' : 'File'} size={13} />
+            <span>{copied ? t('aiCopied') : t('aiCopy')}</span>
+          </button>
         </div>
       </div>
     </div>

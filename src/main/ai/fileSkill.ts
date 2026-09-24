@@ -255,13 +255,21 @@ export const FILE_DOWNLOAD_TOOL_DEFINITION = {
       'OA 域文件会自动复用当前 OA 登录态，未登录时返回 NEED_RELOGIN（此时提示用户先在应用内登录 OA）。' +
       'dir 不存在会自动创建；同名文件自动重命名为「名称(1).ext」「名称(2).ext」，不会覆盖已有文件。' +
       '可选 name 指定保存的文件名，省略则由链接推断（OA 规格文件取 fileName= 参数）。' +
-      '单次下载上限 200MB；**边下边写**（先写 `xxx.part`，完成再改名，失败自动清理），只有「空闲 60 秒没有任何新数据」才判超时 —— 大文件不会像以前那样被整段超时掐断。若返回 PATH_OUTSIDE_ROOT 说明目录不在已授权工作区内，应引导用户用 open_folder 打开该目录后再下载。',
+      '单次下载上限 200MB；**边下边写**（先写 `xxx.part`，完成再改名，失败自动清理），只有「空闲 60 秒没有任何新数据」才判超时 —— 大文件不会像以前那样被整段超时掐断。若返回 PATH_OUTSIDE_ROOT 说明目录不在已授权工作区内，应引导用户用 open_folder 打开该目录后再下载。' +
+      '【重要】**企业内容库（wj.streamax.com）的文件不要用本工具**：那是需要该站点登录态的预览页，' +
+      '本工具只能拿到约 1KB 的 HTML 外壳（现象：下载「成功」但 file_read 报 Invalid PDF structure）。' +
+      '这类文件改用 wjxt_download（传 fileGuid，可从预览/下载链接里的 fileid= 直接取）；' +
+      '若当前会话没启用「鸿翼文件查询下载」技能，就把链接直接给用户，让 TA 在应用内点开下载 —— ' +
+      '**不要**用本工具反复尝试，也不要据此断言「企业内容库的文件下载不了」。',
     parameters: {
       type: 'object',
       properties: {
         url: {
           type: 'string',
-          description: '要下载的文件 URL。OA 规格文件链接（oa.streamax.com 的 specificationFileDownload）或任意 http/https 直链'
+          description: '要下载的文件 URL。OA 规格文件链接（oa.streamax.com 的 specificationFileDownload）或任意 http/https 直链。' +
+            '**企业内容库（wj.streamax.com）的文件不要用本工具**：那是需要该站点登录态的预览页，' +
+            '本工具只能拿到约 1KB 的 HTML 外壳（表现为「下载成功但 file_read 报 Invalid PDF structure」）。' +
+            '这类文件请改用 wjxt_download（传 fileGuid），或先把链接给用户在应用内点开下载。'
         },
         dir: {
           type: 'string',
