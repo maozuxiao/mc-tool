@@ -647,7 +647,7 @@ export function ChatPanel({ disabled }: Props) {
       const data: any = await window.mcApi.ai.getConversation(id)
       setActiveConversation(id)
       setMessages(data.messages)
-      // 恢复该会话上次的勾选（1.0.47）：只在内存里还没有这条会话的记录时用库里的值 ——
+      // 恢复该会话上次的勾选（1.0.46）：只在内存里还没有这条会话的记录时用库里的值 ——
       // 同一进程内用户刚改过的勾选以内存为准，不能被旧值覆盖回去。
       const saved = data?.conversation?.enabledSkills
       if (Array.isArray(saved)) {
@@ -932,7 +932,7 @@ export function ChatPanel({ disabled }: Props) {
   )
   // 下发给主进程的是「来源:id」（内置与导入同名时靠它区分注入哪一份）
   const enabledSkills = useMemo(() => enabledSkillInfos.map(s => skillKey(s)), [enabledSkillInfos])
-  // 勾选落库（1.0.47）：按会话持久化，重启/切回旧会话能恢复。'__new__' 还没有会话 id，跳过，
+  // 勾选落库（1.0.46）：按会话持久化，重启/切回旧会话能恢复。'__new__' 还没有会话 id，跳过，
   // 等会话创建后由下面的迁移 effect 补落。落库失败不影响本次勾选。
   const persistSkillSel = useCallback((convId: string | null, keys: string[]) => {
     if (!convId || convId === '__new__') return
@@ -1966,7 +1966,7 @@ const MessageItem = memo(function MessageItem({ message, thinking, emptyHint, on
         <div className="ai-message-actions">
           <span className="ai-msg-time">{fmtDate(message.createdAt)}</span>
           {/* 「继续」：模型只回了句计划就停时，一键让它接着干（免手打「请继续」）。
-              放在「复制」左边（1.0.47 用户反馈：两个按钮相邻且都是小胶囊，继续在右端时
+              放在「复制」左边（1.0.46 用户反馈：两个按钮相邻且都是小胶囊，继续在右端时
               想点复制容易误触到它）；只给助手消息、且思考占位态不显示（那时本来就在生成中）。 */}
           {message.role === 'assistant' && !thinking && onContinue && (
             <button type="button" className="ai-copy-btn" onClick={onContinue} title={t('aiContinueTip')}>

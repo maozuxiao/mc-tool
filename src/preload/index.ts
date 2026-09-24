@@ -131,7 +131,7 @@ const mcApi = {
     getConversation: (id: string) => ipcRenderer.invoke(AI_IPC.GET_CONVERSATION, id),
     renameConversation: (id: string, title: string) => ipcRenderer.invoke(AI_IPC.RENAME_CONVERSATION, id, title),
     deleteConversation: (id: string) => ipcRenderer.invoke(AI_IPC.DELETE_CONVERSATION, id),
-  // 记住本会话启用的技能（1.0.47）：按会话独立，但重启/切回旧会话要能恢复
+  // 记住本会话启用的技能（1.0.46）：按会话独立，但重启/切回旧会话要能恢复
   setConvSkills: (id: string, keys: string[]) => ipcRenderer.invoke(AI_IPC.SET_CONV_SKILLS, id, keys),
     sendMessage: (payload: any) => ipcRenderer.invoke(AI_IPC.SEND_MESSAGE, payload),
     stopMessage: (conversationId: string) => ipcRenderer.invoke(AI_IPC.STOP_MESSAGE, conversationId),
