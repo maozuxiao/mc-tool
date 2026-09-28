@@ -127,6 +127,8 @@ dist/
 > 7. 问一次「帮我找 XX 文件」：**第一次工具调用应是 `wjxt_search`**（不应先出现 `file_search`）；若只给文件名、没说在哪，模型应先问「是找公司内容库里的，还是你本机上的？」。
 > 8. 挑一个会跑多轮工具的提问（例如让 AI 连续读几个文件），在它「思考中 / 正在读文件」时点 **停止**：应当**当轮立即停下**、不再启动下一个工具；同时 `userData/debug-ai.log` 里应出现 `[AI] stop …` 紧跟 `[AI] aborted …`（只有 stop 没有 aborted = 没停住，需排查）。
 > 9. MCP（1.0.46）：Skills 面板 →「🔌 MCP 服务」→ 点「填入示例」导入 tech-agent 服务（或手工登记 `node src/index.js`，工作目录指向技能 runtime 目录）→「准备依赖」→「测试连接」应列出 `chat_tech_agent` / `status_tech_agent` / `mcp_auth_tech_agent` / `reset_tech_agent` 四个工具；勾选对应技能后模型可调用（未登录会走 `mcp_auth` 拉起 Chrome 扫码），取消勾选即收回；应用退出后任务管理器中无残留 node 子进程。
+> 10. **Word 生成 / 翻译（1.0.46，必须在安装版里测）**：让 AI 生成一个 `.docx`（或直接 `file_write` 写 `.docx`，内容给 Markdown），确认产出是**真文档**：文件头应为 `PK`、Word/WPS 能直接打开、表格与标题样式都在；再让 AI「把一份中文 docx 翻成土耳其语（保持原格式）」验证 `translate_docx`。
+>     **为什么单列一条**：技能依赖随包分发，而 `electron-builder.yml` 的 `filter` 曾把 `docx` 排除 —— **开发目录正常、安装版报「生成 docx 需要 docx 依赖，但未安装」**（1.0.46 踩过）。遇到该报错先查 `resources/skills/file-office-local/node_modules/` 与 `electron-builder.yml` 的 filter；单机应急只需把仓库里的 `docx` 目录补进去（其余运行时依赖 xml / xml-js / jszip / nanoid / hash.js 都在）。
 
 ### 6. 发布到 GitHub Release
 

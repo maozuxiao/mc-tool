@@ -37,9 +37,11 @@ extraResources:
       - '!**/*.map'
       - '!**/node_modules/@types/**'
       - '!**/node_modules/**/tsconfig.json'
-      # 瘦身：以下包运行时并未被引用（docx/pptxgenjs 的生成能力本次未启用），从安装包中剔除。
-      # 注意：exceljs 与 @fast-csv 必须随包分发——update 模式用它保留原 xlsx 样式。
-      - '!**/node_modules/docx/**'
+      # 瘦身：pptxgenjs 仍未启用（生成 pptx 尚未实现），从安装包中剔除。
+      # ⚠️ docx 必须随包分发：1.0.46 起 file_write 写 .docx 与 translate_docx 都用它，
+      # 这里曾经把 docx 也剔掉（当时生成能力未启用），导致**安装版报「生成 docx 需要 docx 依赖」**，
+      # 而开发目录能跑——排查时先看本文件有没有把它排除掉。
+      # 注意：exceljs 与 @fast-csv 也必须随包分发——update 模式用它保留原 xlsx 样式。
       - '!**/node_modules/pptxgenjs/**'
       - '!**/node_modules/test/**'
       - '!**/node_modules/tests/**'

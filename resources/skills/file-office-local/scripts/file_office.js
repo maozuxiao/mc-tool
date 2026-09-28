@@ -1309,8 +1309,17 @@ function cmdWrite(positional, flags, roots) {
 async function writeDocx(target, content, opts) {
   let lib
   try { lib = require('docx') } catch {
+    // 报错必须自带「在哪找、node_modules 在不在」：这次真机上踩的坑就是
+    // 依赖装了、代码也支持了，但 **electron-builder.yml 的 filter 又把 docx 剔除了**，
+    // 于是安装版报「未安装」、开发目录却正常 —— 光看这句话完全无法判断是哪种情况。
+    const modDir = path.join(__dirname, '..', 'node_modules')
+    const hasModDir = fs.existsSync(modDir)
     throw new CommandError(
-      '生成 docx 需要 docx 依赖，但未安装。请在 skills/file-office-local 目录下执行 npm install docx。',
+      '生成 docx 需要 docx 依赖，但当前技能目录里加载不到。' +
+      (hasModDir
+        ? `node_modules 存在（${modDir}）但其中没有 docx —— 打包时可能被 electron-builder.yml 的 filter 排除，或未执行 npm install docx。`
+        : `node_modules 不存在（${modDir}）—— 请在 skills/file-office-local 目录下执行 npm install。`) +
+      ' 开发环境可先跑 `node scripts/file_office.js ping` 查看各依赖加载状态。',
       'MISSING_DEP'
     )
   }
