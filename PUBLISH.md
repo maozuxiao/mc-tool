@@ -274,7 +274,7 @@ nsis:
   artifactName: MC物料查询-${buildVersion}-Setup.${ext}
 ```
 
-产物为 `MC物料查询-1.0.47.0-Setup.exe`，但 `latest.yml` 里产品版本仍是 `1.0.47`。仅用于测试，正式发布请改回统一命名。
+产物为 `MC物料查询-1.0.48.0-Setup.exe`，但 `latest.yml` 里产品版本仍是 `1.0.48`。仅用于测试，正式发布请改回统一命名。
 
 ---
 
@@ -284,7 +284,7 @@ nsis:
 npm run pack:mac
 ```
 
-- 产物：`dist/MC物料查询-1.0.47-<arch>.dmg`（命名来自 `mac.artifactName`）。
+- 产物：`dist/MC物料查询-1.0.48-<arch>.dmg`（命名来自 `mac.artifactName`）。
 - **签名与公证**：当前 `electron-builder.yml` 未配置 `identity` / `notarize`，打出的 DMG 未签名，macOS 会拦截（Gatekeeper）。若要正式分发 macOS 版，需补 Apple Developer 证书与公证配置。
 - **不建议在 Windows 上交叉编译 DMG**，请在 macOS 上执行。
 
