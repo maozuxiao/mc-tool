@@ -45,6 +45,7 @@ const CHROME_EXE = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
 const PROFILE_DIR = path.join(os.homedir(), '.cache', 'chrome-oa-mc');
 const COOKIE_JAR = path.join(os.homedir(), '.cache', 'oa-mc-cookies.json');
 const IMX307_DATA_PATH = path.join(__dirname, '..', 'data', 'imx307_replacement.json');
+const PN_SWITCH_DATA_PATH = path.join(__dirname, '..', 'data', 'pn_switchover.json');
 
 // ── IMX307 替代料号（本地静态数据）────────────────────────────
 // 描述含 IMX307 的物料行自动附加替代料号信息（F355 等方案），
@@ -77,6 +78,137 @@ function attachImx307(rows) {
     if (repls.length) r.imx307_replacement = repls;
     return r;
   });
+}
+
+// ── 料号切换 / 替代通知（本地静态数据，按**料号**精确命中）─────────────
+// 与上面 IMX307 那套互补：IMX307 是「按描述命中」，这里是「按料号命中」。
+// 查到切换前料号 → 提示新料号 + 截止日（截止后旧料号一律不接单）；
+// 查到切换后料号 → 提示它替代了哪个旧料号。生命周期/库存仍以服务器为准。
+let _pnSwitchCache = null;
+function loadPnSwitch() {
+  if (_pnSwitchCache) return _pnSwitchCache;
+  const byOld = {};
+  const byNew = {};
+  try {
+    const raw = JSON.parse(fs.readFileSync(PN_SWITCH_DATA_PATH, 'utf8'));
+    for (const n of (raw.notices || [])) {
+      const base = {
+        noticeId: n.id || null,
+        title: n.title_zh || n.title_en || '',
+        title_en: n.title_en || '',
+        issued: n.issued || null,
+        deadline: n.deadline || null,
+        lockBomDeadline: n.lockBomDeadline || null,
+        reason: n.reason_zh || n.reason_en || '',
+        change: n.change_zh || n.change_en || '',
+        requirement: n.requirement_zh || n.requirement_en || ''
+      };
+      for (const it of (n.items || [])) {
+        const info = {
+          ...base,
+          version: it.version_zh || it.version_en || '',
+          region: it.region_zh || it.region_en || '',
+          old_pn: it.old,
+          new_pn: it.new
+        };
+        byOld[normStr(it.old)] = { ...info, role: 'old' };
+        byNew[normStr(it.new)] = { ...info, role: 'new' };
+      }
+    }
+  } catch (e) {
+    // 数据文件缺失/损坏不影响正常查询，只是没有切换提示
+  }
+  _pnSwitchCache = { byOld, byNew };
+  return _pnSwitchCache;
+}
+
+/** 取某个料号的切换信息（新旧都查）；没有则返回 null */
+function pnSwitchOf(itemNumber) {
+  const { byOld, byNew } = loadPnSwitch();
+  const code = normStr(itemNumber);
+  if (!code) return null;
+  return byOld[code] || byNew[code] || null;
+}
+
+// 对物料行数组附加 pn_switch 字段（按料号精确匹配；新旧两侧都标）
+function attachPnSwitch(rows) {
+  const { byOld, byNew } = loadPnSwitch();
+  if (!Object.keys(byOld).length && !Object.keys(byNew).length) return rows;
+  return rows.map(r => {
+    if (!r || r._error) return r;
+    const hit = pnSwitchOf(r.ITEM_NUMBER);
+    if (hit) r.pn_switch = hit;
+    return r;
+  });
+}
+
+// 本地静态注解统一入口：IMX307 替代料号（按描述）+ 料号切换通知（按料号）
+function attachLocalNotes(rows) {
+  return attachPnSwitch(attachImx307(rows));
+}
+
+/**
+ * BOM 子项的切换命中：BOM 列名由服务端决定，这里不猜列名，
+ * 改为「任一字段值等于切换料号即命中」（只加字段，不改原值）。
+ */
+function attachPnSwitchToBomRows(bomRows) {
+  const { byOld, byNew } = loadPnSwitch();
+  if (!Object.keys(byOld).length && !Object.keys(byNew).length) return bomRows;
+  for (const row of bomRows) {
+    if (!row || typeof row !== 'object') continue;
+    for (const v of Object.values(row)) {
+      if (typeof v !== 'string') continue;
+      const hit = byOld[normStr(v)] || byNew[normStr(v)];
+      if (hit) { row.pn_switch = hit; break; }
+    }
+  }
+  return bomRows;
+}
+
+/** 控制台：把料号切换命中打成显眼一行（agent 读 stdout 就能看到，不必解析 JSON） */
+function logPnSwitch(rows, label) {
+  const hits = (rows || []).filter(r => r && r.pn_switch);
+  for (const r of hits) {
+    const s = r.pn_switch;
+    const who = `${label || ''}${r.ITEM_NUMBER || ''}`;
+    if (s.role === 'old') {
+      console.log(`[PN][WARN] ${who} 是**切换前**料号 → 新料号 ${s.new_pn}（${s.version} ${s.region}）；${s.deadline} 之后旧料号一律不接单，新订单一律报新料号`);
+    } else {
+      console.log(`[PN][INFO] ${who} 是**切换后**新料号，替代 ${s.old_pn}（${s.version} ${s.region}）`);
+    }
+  }
+  if (hits.length) console.log(`[PN] ${hits.length} 条记录涉及料号切换，已附加 pn_switch（新旧对照 / 截止日 / 切换要求）`);
+  return hits.length;
+}
+
+/** HTML 里的切换提示块 */
+function pnSwitchTipHtml(s) {
+  if (!s) return '';
+  if (s.role === 'old') {
+    return `<div class="pn-switch-tip">🔁 料号已切换：新料号 <span class="repl">${esc(s.new_pn)}</span>（${esc(s.version)} ${esc(s.region)}）`
+      + `<div class="pn-switch-sub">${esc(s.deadline || '')} 后旧料号一律不接单；新订单一律报新料号。</div></div>`;
+  }
+  return `<div class="pn-switch-tip new">🔁 切换后新料号，替代 <span class="repl">${esc(s.old_pn)}</span>（${esc(s.version)} ${esc(s.region)}）`
+    + `<div class="pn-switch-sub">功能与使用方式不变（内置 128GB eMMC + 2 个 Micro SD 卡槽）。</div></div>`;
+}
+
+/** BOM 页顶部的切换汇总条 */
+function pnSwitchBannerHtml(bomRows) {
+  const hits = (bomRows || []).filter(r => r && r.pn_switch);
+  if (!hits.length) return '';
+  const olds = hits.filter(r => r.pn_switch.role === 'old');
+  const news = hits.filter(r => r.pn_switch.role === 'new');
+  const cells = [];
+  if (olds.length) {
+    cells.push(`<div>⚠ <b>切换前料号 ${olds.length} 个</b>：`
+      + olds.map(r => `<span class="repl">${esc(r.pn_switch.old_pn)}</span> → ${esc(r.pn_switch.new_pn)}`).join('、') + `</div>`);
+  }
+  if (news.length) {
+    cells.push(`<div>✓ 切换后新料号 ${news.length} 个，替代旧料号 ${news.map(r => esc(r.pn_switch.old_pn)).join('、')}</div>`);
+  }
+  const s = hits[0].pn_switch;
+  cells.push(`<div class="pn-switch-sub">${esc(s.deadline || '')} 后旧料号一律不接单；锁 BOM 客户须在 ${esc(s.lockBomDeadline || '')} 前完成切换（${esc(s.title)}）</div>`);
+  return `<div class="pn-switch-tip">${cells.join('')}</div>`;
 }
 
 // ── 参数解析 ─────────────────────────────────────────────────
@@ -508,6 +640,10 @@ tr:hover { background: #f0f7ff; }
 .fallback-tag { display: inline-block; padding: 1px 6px; border-radius: 8px; font-size: 10px; background: #f3e5f5; color: #7c4dff; margin-left: 4px; }
 .imx307-tip { margin-top: 4px; padding: 4px 8px; border-radius: 6px; font-size: 11px; background: #fff8e1; color: #e65100; border: 1px solid #ffe0b2; }
 .imx307-tip .repl { color: #1745A5; font-weight: 600; }
+.pn-switch-tip { margin-top: 4px; padding: 4px 8px; border-radius: 6px; font-size: 11px; background: #e8f1ff; color: #1745A5; border: 1px solid #c5dcff; line-height: 1.6; }
+.pn-switch-tip.new { background: #eef7ee; color: #2e7d32; border-color: #c8e6c9; }
+.pn-switch-tip .repl { font-weight: 700; }
+.pn-switch-sub { color: #666; font-size: 10px; }
 .empty { color: #999; padding: 20px; text-align: center; }`;
 }
 
@@ -541,7 +677,7 @@ ${rows.map((r, i) => {
     return `<tr class="${isError ? 'error-row' : ''}">
     <td>${i + 1}</td>
     <td class="item-no">${esc(r.ITEM_NUMBER)}</td>
-    <td>${esc(r.ITEM_DESC)}${r._fallback ? '<span class="fallback-tag">模糊匹配</span>' : ''}${r.imx307_replacement ? '<div class="imx307-tip">⚠ IMX307 方案，替代料号: ' + r.imx307_replacement.map(m => `<span class="repl">${esc(m.replacement)}</span>`).join('、') + '</div>' : ''}</td>
+    <td>${esc(r.ITEM_DESC)}${r._fallback ? '<span class="fallback-tag">模糊匹配</span>' : ''}${r.imx307_replacement ? '<div class="imx307-tip">⚠ IMX307 方案，替代料号: ' + r.imx307_replacement.map(m => `<span class="repl">${esc(m.replacement)}</span>`).join('、') + '</div>' : ''}${pnSwitchTipHtml(r.pn_switch)}</td>
     <td>${esc(r.ITEM_TYPE)}</td>
     <td><span class="status-badge ${statusClass(r.INV_STATUS_NAME)}">${esc(r.INV_STATUS_NAME)}</span></td>
     <td class="${qty > 0 ? 'qty-positive' : 'qty-zero'}">${esc(r.ON_HAND_QTY)}</td>
@@ -633,6 +769,9 @@ function bomReportHtml(parent, bomRows, columns, itemNo) {
     levelDist[lvl] = (levelDist[lvl] || 0) + 1;
   });
 
+  // 料号切换提示：子项命中优先，其次父项（锁 BOM 客户要按通知在 lockBomDeadline 前切换）
+  const pnBanner = pnSwitchBannerHtml(bomRows) || pnSwitchTipHtml(parent.pn_switch);
+
   return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -649,6 +788,7 @@ function bomReportHtml(parent, bomRows, columns, itemNo) {
   ${Object.keys(levelDist).sort().map(lvl =>
     `<div class="summary-item"><div class="num">${levelDist[lvl]}</div><div class="label">层级 ${esc(lvl)}</div></div>`).join('')}
 </div>
+${pnBanner}
 
 <h2>父项物料信息</h2>
 <div class="card">
@@ -668,8 +808,12 @@ ${bomRows.length ? `<div class="table-wrap">
 <tbody>
 ${bomRows.map((r, i) => `<tr><td>${i + 1}</td>${finalCols.map(c => {
     const v = r[c.property];
-    if (c.property === 'ITEM_NUMBER' || c.property === 'COMPONENT_ITEM' || c.property === 'COMPONENT_ITEM_NUMBER') return `<td class="item-no">${esc(v)}</td>`;
-    return `<td>${esc(v)}</td>`;
+    // 命中切换料号的那一格直接挂提示（不猜列名，按值比对）
+    const tip = (r.pn_switch && typeof v === 'string'
+      && (normStr(v) === normStr(r.pn_switch.old_pn) || normStr(v) === normStr(r.pn_switch.new_pn)))
+      ? pnSwitchTipHtml(r.pn_switch) : '';
+    if (c.property === 'ITEM_NUMBER' || c.property === 'COMPONENT_ITEM' || c.property === 'COMPONENT_ITEM_NUMBER') return `<td class="item-no">${esc(v)}${tip}</td>`;
+    return `<td>${esc(v)}${tip}</td>`;
   }).join('')}</tr>`).join('\n')}
 </tbody>
 </table>
@@ -735,9 +879,10 @@ async function main() {
       console.log(`[INFO] 物料描述搜索: ${keyword}`);
       const { rows } = await queryMaterial(orgId, 'q.ITEM_DESC', keyword);
       console.log(`[INFO] 共 ${rows.length} 条记录`);
-      const rows2 = attachImx307(rows);
+      const rows2 = attachLocalNotes(rows);
       const imxCount = rows2.filter(r => r.imx307_replacement).length;
       if (imxCount > 0) console.log(`[IMX307] ${imxCount} 条记录含 IMX307 方案，已附加替代料号信息`);
+      logPnSwitch(rows2);
       if (json) printJson({ query: keyword, rows: rows2 });
       else saveHtml(outDir, 'material_query_result.html', materialReportHtml(rows2, keyword, '查询条件'));
     }
@@ -748,8 +893,15 @@ async function main() {
       const result = await queryOneItem(orgId, itemNo);
       if (result.rows.length === 0) console.log(`[WARN] ${itemNo}: 未找到`);
       else console.log(`[OK] ${itemNo}: ${result.rows.length} 条记录 (via ${result.method})`);
-      const rows2 = attachImx307(result.rows);
+      const rows2 = attachLocalNotes(result.rows);
       if (rows2.some(r => r.imx307_replacement)) console.log(`[IMX307] ${itemNo} 为 IMX307 方案，已附加替代料号信息`);
+      if (rows2.length) {
+        logPnSwitch(rows2);
+      } else {
+        // 该料号在 MC 里查不到，但它可能是已知的「切换前料号」（停用/未建档）——仍要把新料号告诉用户
+        const known = pnSwitchOf(itemNo);
+        if (known) logPnSwitch([{ ITEM_NUMBER: itemNo, pn_switch: known }]);
+      }
       if (json) {
         printJson({ itemNumber: itemNo, method: result.method || null, error: result.error || null, rows: rows2 });
       } else {
@@ -777,8 +929,15 @@ async function main() {
         await new Promise(r => setTimeout(r, 300));
       }
       const itemsOut = results.map(r => {
-        const rows2 = attachImx307(r.rows || []);
+        const rows2 = attachLocalNotes(r.rows || []);
         if (rows2.some(x => x.imx307_replacement)) console.log(`[IMX307] ${r.itemNumber} 为 IMX307 方案，已附加替代料号信息`);
+        // 没查到物料行时也要提醒：查询的料号本身可能就是「切换前料号」（查库存/换料号时最常见的用法）
+        if (!rows2.length) {
+          const known = pnSwitchOf(r.itemNumber);
+          if (known) logPnSwitch([{ ITEM_NUMBER: r.itemNumber, pn_switch: known }]);
+        } else {
+          logPnSwitch(rows2);
+        }
         return { itemNumber: r.itemNumber, found: rows2.length > 0, method: r.method || null, error: r.error || null, rows: rows2 };
       });
       if (json) {
@@ -803,6 +962,12 @@ async function main() {
       const { parentData, parentRows, bomData, bomRows } = await queryBom(orgId, itemNo);
       console.log(`[INFO] 父项记录: ${parentRows.length}，BOM 子项: ${bomRows.length}`);
       const columns = (bomData.columns || []).map(c => ({ title: c.title, property: c.property }));
+      // 料号切换：BOM 子项里若含切换前/后料号，标注出来（锁 BOM 客户要按通知完成切换）
+      const parentHit = pnSwitchOf(itemNo);
+      if (parentHit && parentRows[0]) parentRows[0].pn_switch = parentHit;
+      attachPnSwitchToBomRows(bomRows);
+      logPnSwitch(parentRows, 'BOM 父项 ');
+      logPnSwitch(bomRows, 'BOM 子项 ');
       if (json) printJson({ itemNumber: itemNo, parent: parentRows[0] || {}, columns, bomRows });
       else saveHtml(outDir, 'bom_result.html', bomReportHtml(parentRows[0] || {}, bomRows, columns, itemNo));
     }

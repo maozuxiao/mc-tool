@@ -1,0 +1,43 @@
+{
+  "source": "[Urgent]AD_Plus2.0_128G eMMC Part Number Change Notice_260930【紧急】AD Plus2.0_128G eMMC 料号切换通知_260930.pdf",
+  "note": "料号切换 / 替代通知（本地静态参考，生命周期与库存仍以 MC 服务器查询为准）。items 里 old=切换前料号（deadline 之后一律不接单）、new=切换后料号。搜索/单查/BOM 命中任一侧都会自动附加 pn_switch 字段。",
+  "count": 9,
+  "notices": [
+    {
+      "id": "AD_PLUS2_0_128G_EMMC_20260930",
+      "title_zh": "【紧急】AD Plus2.0 料号切换通知（8G eMMC 缺料，请于 10 月 31 日前完成切换）",
+      "title_en": "[Urgent] AD Plus2.0 Part Number Switchover Notice (8G eMMC Shortage - Complete by Oct 31, 2026)",
+      "issued": "2026-09-30",
+      "deadline": "2026-10-31",
+      "lockBomDeadline": "2027-03-31",
+      "exceptionForecastBy": "2026-10-15",
+      "reason_zh": "上游 eMMC 物料紧缺和涨价；AD Plus2.0 已完成高性价比的内置 128GB 版本开发，国内系统验证开局已完成，具备批量出货条件。为提升性价比、保障存储物料供应，优先排发出货内置 128GB 新料号版本。",
+      "reason_en": "Due to the industry-wide shortage and rising prices of upstream eMMC, AD Plus2.0 has completed development of a cost-effective built-in 128GB version (system validation and initial deployment in China done), and is ready for volume shipment.",
+      "change_zh": "功能与使用方式不变：设备自带支持录像的内置 128GB eMMC，同时保留 2 个 Micro SD 卡槽（客户可自行插卡扩容），内置 eMMC + 2 张 SD 卡最多可同时使用 3 个存储器（火车版本 V2.5.1 已兼容）。",
+      "change_en": "Same features and same usage. Built-in 128GB eMMC that supports video recording, plus the two Micro SD card slots (up to three storage devices usable at the same time; supported since release-train V2.5.1).",
+      "requirement_zh": "① 新料号即日起可下单，新订单一律报新料号，原则上不再接旧料号订单；② 2026-10-31 为最终截止，之后旧料号一律不接单；③ 特殊情况（项目交付中、客户需验证时间）须先经 Kathy 审批，并在 2026-10-15 前反馈客户未来几个月的旧料号需求预测；④ 锁 BOM 的客户须在 6 个月内（2027-03-31 前）完成切换。",
+      "requirement_en": "① New P/Ns orderable now; all new orders must use new P/Ns, previous P/N orders are generally no longer accepted. ② Oct 31, 2026 is the final cut-off. ③ Exceptions (projects in delivery / customers needing validation time) require Kathy's approval and a forecast of previous-P/N demand submitted by Oct 15, 2026. ④ Locked-BOM customers must complete the switchover within 6 months (by Mar 31, 2027).",
+      "owner_zh": "货运产品线 郑泽涛 Frank（Trucking Industry, Zetao Zheng (Frank)）",
+      "owner_en": "Trucking Industry - Zetao Zheng (Frank)",
+      "items": [
+        { "old": "5154021100047", "new": "5154021100364", "version_zh": "双镜头", "version_en": "Dual-camera", "region_zh": "欧亚", "region_en": "Europe & Asia" },
+        { "old": "5154021100048", "new": "5154021100365", "version_zh": "双镜头", "version_en": "Dual-camera", "region_zh": "拉美、澳", "region_en": "LATAM & Australia" },
+        { "old": "5154021100049", "new": "5154021100366", "version_zh": "双镜头", "version_en": "Dual-camera", "region_zh": "北美", "region_en": "North America" },
+        { "old": "5154021100050", "new": "5154021100420", "version_zh": "双镜头", "version_en": "Dual-camera", "region_zh": "日本", "region_en": "Japan" },
+        { "old": "5154021100046", "new": "5154021100421", "version_zh": "双镜头", "version_en": "Dual-camera", "region_zh": "亚太北版", "region_en": "APAC North" },
+        { "old": "5154021100051", "new": "5154021100423", "version_zh": "单镜头", "version_en": "Single-camera", "region_zh": "欧亚", "region_en": "Europe & Asia" },
+        { "old": "5154021100052", "new": "5154021100424", "version_zh": "单镜头", "version_en": "Single-camera", "region_zh": "拉美、澳", "region_en": "LATAM & Australia" },
+        { "old": "5154021100054", "new": "5154021100425", "version_zh": "单镜头", "version_en": "Single-camera", "region_zh": "北美", "region_en": "North America" },
+        { "old": "5154021100053", "new": "5154021100422", "version_zh": "单镜头", "version_en": "Single-camera", "region_zh": "日本", "region_en": "Japan" }
+      ],
+      "customized_pn_note_zh": "以上为标准料号；项目定制料号请走 OA 流程自行申请。",
+      "customized_pn_note_en": "The above are standard P/Ns. For project-specific customized P/Ns, please apply through the OA process.",
+      "customer_notice_template": {
+        "usage_zh": "给客户发通知时，先按客户所在区域/版本从 items 里填入对应的旧料号与新料号；客户只看自己区域的料号。",
+        "usage_en": "Before sending, fill in the previous and new P/N for the customer's region and version. The customer sees only their own P/N.",
+        "subject_en": "AD Plus2.0 Part Number Change - Action Required by Oct 31, 2026",
+        "body_en": "Dear Valued Partner,\nBecause of an industry-wide shortage of a key memory component, we are moving AD Plus2.0 to a new part number to keep your supply uninterrupted.\n\nPrevious P/N: [Previous P/N]\nNew P/N: [New P/N]\n\nThe new version keeps the same features and works the same way. It comes with built-in 128GB storage that supports video recording, and the two Micro SD card slots remain available if you need additional storage.\n\nPlease switch to the new part number now. Remaining stock of the previous part number is very limited and will be allocated case by case. October 31, 2026 is the final date for any orders of the previous part number.\n\nFor any questions, please contact your Streamax sales representative.\n\nBest regards,\n[Name / Streamax]"
+      }
+    }
+  ]
+}

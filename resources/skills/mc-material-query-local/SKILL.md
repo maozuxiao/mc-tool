@@ -1,10 +1,10 @@
 ---
 name: mc-material-query-local
-description: 查询锐明 OA MC 物料系统的本地优化版技能（物料搜索/料号查询/库存/BOM/规格文件下载/物料对比），优先于企业版 mc-material-query 使用。统一入口 scripts/mc_query.js，支持 search/item/batch/bom/spec 五个子命令。当用户需要查料号、查物料库存、查 BOM、下载规格文件、对比物料生命周期风险时使用。鉴权采用 Cookie 缓存 + 直连 HTTP：无需常驻 Chrome，仅会话失效时自动弹窗扫码一次；Node.js 由 scripts/ensure_node.ps1 自动自举。输出：HTML 报告 + 中文摘要。
+description: 查询锐明 OA MC 物料系统的本地优化版技能（物料搜索/料号查询/库存/BOM/规格文件下载/物料对比），优先于企业版 mc-material-query 使用。统一入口 scripts/mc_query.js，支持 search/item/batch/bom/spec 五个子命令；结果会自动附加本地静态注解（IMX307 替代料号、料号切换/替代通知）。当用户需要查料号、查物料库存、查 BOM、下载规格文件、对比物料生命周期风险时使用。鉴权采用 Cookie 缓存 + 直连 HTTP：无需常驻 Chrome，仅会话失效时自动弹窗扫码一次；Node.js 由 scripts/ensure_node.ps1 自动自举。输出：HTML 报告 + 中文摘要。
 metadata:
   type: skill
   agent_created: true
-version: 2.1.0
+version: 2.2.0
 name_zh: OA料号库存查询（本地版）
 description_zh: 查询锐明 OA MC 物料系统（物料搜索/料号查询/BOM/规格文件/物料对比），本地维护优化版
 ---
@@ -141,6 +141,24 @@ schtasks /Create /TN "OA-MC-KeepAlive" /SC MINUTE /MO 20 /TR "node C:\Users\stre
 - agent 收到含 IMX307 的结果时，**必须**向用户提示替代料号并告知客户（如"该料号为 IMX307 方案，建议改用替代料号 XXX（F355方案）"）。
 - 也可用 `imx307 <料号>` 子命令单独查询替代映射。
 - 替代料号的**生命周期/库存仍以 MC 服务器查询为准**（映射表 `lifecycle` 字段为 Excel 静态数据，可能滞后）。
+
+## 料号切换 / 替代通知（本地静态数据 + 自动提示）
+
+数据来源：`data/pn_switchover.json`（由正式通知/邮件整理，当前 1 份通知 / 9 组料号）。
+
+当前通知：
+
+| 通知 | 截止 | 内容 |
+|---|---|---|
+| `AD_PLUS2_0_128G_EMMC_20260930`<br>【紧急】AD Plus2.0 料号切换通知 | **2026-10-31**（之后旧料号一律不接单）<br>锁 BOM 客户：2027-03-31 前 | 8G eMMC 缺料 → 切换为内置 128GB 版本；9 组「旧料号 → 新料号」（双镜头 5 组：欧亚/拉美澳/北美/日本/亚太北版；单镜头 4 组：欧亚/拉美澳/北美/日本）。功能与使用方式不变，内置 128GB eMMC + 保留 2 个 Micro SD 卡槽 |
+
+**自动提示规则（按料号精确命中，新旧两侧都标）**：
+- `search` / `item` / `batch` / `bom` 的结果里，某行料号命中「切换前料号」→ 附加 `pn_switch`（`role: 'old'`，含 `new_pn`、`version`、`region`、`deadline`、`requirement`…）；
+  命中「切换后料号」→ 附加 `pn_switch`（`role: 'new'`，含 `old_pn`）。控制台同时打印 `[PN][WARN] / [PN][INFO]` 一行，HTML 报告里带提示块。
+- **料号查不到时也会提示**：`item` / `batch` 若该料号在 MC 里没有记录（停用/未建档），仍会输出它的新料号 —— 因为「旧料号查不到」往往正是切换造成的。
+- agent 收到带 `pn_switch` 的结果时，**必须**主动向用户说明：① 这是**已切换**的料号；② 新料号是多少；③ 截止日后旧料号一律不接单（涉及客户报价/下单/备货时必须提醒，必要时提示「锁 BOM 客户请在 2027-03-31 前完成切换」）。
+- 通知里的**客户通知模板**在 `pn_switchover.json` → `customer_notice_template`（中英），用户要写客户邮件时直接取用，按客户区域填入对应料号。
+- 动态数据（生命周期/库存）仍以 MC 服务器为准；本文件只负责「料号已切换」这件事。
 
 ## 查询类型
 
