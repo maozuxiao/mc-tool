@@ -145,6 +145,47 @@ export function skillPrompt(key: string): string {
   return ''
 }
 
+/** 技能目录的绝对路径（定位规则与 skillPrompt 一致：带来源前缀按来源查，否则 导入 → 内置） */
+export function skillDirOf(key: string): string | null {
+  const k = String(key || '')
+  const i = k.indexOf(':')
+  const src = i > 0 ? k.slice(0, i) : ''
+  const id = bareSkillId(k)
+  if (!id) return null
+  const roots = src === 'builtin' ? [builtinRoot()]
+    : src === 'user' ? [userSkillRoot()]
+      : [userSkillRoot(), builtinRoot()]
+  for (const root of roots) {
+    const dir = join(root, id)
+    if (existsSync(join(dir, SKILL_MD))) return dir
+  }
+  return null
+}
+
+/**
+ * PATH_NOT_FOUND 兜底（1.0.48）：模型按**相对路径**读技能自带文档（`references/xxx.md`）时，
+ * 文件工具的相对路径是按**工作区根**解析的（见沙箱 `resolveSafe`），于是变成
+ * `<工作区>/references/xxx.md` → 必然报「路径不存在」。这里在技能目录里找出同名文件的
+ * **绝对路径**，交给上层作为提示回给模型（模型用绝对路径重试即可读到）。
+ * 只接受相对路径 —— 绝对路径没必要兜底。
+ */
+export function matchSkillDocByRelative(target: string): string[] {
+  const t = String(target || '').replace(/\\/g, '/').replace(/^\.\//, '').trim()
+  if (!t || t.startsWith('/') || /^[a-zA-Z]:/.test(t)) return []
+  const out: string[] = []
+  for (const root of [builtinRoot(), userSkillRoot()]) {
+    let ids: string[] = []
+    try {
+      ids = readdirSync(root, { withFileTypes: true }).filter(d => d.isDirectory()).map(d => d.name)
+    } catch { continue }
+    for (const id of ids) {
+      const p = join(root, id, t)
+      if (existsSync(p)) out.push(p)
+    }
+  }
+  return out
+}
+
 /**
  * 内置技能的「路由提示」：**必须压在这段技能说明的最前面**。
  *
@@ -160,6 +201,22 @@ function routeHint(key: string): string {
       + '**第一个动作必须是 wjxt_search**，不要先用 file_search / file_list 去搜本地目录 —— '
       + '企业内容库在服务器上，本地工具只看用户电脑上的路径，先搜本地只会白跑一轮并给出「本地没有」这种无关结论。'
       + '只有用户给了本地路径、或明确说文件在「本机 / 桌面 / 某盘 / 共享盘」时，才用本地文件工具。\n\n'
+  }
+  // 技能自带参考文档（references/）时，**必须注入技能目录的绝对路径**（1.0.48）：
+  // SKILL.md 里通常按相对路径写（`references/xxx.md`），模型照着读会撞上「相对路径按工作区根解析」
+  // 而报 PATH_NOT_FOUND（用户实测报错）。这里直接把每个参考文件的绝对路径列出来，模型照抄即可。
+  const dir = skillDirOf(key)
+  if (dir) {
+    const refDir = join(dir, 'references')
+    let files: string[] = []
+    try {
+      files = readdirSync(refDir, { withFileTypes: true }).filter(f => f.isFile()).map(f => f.name).sort()
+    } catch { /* 没有 references 目录就不用管 */ }
+    if (files.length) {
+      return `【技能目录】${dir}\n`
+        + '该技能自带参考文档，读取时**必须用下面的绝对路径**（写相对路径如 `references/xxx.md` 会被当成工作区里的文件，报 `PATH_NOT_FOUND`）：'
+        + files.slice(0, 8).map(f => '`' + join(refDir, f) + '`').join('、') + '\n\n'
+    }
   }
   return ''
 }

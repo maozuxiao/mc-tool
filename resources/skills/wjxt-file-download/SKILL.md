@@ -178,5 +178,9 @@ edoc2（鸿翼）的会话与应用的 OA / 钉钉登录是**两件事**：分�
 
 ## 参考
 
-- [references/api_reference.md](./references/api_reference.md)：edoc2 后端接口契约（搜索 / 取原始文件 URL / 备用下载 / 错误码）——排障时看，正常执行不需要。
-- [references/notes.md](./references/notes.md)：实测不可用的接口与易踩边角，避免重复试错。
+本技能自带两份参考文档（在技能目录的 `references/` 下，**绝对路径由系统提示给出**）：
+
+- `api_reference.md`：edoc2 后端接口契约（搜索 / 取原始文件 URL / 备用下载 / 错误码）。
+- `notes.md`：实测不可用的接口与易踩边角，避免重复试错。
+
+> 读法：用 `file_read` 时**照抄系统提示里的绝对路径**（含盘符）；不要写相对路径 `references/notes.md` —— 文件工具的相对路径按**当前工作区根**解析，会报 `PATH_NOT_FOUND`。这两份文档只在**排障**时才有必要看，正常执行流程不需要。

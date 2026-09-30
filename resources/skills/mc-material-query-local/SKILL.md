@@ -18,7 +18,9 @@ description_zh: 查询锐明 OA MC 物料系统（物料搜索/料号查询/BOM/
 2. **登录模式（按需）**：无缓存或会话失效时，脚本自动以独立数据目录拉起 Chrome 等待用户扫码，成功后通过 CDP 导出全部 Cookie（含 httpOnly）写入缓存并**自动关闭浏览器**；
 3. 之后所有查询回到直连模式。
 
-技能目录：`C:\Users\streamax\.config\opencode\skills\mc-material-query-local`（下文以 `$SKILL` 指代）
+技能目录：由系统提示给出（形如 `…\resources\skills\mc-material-query-local`，下文以 `$SKILL` 指代）。
+**不要**使用本文件历史版本里出现过的 `C:\Users\streamax\.config\opencode\skills\…` —— 那是另一份独立副本，不是应用在用的这份；也不要用相对路径（`scripts/mc_query.js` 之类）去读本技能的文件，文件工具的相对路径是按工作区根解析的，会报 `PATH_NOT_FOUND`。
+> 实际上**你不需要自己去跑这些脚本**：应用已把 `mc_query` 封装成工具（`search`/`item`/`batch`/`bom`/`spec`），直接调用工具即可。下面的命令行用法仅用于排障对照。
 
 > **与企业版的区别**：本技能是基于 OpenCode `mc-material.md` 工作流优化的本地维护版，路径已适配本机。另有一个企业市场安装的 `mc-material-query`（云端托管，脚本路径指向其他机器），**执行查询一律使用本技能，不要用企业版**。
 
@@ -35,7 +37,7 @@ description_zh: 查询锐明 OA MC 物料系统（物料搜索/料号查询/BOM/
 **第一步：Node.js 自举**（已存在则直接返回路径跳过下载；缺失时自动从腾讯云/阿里云镜像下载）：
 
 ```powershell
-$SKILL = "C:\Users\streamax\.config\opencode\skills\mc-material-query-local"
+# $SKILL = 系统提示里给出的技能目录绝对路径（不要写死本机路径）
 $NODE = & "$SKILL\scripts\ensure_node.ps1"   # stdout 最后一行即 node.exe 路径
 ```
 

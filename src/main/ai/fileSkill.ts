@@ -1,8 +1,29 @@
 import { runSkill, SKILL_FILE, skillExists } from './skillRuntime'
 import { downloadToDir } from './fileDownload'
+import { matchSkillDocByRelative } from './skillRegistry'
 import type { AIExtraRoot } from '@shared/ai-types'
 
 const SCRIPT = 'file_office.js'
+
+/**
+ * PATH_NOT_FOUND 兜底（1.0.48）：技能自带的参考文档不在工作区里，而模型常按 SKILL.md 里的
+ * **相对路径**去读（`references/xxx.md`）—— 相对路径是按工作区根解析的，必然找不到。
+ * 这里在技能目录里找到同名文件的绝对路径，作为 `hint` 一并回给模型，模型改用绝对路径重试即可。
+ * （系统提示里已经注入了技能目录的绝对路径，这里是第二道保险：模型忽略提示时也能自我纠正。）
+ */
+function withSkillDocHint(res: any, target: string): any {
+  if (!res || res.ok !== false) return res
+  const code = String(res.code || '')
+  const msg = String(res.error || '')
+  if (code !== 'PATH_NOT_FOUND' && !/路径不存在/.test(msg)) return res
+  const hits = matchSkillDocByRelative(target)
+  if (!hits.length) return res
+  return {
+    ...res,
+    hint: '技能自带的参考文档不在工作区里，请改用**绝对路径**重试：'
+      + hits.slice(0, 8).map(h => '`' + h + '`').join('、')
+  }
+}
 
 // 把多根白名单拼成脚本参数：主根用 --root，额外根用 --extra-root <别名>|<目录>
 function rootArgs(roots: AIExtraRoot[]): string[] {
@@ -344,7 +365,7 @@ export async function fileSkillRead(opts: FileReadOptions): Promise<any> {
     timeoutMs: 60000,
     signal: opts.signal
   })
-  return json
+  return withSkillDocHint(json, opts.path)
 }
 
 /**
@@ -385,5 +406,6 @@ export async function runFileSkillCommand(
     timeoutMs,
     signal
   })
-  return json
+  // 第一个位置参数通常就是路径（read/list/search/write 都是），失败时给出技能文档绝对路径提示
+  return withSkillDocHint(json, String(args[0] || ''))
 }
