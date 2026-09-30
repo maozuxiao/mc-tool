@@ -329,6 +329,15 @@ interface WjxtResponse {
   contentType: string
   /** 本次请求实际带上的分区 cookie 数（只记数量，不记内容） */
   cookieCount: number
+  /**
+   * 本次响应来自**降级通道**（主进程 `session.fetch`，而非隐藏页面上下文）。
+   *
+   * 为什么必须逐条标注：该通道只在「页面上下文不可用＝登录态异常」时才被走到，
+   * 且实测它拿到的搜索结果**不可靠/可能不完整**（2026-09-30 真实事故：edoc2 未登录，
+   * 搜索走降级通道返回 1 条，模型据此直接下结论给了用户）。调用方要据此提示模型
+   * 「结果可能不全，建议先登录再搜」，而不是把降级结果当完整清单。
+   */
+  viaFallback?: boolean
 }
 
 /** 最终落点是不是 SSO 登录页（goToLoginPage / sso/auth / login） */
@@ -610,9 +619,10 @@ async function wjxtRequest(
   const viaMain = await mainFetch(path, opts)
   // 降级通道拿到空结果时特别标注一次：这正是「主进程 fetch 拿不到数据」的现场
   if (/GetMapSearchResultList/.test(opts.form || '')) {
-    wjxtLog('[fallback] search went through main-process fetch —— 该通道实测恒为空结果，若返回 0 条属预期')
+    wjxtLog('[fallback] search went through main-process fetch —— 该通道结果不可靠（常为空或不全），已在上层标注')
   }
-  return viaMain
+  // 打上标记：调用方（搜索/探测）据此判断「结果来自降级通道、不可当完整清单」
+  return { ...viaMain, viaFallback: true }
 }
 
 /** 进程内是否已做过一次会话预热 */
@@ -1113,7 +1123,7 @@ function sortClause(sort?: WjxtSort): Array<Record<string, any>> {
 export async function wjxtSearch(
   keyword: string,
   opts: { size?: number; query?: string; mode?: WjxtMatchMode; sort?: WjxtSort; from?: number } = {}
-): Promise<{ total: number; files: WjxtFileInfo[]; strategy?: string; sortMode?: string; nameReranked?: boolean }> {
+): Promise<{ total: number; files: WjxtFileInfo[]; strategy?: string; sortMode?: string; nameReranked?: boolean; fallback?: boolean }> {
   const size = Math.min(Math.max(Math.round(opts.size ?? 10), 1), MAX_SEARCH_SIZE)
   const from = Math.max(0, Math.round(Number(opts.from) || 0))
   const mode: WjxtMatchMode = opts.mode === 'contains' || opts.mode === 'exact' ? opts.mode : 'word'
@@ -1249,11 +1259,14 @@ export async function wjxtSearch(
   let usedServerSort = wantServerSort
   let res: WjxtResponse | null = null
   let json: any = null
+  // 命中是否来自降级通道（见 WjxtResponse.viaFallback）：上层会据此提示「结果可能不全」
+  let usedFallback = false
   let parsed: { files: WjxtFileInfo[]; total: number; docList: any } = { files: [], total: 0, docList: {} }
   for (const s of strategies) {
     wjxtLog(`[search] try strategy=${s.name} query=${s.query} sort=${usedServerSort ? sortKey : 'score'}`)
     const r = await attempt(s.query)
     usedStrategy = s.name
+    usedFallback = r.res.viaFallback === true
     res = r.res
     json = r.json
     parsed = parseFiles(r.json)
@@ -1269,6 +1282,7 @@ export async function wjxtSearch(
       const p2 = parseFiles(r2.json)
       if (p2.files.length) {
         serverSortOk[sortKey] = false
+        usedFallback = r2.res.viaFallback === true
         res = r2.res
         json = r2.json
         parsed = p2
@@ -1323,7 +1337,15 @@ export async function wjxtSearch(
       head: res.body.slice(0, 600)
     }))
   }
-  return { total: parsed.total, files: parsed.files, strategy: usedStrategy, sortMode, nameReranked }
+  return { total: parsed.total, files: parsed.files, strategy: usedStrategy, sortMode, nameReranked, fallback: usedFallback }
+}
+
+/**
+ * 供主进程判断「企业内容库当前是否已登录」：true=已登录 / false=未登录 / null=无法判定。
+ * 用途：应用内预览窗口落地后做空态检测（未登录时站点会跳 SSO 登录页 → 窗口一片空白）。
+ */
+export function wjxtProbeLoggedIn(): Promise<boolean | null> {
+  return probeLoggedIn()
 }
 
 /**
@@ -1645,7 +1667,7 @@ export async function runWjxtSearch(input: {
   const from = Math.max(0, Math.round(Number(input?.from) || 0))
   wjxtLog(`[search] keyword=${keyword} size=${input?.size ?? '-'} mode=${input?.mode || 'word'} sort=${input?.sort || 'score'} from=${from} query=${input?.query ? 'yes' : 'no'}`)
   try {
-    const { total, files, strategy, sortMode, nameReranked } = await wjxtSearch(keyword, {
+    const { total, files, strategy, sortMode, nameReranked, fallback } = await wjxtSearch(keyword, {
       size: input?.size,
       query: input?.query,
       mode: input?.mode,
@@ -1663,6 +1685,13 @@ export async function runWjxtSearch(input: {
     const syns = synonymsFor(keyword)
     if (files.length && syns.length) {
       notes.push(`已把资料词自动扩展为文件名常见英文写法（${syns.join(' / ')}）一并检索；文件名命中的已排前面`)
+    }
+    // 降级通道（= 登录态异常）：必须让模型知道这批结果不能当完整清单用。
+    // 2026-09-30 事故：edoc2 未登录 → 走主进程直连返回 1 条 → 模型直接据此列表下结论。
+    if (files.length && fallback) {
+      notes.push('⚠ 当前企业内容库登录态异常，本次结果来自**降级通道**（主进程直连），' +
+        '实测该通道拿到的结果常为空或**不完整**；汇报时必须向用户说明「结果可能不全、建议先登录文件系统后重搜」，' +
+        '不要把这几条当成完整清单，也不要据此断言「只有这些文件」。')
     }
     // 服务端不支持该排序键时工具已改本地排序：说清楚，免得模型以为排序没生效又去折腾
     if (files.length && sortMode?.startsWith('local:')) {

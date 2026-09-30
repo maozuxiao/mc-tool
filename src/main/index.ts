@@ -9,7 +9,7 @@ import { OA_LOGIN_URL, OA_ORIGIN } from '@shared/constants'
 import { IPC } from '@shared/types'
 import { initAutoUpdater, isUpdateDownloaded, startUpdateDownload } from './updater'
 import { registerAIIPC } from './ai/aiIpc'
-import { setWjxtLoginOpener, setWjxtBootstrap, setWjxtLoginCloser, wjxtResolveOriginUrl, wjxtH5Login, wjxtDiag, clearWjxtCreds, WJXT_ORIGIN } from './ai/wjxtSkill'
+import { setWjxtLoginOpener, setWjxtBootstrap, setWjxtLoginCloser, wjxtResolveOriginUrl, wjxtH5Login, wjxtDiag, wjxtProbeLoggedIn, clearWjxtCreds, WJXT_ORIGIN } from './ai/wjxtSkill'
 import { translate, type Lang } from '@shared/i18n'
 import { listSkills } from './ai/skillRegistry'
 import { listStatuses as listMcpStatuses } from './ai/mcpClient'
@@ -619,7 +619,65 @@ function createWindow() {
     } catch (e: any) {
       debugLog('[openInternal] load error: ' + e?.message)
     }
+    // 企业内容库的预览/浏览窗：分区里没有 edoc2 登录态时，站点会跳 SSO 登录页，
+    // 而那个登录页在应用内窗口里渲染成空白（用户反馈「点预览打开白屏窗口」）。
+    // 只有 wjxt 域做这件事，其余内网窗口（OA 工作台等）不受影响。
+    if (host.toLowerCase() === 'wj.streamax.com') void handleWjxtWindowLoginState(win, url)
     return true
+  }
+
+  /**
+   * 预览窗「落地后是登录页」的处置（2026-09-30 新增）。
+   *
+   * 背景：`wj.streamax.com` 的预览页需要站点自己的登录态；未登录时会被 302 到
+   * `/sso/auth/goToLoginPage`（或客户端跳 `h5.html#login`），应用内窗口就是一片空白 ——
+   * 用户只看到一个白窗，不知道该干什么。
+   *
+   * 两级处置（都不打断正常加载）：
+   *  ① **静默自愈**：复用隐藏窗口 bootstrap（让站点 SPA 自己完成 SSO 换票）→ 成功就自动重载原页；
+   *  ② 仍失败 → **弹窗引导**：点「登录文件系统」走用户已验证可用的 H5 账号密码窗口，
+   *     登录成功后再自动重载原页。
+   */
+  const handleWjxtWindowLoginState = async (win: BrowserWindow, url: string): Promise<void> => {
+    // 打开的本就是登录页（技能侧主动拉起的 SSO / H5 登录窗）→ 别再弹引导，
+    // 否则会在登录窗上再叠一层「请去登录」，既多余又碍事。
+    if (/goToLoginPage|\/sso\/|h5\.html/i.test(url)) return
+    // 等客户端跳转 / SPA 渲染落定（服务端 302 在 loadURL 后即可见，客户端跳要等一拍）
+    await new Promise(r => setTimeout(r, 1500))
+    if (win.isDestroyed()) return
+    const landed = win.webContents.getURL() || ''
+    const onLoginPage = (() => {
+      try {
+        const u = new URL(landed)
+        if (u.hostname.toLowerCase() !== 'wj.streamax.com') return true // 已被跳出站点 → 基本可判定登录页
+        return /goToLoginPage|\/sso\/|h5\.html#?\/?login/i.test(landed)
+      } catch { return true }
+    })()
+    if (!onLoginPage) return
+    debugLog('[wjxt] preview window landed on login page -> silent heal: ' + landed)
+
+    const healed = await bootstrapWjxtSession(`${WJXT_ORIGIN}/index.html`).catch(() => false)
+    if (healed && (await wjxtProbeLoggedIn().catch(() => null)) === true) {
+      debugLog('[wjxt] silent heal ok -> reload preview window')
+      void win.loadURL(url).catch(() => { /* 站内跳转会 reject，忽略 */ })
+      return
+    }
+
+    // 仍失败：给一句人话 + 一个可点的下一步（不再让用户对着白屏猜）
+    const r = await dialog.showMessageBox(win, {
+      type: 'warning',
+      buttons: ['登录文件系统', '稍后再说'],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true,
+      title: '文件系统登录态已失效',
+      message: '这个预览页需要企业内容库的登录态，当前未登录，所以窗口是空白的。',
+      detail: '点「登录文件系统」会打开应用内登录窗口（输入账号密码）；登录成功后本页会自动重新加载。\n' +
+        '若登录后仍然空白，可先重启应用 —— 它会尝试用 OA 会话自动恢复文件系统登录态。'
+    }).catch(() => ({ response: 1 }))
+    if (r.response !== 0 || win.isDestroyed()) return
+    const ok = await wjxtH5Login().catch(() => false)
+    if (ok && !win.isDestroyed()) void win.loadURL(url).catch(() => { /* 同上 */ })
   }
 
   // 鸿翼文件系统技能在「分区里没有可用登录态」时会调用它弹出应用内登录窗口
