@@ -22,7 +22,7 @@
 
 ---
 
-## 一、发布一个新版本（以 1.0.47 为例）
+## 一、发布一个新版本（以 1.0.48 为例）
 
 ### 1. 同步代码并提交
 
@@ -47,17 +47,17 @@ git push origin master
 
 | 文件 | 字段 | 格式 | 示例 |
 |---|---|---|---|
-| `package.json` | `version` | SemVer **三段** | `"1.0.47"` |
-| `electron-builder.yml` | `buildVersion` | **四位**文件版本 | `1.0.47.0` |
+| `package.json` | `version` | SemVer **三段** | `"1.0.48"` |
+| `electron-builder.yml` | `buildVersion` | **四位**文件版本 | `1.0.48.0` |
 
 ```jsonc
 // package.json
-{ "version": "1.0.47" }
+{ "version": "1.0.48" }
 ```
 
 ```yaml
 # electron-builder.yml
-buildVersion: 1.0.47.0
+buildVersion: 1.0.48.0
 ```
 
 > **两处必须同步**。
@@ -72,14 +72,14 @@ buildVersion: 1.0.47.0
 在 `MC Tool Release Notes.md` 的表格末尾追加一行：
 
 ```markdown
-| 1.0.47 | 1.0.47.0 | 本次改动说明 |
+| 1.0.48 | 1.0.48.0 | 本次改动说明 |
 ```
 
 提交版本号与 notes：
 
 ```bash
 git add -A
-git commit -m "chore: bump to 1.0.47"
+git commit -m "chore: bump to 1.0.48"
 git push origin master
 ```
 
@@ -107,9 +107,9 @@ npm run pack:win   # = electron-vite build && electron-builder --win --config el
 ```text
 dist/
 ├─ latest.yml                            # 自动更新元数据（关键）
-├─ MC物料查询 Setup 1.0.47.exe            # NSIS 安装包
-├─ MC物料查询 Setup 1.0.47.exe.blockmap  # 增量更新块映射
-└─ MC物料查询 1.0.47.exe                  # 便携版
+├─ MC物料查询 Setup 1.0.48.exe            # NSIS 安装包
+├─ MC物料查询 Setup 1.0.48.exe.blockmap  # 增量更新块映射
+└─ MC物料查询 1.0.48.exe                  # 便携版
 ```
 
 > `dist/` 已被 `.gitignore` 忽略，**不要 commit**。
@@ -129,6 +129,9 @@ dist/
 > 9. MCP（1.0.46）：Skills 面板 →「🔌 MCP 服务」→ 点「填入示例」导入 tech-agent 服务（或手工登记 `node src/index.js`，工作目录指向技能 runtime 目录）→「准备依赖」→「测试连接」应列出 `chat_tech_agent` / `status_tech_agent` / `mcp_auth_tech_agent` / `reset_tech_agent` 四个工具；勾选对应技能后模型可调用（未登录会走 `mcp_auth` 拉起 Chrome 扫码），取消勾选即收回；应用退出后任务管理器中无残留 node 子进程。
 > 10. **Word 生成 / 翻译（1.0.46，必须在安装版里测）**：让 AI 生成一个 `.docx`（或直接 `file_write` 写 `.docx`，内容给 Markdown），确认产出是**真文档**：文件头应为 `PK`、Word/WPS 能直接打开、表格与标题样式都在；再让 AI「把一份中文 docx 翻成土耳其语（保持原格式）」验证 `translate_docx`。
 >     **为什么单列一条**：技能依赖随包分发，而 `electron-builder.yml` 的 `filter` 曾把 `docx` 排除 —— **开发目录正常、安装版报「生成 docx 需要 docx 依赖，但未安装」**（1.0.46 踩过）。遇到该报错先查 `resources/skills/file-office-local/node_modules/` 与 `electron-builder.yml` 的 filter；单机应急只需把仓库里的 `docx` 目录补进去（其余运行时依赖 xml / xml-js / jszip / nanoid / hash.js 都在）。
+> 11. **新增内置技能必须同时改打包配置（1.0.48 踩过）**：内置技能不在 `out/**` 编译产物里，靠 `electron-builder.yml` 的 `extraResources` 逐条拷进安装包。**只把技能放进 `resources/skills/` 是不够的** —— 开发目录能勾选、安装版里则完全看不到。每次新增内置技能后：① 在 `extraResources` 补一条 `from: resources/skills/<技能目录> / to: skills/<技能目录>`；② 在**安装版**里打开 Skills 面板确认新技能出现且能勾选、能正常作答（1.0.48 的 `ceiba2-api-qa` 就是这样漏配的）。
+> 12. **料号切换标注（1.0.48）**：勾选「MC 查询」→ 查 `5154021100047`，返回里应带 `pn_switch`（`role:old`、新料号 `5154021100364`、截止日 2026-10-31），气泡/表格下方应能看到提示；查 `5154021100364` 则应提示「替代 5154021100047」。若没有，检查安装版 `resources/skills/mc-material-query-local/data/pn_switchover.json` 是否存在。
+> 13. **预览窗白屏引导（1.0.48）**：在文件系统**未登录**（或等它过期）时让 AI 搜一个文件并点**预览** —— 应先在应用内窗口尝试静默自愈，仍失败则弹出「文件系统登录态已失效」对话框（含「登录文件系统」按钮），点它走 H5 账号密码窗，登录成功后原预览页**自动重新加载**；不应再停在一片空白的 Loading 页。
 
 ### 6. 发布到 GitHub Release
 
@@ -156,7 +159,7 @@ npx electron-builder --win --config electron-builder.yml --publish=always
 该命令会：
 
 1. 重新构建并打包到 `dist/`；
-2. 自动创建 git tag `v1.0.47`；
+2. 自动创建 git tag `v1.0.48`；
 3. 创建 GitHub Release；
 4. 上传 `latest.yml`、安装包、`.blockmap`。
 
@@ -172,7 +175,7 @@ npx electron-builder --win --config electron-builder.yml --publish=always
 $token = '你的token'
 $h = @{Authorization="Bearer $token"; "Content-Type"="application/json"}
 $rel = Invoke-RestMethod -Uri 'https://api.github.com/repos/maozuxiao/mc-tool/releases' -Headers $h
-$v = $rel | Where-Object { $_.tag_name -eq 'v1.0.47' }
+$v = $rel | Where-Object { $_.tag_name -eq 'v1.0.48' }
 $body = @{draft=$false} | ConvertTo-Json
 Invoke-RestMethod -Method PATCH -Uri "https://api.github.com/repos/maozuxiao/mc-tool/releases/$($v.id)" -Headers $h -Body $body
 ```

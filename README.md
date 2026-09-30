@@ -4,7 +4,7 @@
 
 - 仓库：https://github.com/maozuxiao/mc-tool
 - 技术栈：Electron 33 + electron-vite + React 18 + TypeScript + Zustand，UI 组件库 [`animal-island-ui`](https://www.npmjs.com/package/animal-island-ui)；AI 面板里的操作类小图标用 [`naive-icons`](https://www.npmjs.com/package/naive-icons)（同为手绘 naive 风，按需引 `svg/*.svg?raw` 并改色跟随主题，见 `src/renderer/src/components/NaiveIcon.tsx`）
-- 当前版本：`1.0.47`（`package.json` 的 `version` 为准）
+- 当前版本：`1.0.48`（`package.json` 的 `version` 为准）
 
 ---
 
@@ -291,7 +291,7 @@ mc-tool/
 │        │  ├─ NaiveIcon.tsx        # naive-icons 小图标封装（按需引 SVG + 改色跟随主题）
 │        │  ├─ McpModal.tsx         # MCP 服务管理弹窗（1.0.46：登记/绑定/测试连接/依赖准备）
 │        │  └─ nookIcon.ts          # NOOK 图标
-│        └─ assets/nook.svg + icon-leaf.png   # NOOK 图标 / 选中 Tab 的小叶子
+│        └─ assets/icon-leaf.png              # 选中 Tab 的小叶子（NOOK 图标内联在 nookIcon.ts）
 ├─ shared/                      # 主进程 / 渲染进程共享（纯逻辑，无副作用）
 │  ├─ constants.ts              # OA 地址、组织号、生命周期→样式映射
 │  ├─ types.ts                  # 数据类型 + IPC 通道名常量
@@ -304,10 +304,13 @@ mc-tool/
 │  │  ├─ SKILL.md               # 工具说明，作为 system prompt 的一部分
 │  │  ├─ scripts/mc_query.js    # 查询脚本（search/item/batch/bom/spec）
 │  │  ├─ scripts/ensure_node.ps1# 准备 Node 22 运行时
-│  │  └─ data/                  # 摄像机机型表、IMX307 替代料映射
+│  │  └─ data/                  # 摄像机机型表、IMX307 替代料映射、料号切换通知
 │  ├─ wjxt-file-download/       # 内置 Skill：鸿翼文件系统查询下载（edoc2）
 │  │  ├─ SKILL.md               # 工具说明（含「只在服务器检索」硬约束）
 │  │  └─ references/            # API 契约与实测排查笔记
+│  ├─ ceiba2-api-qa/            # 内置 Skill：Ceiba2 / WCMS5 API 报错排查（纯文档技能）
+│  │  ├─ SKILL.md               # 排查流程 + 错误码速查 + 自检阶梯 + 输出格式
+│  │  └─ references/            # 错误码逐条处置、客诉剧本、44 个接口索引与官方原文
 │  └─ file-office-local/        # 内置 Skill：本地 Office / PDF 读写（Build 模式，file_office）
 ├─ build/                       # 打包资源（图标：icon.png / icon-512.png / icon.svg）
 ├─ electron.vite.config.ts      # main / preload / renderer 三端构建配置
@@ -388,9 +391,9 @@ npm run pack:all   # 全平台
 ```
 dist/
 ├─ latest.yml                            # 自动更新元数据
-├─ MC物料查询 Setup 1.0.47.exe            # NSIS 安装包
-├─ MC物料查询 Setup 1.0.47.exe.blockmap  # 增量更新块映射
-└─ MC物料查询 1.0.47.exe                  # 便携版
+├─ MC物料查询 Setup 1.0.48.exe            # NSIS 安装包
+├─ MC物料查询 Setup 1.0.48.exe.blockmap  # 增量更新块映射
+└─ MC物料查询 1.0.48.exe                  # 便携版
 ```
 
 > macOS 交叉编译在 Windows 上不可靠，DMG 请在 macOS 上打包。
