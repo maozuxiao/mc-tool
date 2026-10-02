@@ -391,8 +391,21 @@ function createWindow() {
     }
   })
 
-  // 加载本地查询面板（默认页面）
-  mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+  // 加载查询面板（默认页面）。
+  //
+  // ⚠️ 这里**必须**优先用 electron-vite 在 dev 下注入的 `ELECTRON_RENDERER_URL`（指向 vite dev server）：
+  // 早先这行是**无条件** `loadFile('../renderer/index.html')`，于是 `npm run dev` 实际加载的是
+  // `out/renderer/index.html` —— 那是**上一次 `npm run build` 的旧产物**（既看不到改动、也没有热更新），
+  // 一旦 `out/` 不存在（例如清理构建产物后）就直接 **ERR_FILE_NOT_FOUND → 白屏**（2026-10-02 实测）。
+  // 打包/`preview` 下没有该环境变量，自然回落到文件加载。
+  const devRendererUrl = process.env['ELECTRON_RENDERER_URL']
+  if (devRendererUrl) {
+    debugLog('[window] load renderer from dev server: ' + devRendererUrl)
+    void mainWindow.loadURL(devRendererUrl).catch((e: any) => debugLog('[window] dev load failed: ' + e?.message))
+  } else {
+    debugLog('[window] load renderer from file: out/renderer/index.html')
+    void mainWindow.loadFile(join(__dirname, '../renderer/index.html')).catch((e: any) => debugLog('[window] loadFile failed: ' + e?.message))
+  }
 
   // 1.0.35 修复：最小化按钮 `_` 走系统默认行为——缩到任务栏并在任务栏保留图标，
   // 不再 hide()。此前 hide() 会把窗口从任务栏移除，表现为「最小化后任务栏图标消失、
