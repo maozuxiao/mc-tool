@@ -108,8 +108,9 @@ const mcApi = {
   // 与「预览」分开：预览用 openOaWindow 在应用内窗口看站点预览页，不触发下载。
   wjxtDownload: (payload: { fileGuid: string; name?: string; id?: string }): Promise<any> =>
     ipcRenderer.invoke('mc-wjxt-download', payload),
-  // 打开「登录文件系统（账号密码）」窗口（H5 登录页）：会话缺失/失效时的备份登录方式，
-  // 成功后窗口自动关闭并跳回文件系统首页；用户可在窗口内选择记住账号密码以便自动续登。
+  // 打开「登录文件系统（账号密码）」窗口（H5 登录页）：会话缺失/失效时的登录方式之一，
+  // 成功后窗口自动关闭。注意：登录方式由用户在 AI 回复里选择（账号密码 / 扫码），
+  // 本应用**不保存**账号密码（那是浏览器行为），也不再有「记住账号密码」提示。
   wjxtLogin: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('mc-wjxt-login'),
   // 「一键自检」：体检「OA 物料查询 / IAM 会话 / 鸿翼 edoc2」三条线，返回一行结论 + 明细。
   // 结论与明细由主进程按**界面语言**生成，所以这里把当前语言带过去（同 showMessage 的做法）。

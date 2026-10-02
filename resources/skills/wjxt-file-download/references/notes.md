@@ -191,8 +191,18 @@ POST https://wj.streamax.com:9443/WebCore
    它的 `$.ajaxSetup` 还专门把 404 静默掉），原技能包的处置「重新导航一次首页」本质就是补这两步。
    MC Tool 现在的 `wjxtWarmUp` 就是「确保隐藏窗口已把首页跑完」，遇到 404 时 **强制重新导航一次**
    再重试一次；持续 404 才说明服务端/网关真的不可用。
-6. `WJXT_NO_SESSION` / `NEED_RELOGIN` → 顺序见 SKILL.md「登录态」一节。**备份通道是站点自带的 H5 登录页**
-   （`h5.html#login/index`，账号密码），不再是 SSO 页；**不要把地址交给系统浏览器**（不共享登录态）。
+6. `WJXT_NO_SESSION` / `NEED_RELOGIN` → 顺序见 SKILL.md「登录态」一节。**登录入口有两个**，由用户自己选：
+   ① 站点自带的 H5 登录页（`h5.html#login/index`，账号密码，不经 IAM）；
+   ② IAM AC 登录页（`iam.streamax.com/ac/#/index?lck=…&entityId=edoc2`，扫码或密码）。
+   **不要把地址交给系统浏览器**（不共享登录态）；`lck` 是一次性的，由应用现取，不要写死。
+6.0 **（2026-10-02 实测）扫码入口的 `lck` 只能在浏览器上下文里拿到**：主进程裸 fetch 跟随
+   `/sso/auth/goToLoginPage` 只停在 `iam/idp/authCenter/authenticate?…client_id=edoc2`（无 `lck`）；
+   而用共享分区的**隐藏窗口**加载同一地址约 2 秒后，会精准落在
+   `iam.streamax.com/ac/#/index?lck=context_oauth2_…&entityId=edoc2&theme=…` —— 即用户扫码那个页面。
+   所以「现取扫码地址」的实现必须是隐藏窗口（见 `index.ts` 的 `hiddenNavUrl` / `wjxtSkill.wjxtQrLoginUrl`）。
+6.0.1 **「记住账号密码 / 自动续登」已移除（1.0.48）**：站点没有让第三方保存口令的接口（那是浏览器行为），
+   原实现是在 H5 页注入脚本抓用户输入的账号密码再加密落盘 —— 越权且脆弱（页面结构一变就抓不到，
+   于是用户根本看不到保存提示）。现在：不保存、不读取、不自动填表；遗留的 `wjxt-login.json` 启动时删除。
 6.1 **隐藏窗口被跳到站外（未登录）时，页内相对 `fetch('WebCore')` 必然 `Failed to fetch`** ——
    这是**跨域**（页面已经在 `iam.streamax.com` 上），不是「页面上下文坏了」。
    踩过的坑：把这种失败当成上下文损坏去 `destroy` 窗口 → 「重建 → 又被跳转 → 再失败」的**两秒一轮抖动**，

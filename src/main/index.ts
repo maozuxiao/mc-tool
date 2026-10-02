@@ -9,7 +9,7 @@ import { OA_LOGIN_URL, OA_ORIGIN } from '@shared/constants'
 import { IPC } from '@shared/types'
 import { initAutoUpdater, isUpdateDownloaded, startUpdateDownload } from './updater'
 import { registerAIIPC } from './ai/aiIpc'
-import { setWjxtLoginOpener, setWjxtBootstrap, setWjxtLoginCloser, wjxtResolveOriginUrl, wjxtH5Login, wjxtDiag, wjxtProbeLoggedIn, clearWjxtCreds, WJXT_ORIGIN } from './ai/wjxtSkill'
+import { setWjxtLoginOpener, setWjxtBootstrap, setWjxtLoginCloser, setWjxtHiddenNav, wjxtResolveOriginUrl, wjxtH5Login, wjxtQrLoginUrl, startLoginWatch, wjxtDiag, wjxtProbeLoggedIn, WJXT_H5_LOGIN_URL, WJXT_ORIGIN } from './ai/wjxtSkill'
 import { translate, type Lang } from '@shared/i18n'
 import { listSkills } from './ai/skillRegistry'
 import { listStatuses as listMcpStatuses } from './ai/mcpClient'
@@ -576,6 +576,24 @@ function createWindow() {
   //
   // 因此：内网（*.streamax.com）一律走应用内窗口；外部站点才交给系统浏览器。
   const internalUrlWindows = new Map<string, BrowserWindow>()
+  /**
+   * 是不是「鸿翼登录入口」（用于登录态监听与自动关窗）：
+   * - 站点自带 H5 登录页：`…/h5.html#login/index`（账号密码，不经 IAM）
+   * - 站点 SSO 入口：`…/sso/auth/goToLoginPage`（会跳到 IAM）
+   * - IAM AC 登录页：`iam.streamax.com/ac/#/index?lck=…&entityId=edoc2`（扫码/密码）
+   */
+  function isWjxtLoginUrl(u: string): boolean {
+    try {
+      const url = new URL(String(u || ''))
+      const host = url.hostname.toLowerCase()
+      // IAM 侧必须认准 entityId/client_id 是 **edoc2**（鸿翼），否则会把 OA 的登录页也算进来 ——
+      // 那样 OA 登录窗口会在 edoc2 会话建立时被误关。
+      if (host === 'iam.streamax.com' && /entityId=edoc2|client_id=edoc2/i.test(String(u))) return true
+      if (host === 'wj.streamax.com' && /h5\.html#login|sso\/auth\/goToLoginPage/i.test(String(u))) return true
+    } catch { /* 地址不合法就不算 */ }
+    return false
+  }
+
   const openInternalUrl = async (url: string): Promise<boolean> => {
     let host = ''
     try { host = new URL(url).hostname.toLowerCase() } catch { return false }
@@ -623,6 +641,9 @@ function createWindow() {
     // 而那个登录页在应用内窗口里渲染成空白（用户反馈「点预览打开白屏窗口」）。
     // 只有 wjxt 域做这件事，其余内网窗口（OA 工作台等）不受影响。
     if (host.toLowerCase() === 'wj.streamax.com') void handleWjxtWindowLoginState(win, url)
+    // 用户点 AI 回复里的登录链接（H5 页 / IAM 扫码页）开的窗口：开始监听登录态，
+    // 会话一建立就自动关掉这个窗口（不用用户自己找关闭按钮）
+    if (isWjxtLoginUrl(url)) startLoginWatch()
     return true
   }
 
@@ -736,8 +757,68 @@ function createWindow() {
     return ok
   }
   setWjxtBootstrap((url, settleMs) => bootstrapWjxtSession(url, settleMs))
+
+  // ── 鸿翼「隐藏窗口取最终 URL」（用于现取一次性 lck 拼扫码登录页）──────────
+  // 为什么不是主进程 fetch：实测 `lck`（context_oauth2_…）是在**站点 SSO 跳转链的浏览器
+  // 上下文里**生成的 —— 主进程裸 fetch 跟着 302 只停在 `idp/authCenter/authenticate`，
+  // 拿不到带 `lck` 的 `/ac/#/index`；而隐藏窗口加载约 2 秒后就精准落在该地址（2026-10-02 实测）。
+  const hiddenNavUrl = async (url: string, settleMs = 3500): Promise<string | null> => {
+    const sess = session.fromPartition(PARTITION)
+    ensureOaCookieInjector(sess)
+    let win: BrowserWindow | null = null
+    try {
+      win = new BrowserWindow({
+        width: 1100,
+        height: 800,
+        show: false,
+        autoHideMenuBar: true,
+        backgroundColor: '#f7f3df',
+        webPreferences: {
+          partition: PARTITION,
+          nodeIntegration: false,
+          contextIsolation: true,
+          backgroundThrottling: false
+        }
+      })
+      registerOaWindow(win)
+      const settled = new Promise<void>((resolve) => {
+        let done = false
+        const finish = () => { if (!done) { done = true; resolve() } }
+        win!.webContents.once('did-finish-load', () => setTimeout(finish, settleMs))
+        win!.webContents.once('did-fail-load', finish)
+        setTimeout(finish, settleMs + 8000) // 兜底：别把调用方挂死
+      })
+      try {
+        await win.loadURL(url)
+      } catch (e: any) {
+        debugLog('[wjxtHiddenNav] loadURL rejected: ' + e?.message)
+      }
+      await settled
+      const finalUrl = win.isDestroyed() ? '' : win.webContents.getURL()
+      debugLog(`[wjxtHiddenNav] finalUrl=${(finalUrl || '(empty)').slice(0, 140)}`)
+      return finalUrl || null
+    } catch (e: any) {
+      debugLog('[wjxtHiddenNav] failed: ' + String(e?.message || e))
+      return null
+    } finally {
+      try { if (win && !win.isDestroyed()) win.destroy() } catch { /* ignore */ }
+    }
+  }
+  setWjxtHiddenNav((url, settleMs) => hiddenNavUrl(url, settleMs))
+
   // 登录成功后由技能侧调用它自动关掉登录窗口（用户扫完码不用自己找关闭按钮）
+  // target 为空串 = 关掉**所有**已登记的鸿翼登录窗口（用户点 H5 页或 IAM 扫码页都有可能）
   setWjxtLoginCloser((target) => {
+    if (!target) {
+      let closed = 0
+      for (const [u, w] of [...internalUrlWindows.entries()]) {
+        if (!isWjxtLoginUrl(u)) continue
+        try { if (w && !w.isDestroyed()) { w.close(); closed++ } } catch { /* ignore */ }
+        internalUrlWindows.delete(u)
+      }
+      debugLog(`[wjxt] login windows auto-closed (session established): ${closed} 个`)
+      return
+    }
     const win = internalUrlWindows.get(target)
     if (win && !win.isDestroyed()) {
       try { win.close() } catch { /* ignore */ }
@@ -1172,6 +1253,15 @@ app.whenReady().then(() => {
   if (!gotSingleInstanceLock) return
   app.setAppUserModelId(APP_ID)
   app.setName('MC物料查询')
+  // 1.0.48：清理历史遗留的「文件系统账号密码」文件 —— 该机制（记住账号密码/自动续登）已整体移除，
+  // 站点本身没有这个接口（那是浏览器行为），留在磁盘上的口令文件不再需要，启动时一律删除。
+  try {
+    const staleCreds = join(app.getPath('userData'), 'wjxt-login.json')
+    if (existsSync(staleCreds)) {
+      unlinkSync(staleCreds)
+      debugLog('[startup] removed legacy wjxt-login.json (credential saving removed in 1.0.48)')
+    }
+  } catch { /* ignore */ }
   // 先读偏好再建窗口：--hidden 静默启动与托盘开关都要用
   loadAppPrefs()
   createWindow()
@@ -2390,17 +2480,28 @@ ipcMain.handle('mc-wjxt-download', async (_e, payload: { fileGuid?: string; name
     debugLog('[wjxt-download] error: ' + msg)
     sendDownloadEvent(id, { error: msg })
     if (msg === 'NEED_RELOGIN' || msg === 'WJXT_NO_SESSION') {
-      // 走链接下载时不会经过技能的 reloginResult，这里补一次登录入口（H5 账号密码窗口）
-      void wjxtH5Login({})
-      return { ok: false, error: 'NEED_RELOGIN', needLogin: true }
+      // 走链接下载时不经过技能的 reloginResult，这里补一次「登录入口」——
+      // 与技能保持一致：**不再自作主张弹窗**，只把两个入口交给上层（渲染层会提示用户选择），
+      // 同时开启登录态监听，用户登完窗口自动关闭。
+      const qr = await wjxtQrLoginUrl().catch(() => ({ url: '', fresh: false }))
+      startLoginWatch()
+      return {
+        ok: false,
+        error: 'NEED_RELOGIN',
+        needLogin: true,
+        h5LoginUrl: WJXT_H5_LOGIN_URL,
+        qrLoginUrl: qr.url || WJXT_H5_LOGIN_URL,
+        message: '鸿翼文件系统登录态已失效，请在「账号密码登录」或「扫码登录」中选一种登录后重试。'
+      }
     }
     return { ok: false, error: msg }
   }
 })
 
-// 手动打开「文件系统登录」窗口（H5 账号密码），供界面在需要时调用
+// 手动打开「文件系统登录」窗口（H5 账号密码）—— 由界面/对话框里用户**明确点过**「登录文件系统」才调用，
+// 所以这里直接开窗是符合预期的（用户已经做出选择）；登录成功后窗口会自动关闭。
 ipcMain.handle('mc-wjxt-login', async () => {
-  const ok = await wjxtH5Login({})
+  const ok = await wjxtH5Login()
   return { ok }
 })
 
@@ -2459,7 +2560,7 @@ ipcMain.handle('mc-wjxt-diagnose', async (_e, langRaw?: string) => {
     }))
     diagLog.push(`edoc2=${d.loggedIn === null ? 'unknown' : d.loggedIn ? 'in' : 'out'}`)
     diagLog.push(`ctxWin=${d.ctxWinAlive ? (d.ctxOnSite ? 'onsite' : 'offsite') : 'none'}`)
-    diagLog.push(`savedCreds=${d.hasSavedCreds ? (d.savedUser || 'yes') : 'no'}`)
+    // 说明：此前这里还会记一行 savedCreds（记住账号密码的账号）；该机制已移除（1.0.48）
     if (d.h5WindowOpen) diagLog.push('h5Win=open')
   } catch (e: any) {
     lines.push(tr('aiDiagEdoc2Line', { s: tr('aiDiagStUnknown') }))
@@ -2519,8 +2620,8 @@ ipcMain.handle(IPC.COOKIE_CLEAR, async () => {
   debugLog('[COOKIE_CLEAR] cleared OA/streamax session cookies, kept IAM session')
   // 同时删除 OA 会话文件备份，避免退出登录后重开又自动恢复登录态
   try { if (existsSync(SESSION_BACKUP_PATH)) unlinkSync(SESSION_BACKUP_PATH) } catch {}
-  // 文件系统（H5 账号密码）保存的凭据一并清掉：用户点「退出登录」就不该再自动续登
-  clearWjxtCreds()
+  // 说明：此前这里还会清掉文件系统（H5）保存的账号密码；该机制已整体移除（见 wjxtSkill.ts 顶部注释），
+  // 因此不再存在需要清理的口令文件。
   checkLoginAndNotify()
 })
 ipcMain.handle(IPC.INSTALL_UPDATE, () => {

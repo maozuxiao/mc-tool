@@ -1,5 +1,6 @@
-import { app, BrowserWindow, dialog, safeStorage, session } from 'electron'
-import { appendFileSync, existsSync, readFileSync, unlinkSync, writeFileSync } from 'fs'
+// dialog / safeStorage 曾用于「记住账号密码」弹窗与口令加密落盘 —— 该机制已于 1.0.48 移除
+import { app, BrowserWindow, session } from 'electron'
+import { appendFileSync } from 'fs'
 import { join } from 'path'
 import { PARTITION, downloadToDir, type DownloadToDirResult } from './fileDownload'
 import type { AIExtraRoot } from '@shared/ai-types'
@@ -85,10 +86,47 @@ export function setWjxtBootstrap(fn: ((url: string, settleMs?: number) => Promis
   bootstrapHiddenWindow = fn
 }
 
-/** 关掉应用内登录窗口（登录成功后自动关）—— 同样由 index.ts 注入 */
+/** 关掉应用内登录窗口（登录成功后自动关）—— 同样由 index.ts 注入。
+ *  传空字符串 = 关掉**所有**已登记的登录窗口（用户点不同链接可能开的是不同入口） */
 let closeLoginWindow: ((url: string) => void) | null = null
 export function setWjxtLoginCloser(fn: ((url: string) => void) | null): void {
   closeLoginWindow = fn
+}
+
+/**
+ * 「隐藏窗口取最终 URL」能力由 index.ts 注入。
+ * 用途：现取一次性 `lck` 拼扫码登录页（见 wjxtQrLoginUrl）—— 该值由站点的 SSO 跳转链
+ * 在**浏览器上下文里**生成，主进程裸 fetch 拿不到（实测只有隐藏窗口加载才落到带 lck 的地址）。
+ */
+let hiddenNav: ((url: string, settleMs?: number) => Promise<string | null>) | null = null
+export function setWjxtHiddenNav(fn: ((url: string, settleMs?: number) => Promise<string | null>) | null): void {
+  hiddenNav = fn
+}
+
+/**
+ * 扫码登录页（IAM AC 登录页，`entityId=edoc2`）。
+ *
+ * 为什么必须**现取**：URL 里的 `lck`（`context_oauth2_…`）是一次性 OAuth2 上下文，
+ * 写死一个隔天就失效，且不同入口的 entityId 不同（OA 是 `oa`、鸿翼是 `edoc2`）。
+ * 实测（2026-10-02，隐藏窗口 + 共享分区）：加载站点 SSO 入口
+ * `/sso/auth/goToLoginPage` 约 2 秒后，窗口落在
+ *   `https://iam.streamax.com/ac/#/index?lck=context_oauth2_…&entityId=edoc2&theme=…`
+ * 即用户扫码（或输密码）的那个页面 —— 原样给用户点即可。
+ * 取不到（隐藏窗口不可用 / 网络抖动）时退回 SSO 入口：点开同样会跳到该页面，只是多一跳。
+ */
+export async function wjxtQrLoginUrl(): Promise<{ url: string; fresh: boolean }> {
+  if (!hiddenNav) return { url: WJXT_SSO_LOGIN_URL, fresh: false }
+  try {
+    const finalUrl = await hiddenNav(WJXT_SSO_LOGIN_URL, 3500)
+    if (finalUrl && /\/ac\/#\/index\?lck=/i.test(finalUrl)) {
+      wjxtLog(`[qr] fresh lck url ok (${finalUrl.split('?')[0]}…)`)
+      return { url: finalUrl, fresh: true }
+    }
+    wjxtLog(`[qr] hidden nav final=${String(finalUrl).slice(0, 120)} -> fallback to SSO entry`)
+  } catch (e: any) {
+    wjxtLog('[qr] hidden nav failed: ' + String(e?.message || e))
+  }
+  return { url: WJXT_SSO_LOGIN_URL, fresh: false }
 }
 
 // ── H5 账号密码登录（备份登录方式）────────────────────────────────────────────
@@ -106,76 +144,21 @@ export function setWjxtLoginCloser(fn: ((url: string) => void) | null): void {
  */
 export const WJXT_H5_LOGIN_URL = `${WJXT_ORIGIN}/h5.html#login/index?returnUrl=%252Findex.html`
 
-const credsFile = () => join(app.getPath('userData'), 'wjxt-login.json')
+// ── 关于「记住账号密码」：本应用**不再保存也不再使用**文件系统账号密码 ────────────
+// 原因：站点（edoc2）本身没有「让第三方记住密码」的接口，所谓记住/自动续登是**浏览器自己的行为**；
+// 应用此前是在 H5 登录页里注入脚本抓取用户输入的账号密码再加密落盘（userData/wjxt-login.json），
+// 这既越权（用户以为只是登录一次）也脆弱（页面结构一变就抓不到，弹窗也就不再出现 —— 用户反馈的正是
+// 「登录时没有保存账号密码的窗口」）。1.0.48 起整套移除：不保存、不读取、不自动填表续登。
+// 已存在的 wjxt-login.json 由主进程启动时清理（见 src/main/index.ts）。
 
-/** 读取已保存的文件系统账号（密码用系统 safeStorage 加密保存；读不到/解不开返回 null） */
-export function readWjxtCreds(): { username: string; password: string } | null {
-  try {
-    const raw = JSON.parse(readFileSync(credsFile(), 'utf8'))
-    const username = String(raw?.username || '')
-    const enc = String(raw?.password || '')
-    if (!username || !enc) return null
-    if (raw?.plain) return { username, password: enc }
-    if (!safeStorage.isEncryptionAvailable()) return null
-    return { username, password: safeStorage.decryptString(Buffer.from(enc, 'base64')) }
-  } catch {
-    return null
-  }
-}
-
-/**
- * 保存账号密码。密码优先用系统加密（Windows 下走 DPAPI）；系统不支持加密时**带 `plain:` 语义的
- * `plain` 标记明文落盘** —— 与 AI 的 API Key 同一套策略（宁可可用，但要能一眼看出是明文）。
- * 只在用户明确点「记住账号密码」时调用。
- */
-export function saveWjxtCreds(username: string, password: string): void {
-  try {
-    const u = String(username || '').trim()
-    if (!u || !password) return
-    const payload: Record<string, unknown> = safeStorage.isEncryptionAvailable()
-      ? { username: u, password: safeStorage.encryptString(password).toString('base64') }
-      : { username: u, password, plain: true }
-    writeFileSync(credsFile(), JSON.stringify(payload), { encoding: 'utf8', mode: 0o600 })
-    wjxtLog(`[h5login] credentials saved for user=${u} encrypted=${!payload.plain}`)
-  } catch (e: any) {
-    wjxtLog('[h5login] save credentials failed: ' + String(e?.message || e))
-  }
-}
-
-/** 丢掉保存的账号（改过密码 / 用户选择忘记时用） */
-export function clearWjxtCreds(): void {
-  try { if (existsSync(credsFile())) unlinkSync(credsFile()) } catch { /* ignore */ }
-}
-
-/** 页面里要执行的脚本：装「提交时抓账号密码」钩子；给了凭据就自动填表并提交 */
-function h5FormScript(creds?: { username: string; password: string }): string {
-  const fill = creds
-    ? `(() => {
-    const u = document.querySelector('input.mui-input-clear');
-    const p = document.querySelector('input.mui-input-password');
-    if (!u || !p) return false;
-    u.value = ${JSON.stringify(creds.username)}; u.dispatchEvent(new Event('input', { bubbles: true }));
-    p.value = ${JSON.stringify(creds.password)}; p.dispatchEvent(new Event('input', { bubbles: true }));
-    const btn = document.querySelector('div.login-btn') || document.querySelector('button.mui-btn-primary');
-    if (!btn) return false;
-    setTimeout(() => btn.click(), 150);
-    return true;
-  })()`
-    : 'false'
+/** 页面里要执行的脚本：只探测 H5 登录表单是否渲染出来（不再抓任何输入值） */
+function h5FormReadyScript(): string {
   return `(() => {
   try {
-    if (!window.__mcCredHook) {
-      window.__mcCredHook = true;
-      // 用户点「登录」那一刻把两个输入框的值留在页面里；主进程读完只在用户确认后落盘
-      document.addEventListener('click', (e) => {
-        const t = e.target && e.target.closest ? e.target.closest('div.login-btn, button.mui-btn-primary') : null;
-        if (!t) return;
-        const u = document.querySelector('input.mui-input-clear');
-        const p = document.querySelector('input.mui-input-password');
-        if (u && p) { try { window.__mcCred = JSON.stringify({ u: u.value, p: p.value }); } catch (er) { } }
-      }, true);
-    }
-    return JSON.stringify({ filled: !!(${fill}) });
+    const u = document.querySelector('input.mui-input-clear');
+    const p = document.querySelector('input.mui-input-password');
+    const btn = document.querySelector('div.login-btn') || document.querySelector('button.mui-btn-primary');
+    return JSON.stringify({ ready: !!(u && p), hasButton: !!btn, title: String(document.title || '').slice(0, 40) });
   } catch (e) { return JSON.stringify({ error: String((e && e.message) || e) }); }
 })()`
 }
@@ -183,51 +166,25 @@ function h5FormScript(creds?: { username: string; password: string }): string {
 let h5Win: BrowserWindow | null = null
 let h5Pending: Promise<boolean> | null = null
 
-/** 登录成功后的收尾：可选保存凭据 → 关窗 → 让隐藏页面上下文用新会话重新绑定 */
-async function afterH5LoginSuccess(win: BrowserWindow, silent: boolean): Promise<void> {
+/** 登录成功后的收尾：关窗 → 让隐藏页面上下文用新会话重新绑定 */
+async function afterH5LoginSuccess(win: BrowserWindow): Promise<void> {
   wjxtLog('[h5login] logged in')
-  if (!silent) {
-    let captured: { u?: string; p?: string } | null = null
-    try {
-      const raw = await win.webContents.executeJavaScript('window.__mcCred || ""')
-      if (raw) captured = JSON.parse(String(raw))
-    } catch { /* 拿不到就算了（用户可能用了扫码/其它方式） */ }
-    if (captured?.u && captured?.p && !readWjxtCreds()) {
-      try {
-        const r = await dialog.showMessageBox({
-          type: 'question',
-          buttons: ['记住账号密码', '不用了'],
-          defaultId: 0,
-          cancelId: 1,
-          noLink: true,
-          title: '保存文件系统登录信息',
-          message: `要记住文件系统的账号「${captured.u}」吗？`,
-          detail: '记住后，下次会话过期会自动用该账号重新登录。密码用系统加密保存在本机（userData/wjxt-login.json），不会上传。'
-        })
-        if (r.response === 0) saveWjxtCreds(captured.u, captured.p)
-      } catch { /* 弹窗失败不影响登录 */ }
-    }
-  }
   try { if (!win.isDestroyed()) win.destroy() } catch { /* ignore */ }
   warmedUp = false
   await reloadCtxWin()
 }
 
 /**
- * 打开 H5 登录窗口并等登录成功。
- * - 传了 `creds`：窗口**不显示**，自动填表提交（用于「记住过账号密码」的静默续登）
- * - 不传：窗口显示出来让用户自己输入（备份手工登录）
+ * 打开 H5 登录窗口并等登录成功（**总是可见**：由用户在窗口里自己输账号密码）。
  * 返回 true = edoc2 会话已建立。全程只创建一次窗口（重复调用复用同一个 Promise）。
  */
-export function wjxtH5Login(opts: { creds?: { username: string; password: string }; silent?: boolean } = {}): Promise<boolean> {
+export function wjxtH5Login(): Promise<boolean> {
   if (h5Pending) return h5Pending
   h5Pending = (async (): Promise<boolean> => {
-    const silent = !!opts.silent
     const win = (h5Win && !h5Win.isDestroyed())
       ? h5Win
       : new BrowserWindow({
-        show: !silent,
-        skipTaskbar: silent,
+        show: true,
         width: 460,
         height: 860,
         minWidth: 380,
@@ -247,9 +204,9 @@ export function wjxtH5Login(opts: { creds?: { username: string; password: string
       })
       await new Promise(r => setTimeout(r, 1500)) // 等 knockout 把表单渲染出来
       const res = await win.webContents
-        .executeJavaScript(h5FormScript(opts.creds), true)
+        .executeJavaScript(h5FormReadyScript(), true)
         .catch((e: any) => JSON.stringify({ error: String(e?.message || e) }))
-      wjxtLog(`[h5login] window open silent=${silent} form=${String(res).slice(0, 120)}`)
+      wjxtLog(`[h5login] window open form=${String(res).slice(0, 120)}`)
 
       // 轮询登录结果（用户手输也给足 3 分钟）
       const deadline = Date.now() + 3 * 60 * 1000
@@ -257,7 +214,7 @@ export function wjxtH5Login(opts: { creds?: { username: string; password: string
         await new Promise(r => setTimeout(r, 2000))
         if (win.isDestroyed()) break
         if (await probeLoggedIn() === true) {
-          await afterH5LoginSuccess(win, silent)
+          await afterH5LoginSuccess(win)
           return true
         }
       }
@@ -715,9 +672,8 @@ export interface WjxtDiagSnapshot {
   ctxOnSite: boolean | null
   /** H5 登录窗口是否开着 */
   h5WindowOpen: boolean
-  /** 已保存（可自动续登）的文件系统账号 */
-  savedUser?: string
-  hasSavedCreds: boolean
+  // 说明：此前这里有 `savedUser` / `hasSavedCreds`（已保存、可自动续登的账号）。
+  // 随「记住账号密码」机制一起移除（1.0.48）：应用不再保存任何文件系统口令。
 }
 
 /**
@@ -725,7 +681,6 @@ export interface WjxtDiagSnapshot {
  * 不是读缓存 —— 自检的意义就在于「现在到底能不能用」。
  */
 export async function wjxtDiag(): Promise<WjxtDiagSnapshot> {
-  const creds = readWjxtCreds()
   let loggedIn: boolean | null = null
   try {
     loggedIn = await probeLoggedIn()
@@ -742,9 +697,7 @@ export async function wjxtDiag(): Promise<WjxtDiagSnapshot> {
     loggedIn,
     ctxWinAlive,
     ctxOnSite,
-    h5WindowOpen: !!h5Win && !h5Win.isDestroyed(),
-    savedUser: creds?.username,
-    hasSavedCreds: !!creds
+    h5WindowOpen: !!h5Win && !h5Win.isDestroyed()
   }
 }
 
@@ -754,6 +707,11 @@ export async function wjxtDiag(): Promise<WjxtDiagSnapshot> {
  * 3 分钟没等到就停（不无限轮询）。
  */
 let loginWatchTimer: ReturnType<typeof setInterval> | null = null
+/** 开启「登录态监听」：会话一建立就自动关掉登录窗口（幂等，重复调用只起一个定时器） */
+export function startLoginWatch(): void {
+  watchLoginUntilDone()
+}
+
 function watchLoginUntilDone(): void {
   if (loginWatchTimer) return
   let tries = 0
@@ -764,7 +722,8 @@ function watchLoginUntilDone(): void {
       if (ok === true) {
         if (loginWatchTimer) { clearInterval(loginWatchTimer); loginWatchTimer = null }
         wjxtLog(`[loginWatch] session established after ${tries} polls -> auto-close login window`)
-        try { closeLoginWindow?.(WJXT_SSO_LOGIN_URL) } catch { /* ignore */ }
+        // 传空串 = 关掉所有已登记的登录窗口：用户可能点的是 H5 页，也可能是 IAM 扫码页
+        try { closeLoginWindow?.('') } catch { /* ignore */ }
         warmedUp = false
         // 隐藏窗口里的页面还是「登录前」那份上下文：重新导航一次让它用新会话重新绑定
         void reloadCtxWin()
@@ -866,16 +825,8 @@ async function wjxtWarmUp(force = false): Promise<void> {
       loggedIn = await recheck('recheck#2')
     }
 
-    // ③ H5 账号密码自动续登：用户之前点过「记住账号密码」时，这里静默登录，用户完全无感
-    if (loggedIn === false) {
-      const saved = readWjxtCreds()
-      if (saved) {
-        wjxtLog(`[warmup] try silent H5 login with saved credentials (user=${saved.username})`)
-        const ok = await wjxtH5Login({ creds: saved, silent: true })
-        wjxtLog(`[warmup] silent H5 login ok=${ok}`)
-        if (ok) loggedIn = true
-      }
-    }
+    // ③ 说明：此前这里还有一步「用保存的账号密码静默续登」，随「记住账号密码」机制一起移除
+    //    （站点没有这个接口，那是浏览器行为；应用不再保存口令，见文件顶部注释）。
 
     if (loggedIn === false) {
       wjxtLog('[warmup] still not logged in after silent attempts -> 需要用户手动登录（搜索会报 WJXT_NO_SESSION）')
@@ -1425,27 +1376,46 @@ function toUserError(e: any): string {
  * 需要登录时的统一处置：弹一次应用内登录窗口 + 给出可执行提示。
  * 窗口与工具请求共用 persist:mc-query 分区 —— 用户登录一次，工具侧立刻就有会话。
  */
-function reloginResult(code: 'NEED_RELOGIN' | 'WJXT_NO_SESSION'): any {
-  // 首选 **H5 账号密码登录窗口**（备份通道，见文件顶部 wjxtH5Login 的长注释）：
-  // 老的 SSO 页在 IAM 未登录时会不停在 wj/sso ↔ iam 之间跳转，应用内窗口看起来就是白屏（用户反馈过）；
-  // H5 页直接输账号密码即可建会话，成功后自动关窗并跳回桌面版首页。
-  // 这里不 await：本次工具调用要先给模型/用户一个可执行结论，窗口在后台等登录结果。
-  void wjxtH5Login({})
-  wjxtLog(`need login (${code}) -> open in-app H5 login window ${WJXT_H5_LOGIN_URL}`)
+/**
+ * 登录态缺失/失效时的结论：**把登录方式的选择权交回用户**（1.0.48 起）。
+ *
+ * 此前这里是「直接弹 H5 账号密码窗口」，问题在于：① 未经询问就占用屏幕；
+ * ② 用户更想扫码时也只能先关掉再想办法；③ 回复里把「记住账号密码」当成常规建议，
+ * 而站点本身并不提供这个能力（那是浏览器行为）。
+ *
+ * 现在：静默自愈（隐藏窗口跑首页）已在上游失败，于是返回**两个可点击的登录入口**让用户自己选：
+ *   - `h5LoginUrl`：站点自带 H5 页，账号密码，不经 IAM（白屏风险最低）
+ *   - `qrLoginUrl`：IAM AC 登录页（`entityId=edoc2`），扫码或密码；`lck` 一次性，已现取
+ * 点开任意一个都会由渲染层在**应用内窗口**打开（共享登录分区），登录成功后
+ * `startLoginWatch()` 会自动关掉该窗口，AI 随即重试原查询。
+ */
+async function reloginResult(code: 'NEED_RELOGIN' | 'WJXT_NO_SESSION'): Promise<any> {
+  const qr = await wjxtQrLoginUrl()
+  wjxtLog(`need login (${code}) -> ask user to choose (h5=${WJXT_H5_LOGIN_URL} qr fresh=${qr.fresh})`)
+  // 无论用户点哪个入口，都开始监听：会话一建立就自动关掉登录窗口
+  startLoginWatch()
   return {
     ok: false,
     error: code,
     needLogin: true,
-    loginUrl: WJXT_H5_LOGIN_URL,
-    message: code === 'WJXT_NO_SESSION'
-      ? '应用内还没有鸿翼文件系统（edoc2）的登录态。'
-        + '已为你打开【登录文件系统（账号密码）】窗口：在那个窗口里用**账号密码**登录一次即可 —— '
-        + '登录成功后窗口会自动关闭并跳回文件系统首页，届时让我重试同一个查询。'
-        + '若你愿意，登录时可以直接勾选窗口里的「记住账号密码」提示：之后会话过期会自动续登、不再打扰你。'
-        + '（不要把这个地址复制到系统浏览器：系统浏览器与应用不共享登录态。）'
-        + '若那个窗口是空白页，说明当前连站点本身都打不开，请先确认内网/VPN 是否正常。'
-      : '鸿翼文件系统的登录态已失效：已重新打开【登录文件系统（账号密码）】窗口，'
-        + '用账号密码登录一次后让我重试；如果你之前选过「记住账号密码」，会自动续登、通常无需操作。'
+    /** 账号密码登录（站点自带 H5 页，不经 IAM） */
+    h5LoginUrl: WJXT_H5_LOGIN_URL,
+    /** 扫码登录（IAM AC 页，entityId=edoc2；lck 一次性，已现取；取不到时是站点 SSO 入口） */
+    qrLoginUrl: qr.url,
+    /** 结构化列表，便于模型直接渲染成两个链接 */
+    loginOptions: [
+      { type: 'password', label: '账号密码登录', url: WJXT_H5_LOGIN_URL },
+      { type: 'qrcode', label: '扫码登录', url: qr.url }
+    ],
+    message: (code === 'WJXT_NO_SESSION'
+      ? '应用内还没有鸿翼文件系统（企业内容库）的登录态，已尝试无感恢复但未成功。'
+      : '鸿翼文件系统（企业内容库）的登录态已失效，已尝试无感恢复但未成功。')
+      + '请**选一种方式登录**（点下面任一链接即可，会在应用内窗口打开；登录成功后窗口会自动关闭）：\n'
+      + `1. 账号密码登录（站点自带 H5 页，不经 IAM）：${WJXT_H5_LOGIN_URL}\n`
+      + `2. 扫码登录（IAM，${qr.fresh ? '已为你生成一次性登录上下文' : '由站点跳转到登录页'}）：${qr.url}\n`
+      + '登录完成后回一句「已登录」，我就立刻重试刚才的查询。'
+      + '（不要用系统浏览器打开这些地址：系统浏览器与应用不共享登录态。）'
+      + '若窗口是空白页，通常是内网/VPN 不通或站点 SSO 正在跳转，可换另一种方式再试。'
   }
 }
 
@@ -1455,7 +1425,15 @@ export const WJXT_SEARCH_TOOL_DEFINITION = {
   type: 'function',
   function: {
     name: 'wjxt_search',
-    description: '在鸿翼文件系统（Streamax 企业内容库）里搜索文件，返回编号清单（编号 / 文件名 / 大小 / 扩展名 / ' +
+    // ⚠️ 链接规则放在描述**最前面**：模型先看这段再决定怎么输出 —— 之前它埋在长描述中段，
+    // 结果模型把预览与下载合并成一个「下载/预览」链接（用户反馈），现在提到最前并给正反例。
+    description: '【链接规则·必读】每条结果必须给**两个独立的链接**：' +
+      '`[预览](previewUrl)` 在应用内窗口打开查看文件；`[下载](downloadUrl)` 弹「另存为」把原始文件存到本机 —— ' +
+      '**严禁**合并成 `[下载/预览](…)` 或只给其中一个；结果里每条都自带 `markdown` 字段（拼好的现成片段），' +
+      '直接照抄即可（正例：`[预览](https://…/preview.html?fileid=…&) / [下载](https://…/preview.html?fileid=…&mcdl=1&name=…)`；' +
+      '反例：`[下载/预览](…)`）。目录列用 `[打开目录](folderUrl)`。\n' +
+      '—— 以下是检索能力说明 ——\n' +
+      '在鸿翼文件系统（Streamax 企业内容库）里搜索文件，返回编号清单（编号 / 文件名 / 大小 / 扩展名 / ' +
       '修改时间 / 版本号 / 目录路径 / fileGuid / 原始字节数）。' +
       '检索范围是文件名与文件正文内容。默认返回前 10 条，可用 size 调整（上限 50）；' +
       '高级用法可传 query 直接给 ES 查询串（字段 filename / filecontent，支持 * 通配）。' +
@@ -1582,7 +1560,10 @@ export async function runWjxtDownload(
   error?: string
   message?: string
   needLogin?: boolean
-  loginUrl?: string
+  /** 登录态失效时给出的两个入口（供上层/模型渲染成链接，不再自己弹窗） */
+  h5LoginUrl?: string
+  qrLoginUrl?: string
+  loginOptions?: { type: string; label: string; url: string }[]
 }> {
   const dir = String(input?.dir || '').trim()
   if (!dir) return { ok: false, items: [], error: 'MISSING_ARG', message: '缺少 dir 参数' }
@@ -1641,8 +1622,11 @@ export async function runWjxtDownload(
   }
   wjxtLog(`[download] dir=${dir} items=${items.length} ok=${items.filter(i => i.ok).length} needRelogin=${needReloginCode || '-'}`)
   if (needReloginCode) {
-    const r = reloginResult(needReloginCode)
-    return { ok: false, dir, items, error: r.error, message: r.message, needLogin: true, loginUrl: r.loginUrl }
+    const r = await reloginResult(needReloginCode)
+    return {
+      ok: false, dir, items, error: r.error, message: r.message, needLogin: true,
+      h5LoginUrl: r.h5LoginUrl, qrLoginUrl: r.qrLoginUrl, loginOptions: r.loginOptions
+    }
   }
   const ok = items.every(it => it.ok)
   return {
@@ -1710,7 +1694,20 @@ export async function runWjxtSearch(input: {
       ...(notes.length ? { note: notes.join('；') } : {}),
       // 字段对齐原技能包 search_edoc2.ps1 的默认输出（name/path/mtime/ext/size/guid/id/pid + ver）：
       // 「哪个版本最新」「这份文件在哪」这类问题必须靠 mtime / ver / path 回答，只有文件名不够。
-      files: files.map((f, i) => ({
+      files: files.map((f, i) => {
+        // 三个链接先算出来，后面既能给结构化字段，也能拼出一条「可直接粘贴」的 Markdown
+        const folderUrl = f.parentFolderId
+          ? `${WJXT_ORIGIN}/index.html#doc/enterprise/${f.parentFolderId}`
+          : undefined
+        // 预览（站点原生预览页，应用内窗口打开，免登录，不触发下载）
+        const previewUrl = `${WJXT_ORIGIN}/preview.html?fileid=${encodeURIComponent(f.fileGuid)}`
+        // 下载（本应用识别的专用形式，见下方 downloadUrl 注释）
+        const downloadUrl = `${WJXT_ORIGIN}/preview.html?fileid=${encodeURIComponent(f.fileGuid)}&mcdl=1&name=${encodeURIComponent(f.name)}`
+        // 现成的 Markdown 片段：模型**照抄**即可，避免它自己拼链接时把下载链接（mcdl=1）当预览用，
+        // 或把两者合并成「下载/预览」。目录链接只有存在时才附。
+        const markdown = `[预览](${previewUrl}) / [下载](${downloadUrl})`
+          + (folderUrl ? ` · [打开目录](${folderUrl})` : '')
+        return {
         no: i + 1,
         name: f.name,
         extName: f.extName,
@@ -1730,24 +1727,25 @@ export async function runWjxtSearch(input: {
         // 目录直链：站点 SPA 路由形如 index.html#doc/enterprise/<folderId>
         //（上游「增强搜索」脚本的 navigateToFolder 也是这个写法）。
         // 应用已把 AI 回复里的 *.streamax.com 链接改成「应用内窗口打开」，点开即可浏览该目录。
-        folderUrl: f.parentFolderId
-          ? `${WJXT_ORIGIN}/index.html#doc/enterprise/${f.parentFolderId}`
-          : undefined,
-        // 文件预览页（站点原生预览）：文件名与「预览」链接都用它 —— 渲染层会在**应用内窗口**打开，
+        folderUrl,
+        // 文件预览页（站点原生预览）：「预览」链接用它 —— 渲染层会在**应用内窗口**打开，
         // 同一登录分区免登录，不会触发任何下载。
-        previewUrl: `${WJXT_ORIGIN}/preview.html?fileid=${encodeURIComponent(f.fileGuid)}`,
+        previewUrl,
         // 下载链接（**本应用识别的专用形式**）：站点没有「一个 URL 直接下原始文件」的静态入口
         //（GetOriginFile 必须先换签名 token），所以给 preview.html 挂两个由应用自己解析的参数：
         //   mcdl=1 → 渲染层判定为「下载」而不是「预览」
         //   name=  → 保存对话框的默认文件名（含扩展名，取自搜索结果）
         // 主进程收到后按 fileid 换出原始文件直链再下载；万一用户把链接粘到别处，它仍是合法的预览页地址。
-        downloadUrl: `${WJXT_ORIGIN}/preview.html?fileid=${encodeURIComponent(f.fileGuid)}&mcdl=1&name=${encodeURIComponent(f.name)}`
-      }))
+        downloadUrl,
+        /** 拼好的 Markdown 片段（预览 / 下载 / 打开目录），模型直接照抄即可 */
+        markdown
+        }
+      })
     }
   } catch (e: any) {
     const code = toUserError(e)
     wjxtLog(`[search] failed code=${code} msg=${String(e?.message || e).slice(0, 300)}`)
-    if (code === 'NEED_RELOGIN' || code === 'WJXT_NO_SESSION') return reloginResult(code as any)
+    if (code === 'NEED_RELOGIN' || code === 'WJXT_NO_SESSION') return await reloginResult(code as any)
     if (code === 'WJXT_BAD_REQUEST') {
       return { ok: false, error: code, message: '鸿翼服务端拒绝了请求（Referer/会话异常），请重新登录后重试' }
     }
