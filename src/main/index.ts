@@ -607,6 +607,55 @@ function createWindow() {
     return false
   }
 
+  /**
+   * 登录窗口的「空白兜底」提示条（2026-10-02 新增）。
+   *
+   * 站点 SSO 入口返回的是一份 **1251 字节的跳转壳页**（日志实证：
+   * `[main] GET /sso/auth/goToLoginPage… len=1251`），它在应用内窗口里没有任何可见内容 ——
+   * 用户看到的就是「白屏一闪而过」，不知道是卡了还是成功了。这里注入一条说明条：
+   * 说清正在发生什么、卡住时该怎么办（改用账号密码入口）。
+   */
+  const injectLoginWindowTip = (win: BrowserWindow): void => {
+    try {
+      win.webContents.on('did-finish-load', () => {
+        void win.webContents.executeJavaScript(
+          `(function(){try{` +
+          `if(document.getElementById('__mcLoginTip'))return;` +
+          `var d=document.createElement('div');d.id='__mcLoginTip';` +
+          `d.setAttribute('style','position:fixed;left:0;right:0;top:0;z-index:2147483647;padding:10px 16px;` +
+          `background:#1745A5;color:#fff;font:13px/1.7 "Microsoft YaHei",sans-serif;box-shadow:0 2px 8px rgba(0,0,0,.2)');` +
+          `d.textContent='正在通过 SSO 自动登录企业内容库…若本页长时间空白，请关闭它，改用「账号密码登录」链接。';` +
+          `(document.body||document.documentElement).appendChild(d);` +
+          `}catch(e){}})()`
+        ).catch(() => { /* 页面正在跳转，注入失败无所谓 */ })
+      })
+    } catch { /* ignore */ }
+  }
+
+  /**
+   * 登录成功后的收尾：**先把窗口切成「登录成功」再关**（2026-10-02 新增）。
+   *
+   * 此前是探到会话就直接关窗 —— 从用户视角看就是窗口「凭空消失 / 白屏一闪」，
+   * 成功还是失败完全没有反馈（用户只能靠再点一次「继续」去试）。现在停留 1.2 秒给个明确结果。
+   */
+  const showLoginSuccessThenClose = async (win: BrowserWindow): Promise<void> => {
+    try {
+      if (!win.isDestroyed()) {
+        await win.webContents.executeJavaScript(
+          `(function(){try{` +
+          `var d=document.createElement('div');` +
+          `d.setAttribute('style','position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;` +
+          `justify-content:center;background:#f7f3df;color:#2e7d32;font:16px/1.8 "Microsoft YaHei",sans-serif');` +
+          `d.textContent='✅ 登录成功，正在返回应用…';` +
+          `(document.body||document.documentElement).appendChild(d);` +
+          `}catch(e){}})()`
+        ).catch(() => { /* 同上 */ })
+        await new Promise(r => setTimeout(r, 1200))
+      }
+    } catch { /* ignore */ }
+    try { if (!win.isDestroyed()) win.close() } catch { /* ignore */ }
+  }
+
   const openInternalUrl = async (url: string): Promise<boolean> => {
     let host = ''
     try { host = new URL(url).hostname.toLowerCase() } catch { return false }
@@ -654,9 +703,13 @@ function createWindow() {
     // 而那个登录页在应用内窗口里渲染成空白（用户反馈「点预览打开白屏窗口」）。
     // 只有 wjxt 域做这件事，其余内网窗口（OA 工作台等）不受影响。
     if (host.toLowerCase() === 'wj.streamax.com') void handleWjxtWindowLoginState(win, url)
-    // 用户点 AI 回复里的登录链接（H5 页 / IAM 扫码页）开的窗口：开始监听登录态，
-    // 会话一建立就自动关掉这个窗口（不用用户自己找关闭按钮）
-    if (isWjxtLoginUrl(url)) startLoginWatch()
+    // 用户点 AI 回复里的登录链接（H5 页 / IAM 扫码页）开的窗口：
+    // ① 注入一条提示条（免得 SSO 壳页在应用内窗口里就是一片白，用户不知道发生了什么）；
+    // ② 开始监听登录态，会话一建立就自动关掉（不用用户自己找关闭按钮）
+    if (isWjxtLoginUrl(url)) {
+      injectLoginWindowTip(win)
+      startLoginWatch()
+    }
     return true
   }
 
@@ -794,22 +847,42 @@ function createWindow() {
         }
       })
       registerOaWindow(win)
-      const settled = new Promise<void>((resolve) => {
-        let done = false
-        const finish = () => { if (!done) { done = true; resolve() } }
-        win!.webContents.once('did-finish-load', () => setTimeout(finish, settleMs))
-        win!.webContents.once('did-fail-load', finish)
-        setTimeout(finish, settleMs + 8000) // 兜底：别把调用方挂死
-      })
       try {
         await win.loadURL(url)
       } catch (e: any) {
         debugLog('[wjxtHiddenNav] loadURL rejected: ' + e?.message)
       }
-      await settled
+      // 轮询等待（**不再**用「首次 did-finish-load 后固定等 N 秒」那套）。
+      //
+      // 为什么必须改（2026-10-02 实证）：SSO 跳转链是「站点 SSO 入口 → iam 授权页 → 回跳站点」，
+      // 而 `did-finish-load` 在第一跳（那个 1251 字节的跳转壳页）就触发了 —— 于是计时从那里开始，
+      // 等满 2.5/3.5 秒时窗口正停在 `iam…/idp/authCenter/authenticate`，**票还没换成就被销毁**，
+      // 日志里的 `hidden window off-site` 就是这个现场。而用户点开的可见窗口一直活着，所以走完了全程。
+      //
+      // 现在的判据：① 沿途记下出现过的 IAM 登录页（带一次性 lck）；② 一旦 URL **落回站点**
+      // （非 /sso/auth/ 路径）说明换票链已走完，再留 800ms 收尾即可提前结束。
+      const started = Date.now()
+      const capMs = settleMs + 3000
+      const isBackOnSite = (u: string): boolean => {
+        try { return new URL(u).hostname.toLowerCase() === 'wj.streamax.com' && !/\/sso\/auth\//i.test(u) } catch { return false }
+      }
+      let lckUrl: string | null = null
+      while (Date.now() - started < capMs) {
+        if (!win || win.isDestroyed()) break
+        const cur = win.webContents.getURL() || ''
+        if (/\/ac\/#\/index\?lck=/i.test(cur)) lckUrl = cur
+        // 需要人机交互时会停在 IAM 登录页：拿到 lck 且已过 3 秒就收工（再等也不会自己跳回去）
+        if (lckUrl && Date.now() - started > 3000) break
+        if (isBackOnSite(cur) && Date.now() - started > 1200) {
+          await new Promise(r => setTimeout(r, 800))
+          break
+        }
+        await new Promise(r => setTimeout(r, 400))
+      }
       const finalUrl = win.isDestroyed() ? '' : win.webContents.getURL()
-      debugLog(`[wjxtHiddenNav] finalUrl=${(finalUrl || '(empty)').slice(0, 140)}`)
-      return finalUrl || null
+      const out = lckUrl || finalUrl || null
+      debugLog(`[wjxtHiddenNav] wait=${Date.now() - started}ms lck=${lckUrl ? 'yes' : 'no'} finalUrl=${(out || '(empty)').slice(0, 140)}`)
+      return out
     } catch (e: any) {
       debugLog('[wjxtHiddenNav] failed: ' + String(e?.message || e))
       return null
@@ -826,7 +899,8 @@ function createWindow() {
       let closed = 0
       for (const [u, w] of [...internalUrlWindows.entries()]) {
         if (!isWjxtLoginUrl(u)) continue
-        try { if (w && !w.isDestroyed()) { w.close(); closed++ } } catch { /* ignore */ }
+        // 先显示「登录成功」再关：此前是静默关窗，用户只看到白屏一闪，不知道成没成
+        if (w && !w.isDestroyed()) { void showLoginSuccessThenClose(w); closed++ }
         internalUrlWindows.delete(u)
       }
       debugLog(`[wjxt] login windows auto-closed (session established): ${closed} 个`)
@@ -2497,14 +2571,22 @@ ipcMain.handle('mc-wjxt-download', async (_e, payload: { fileGuid?: string; name
       // 与技能保持一致：**不再自作主张弹窗**，只把两个入口交给上层（渲染层会提示用户选择），
       // 同时开启登录态监听，用户登完窗口自动关闭。
       const qr = await wjxtQrLoginUrl().catch(() => ({ url: '', fresh: false }))
+      const qrLabel = qr.fresh ? '扫码登录' : 'SSO 登录'
+      const qrUrl = qr.url || WJXT_H5_LOGIN_URL
       startLoginWatch()
       return {
         ok: false,
         error: 'NEED_RELOGIN',
         needLogin: true,
         h5LoginUrl: WJXT_H5_LOGIN_URL,
-        qrLoginUrl: qr.url || WJXT_H5_LOGIN_URL,
-        message: '鸿翼文件系统登录态已失效，请在「账号密码登录」或「扫码登录」中选一种登录后重试。'
+        qrLoginUrl: qrUrl,
+        // 同样给出拼好的 Markdown 链接：用户看到的是可点文字，不是一长串 URL
+        loginLinksMarkdown: `[账号密码登录](${WJXT_H5_LOGIN_URL})  \n[${qrLabel}](${qrUrl})`,
+        message: '鸿翼文件系统登录态已失效，请选一种方式登录（点链接即可，会在应用内窗口打开；'
+          + '登录成功后窗口会显示「登录成功」再自动关闭）：\n'
+          + `1. [账号密码登录](${WJXT_H5_LOGIN_URL}) —— 站点自带 H5 页，不经 IAM\n`
+          + `2. [${qrLabel}](${qrUrl}) —— ${qr.fresh ? 'IAM 二维码页，已生成一次性登录上下文' : '站点 SSO 入口，打开后自动跳转完成登录'}\n`
+          + '**把上面两行原样输出为 Markdown 链接**：不要改写成裸 URL、不要放进代码块、不要加引号。'
       }
     }
     return { ok: false, error: msg }

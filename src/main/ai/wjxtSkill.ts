@@ -129,6 +129,45 @@ export async function wjxtQrLoginUrl(): Promise<{ url: string; fresh: boolean }>
   return { url: WJXT_SSO_LOGIN_URL, fresh: false }
 }
 
+/** 上一次「SSO 无感换票」的尝试时刻（用于限频：失败后 30 秒内不重复跑，免得每次查询都多等几秒） */
+let lastSsoHealAt = 0
+
+/**
+ * **SSO 无感换票**：隐藏窗口把站点 SSO 入口走完，再探登录态。
+ *
+ * 为什么要单独有这一步（2026-10-02 实证）：
+ * - 静默自愈原先只跑 `/index.html`（`WJXT_LOGIN_URL`），隐藏窗口会停在
+ *   `iam…/idp/authCenter/authenticate` 就被销毁，票没换成（日志 `hidden window off-site`）；
+ * - 而用户**点开 SSO 入口链接**后窗口一直活着，跳转链走完 → 登录态自动恢复（用户体感「白屏一闪就好了」）。
+ *   也就是说：**用户手动点的那一下，本质就是在替我们把 SSO 链跑完** —— 这件事隐藏窗口也能做。
+ *
+ * 改成「隐藏窗口加载 SSO 入口 + 等它落回站点」（见 index.ts 的 hiddenNavUrl 轮询判据）后，
+ * 这一步成功就完全不用用户动手；失败才进入「让用户选登录方式」。
+ */
+export async function silentSsoHeal(): Promise<boolean> {
+  if (!hiddenNav) return false
+  if (Date.now() - lastSsoHealAt < 30000) {
+    wjxtLog('[heal] skip (tried recently)')
+    return false
+  }
+  lastSsoHealAt = Date.now()
+  try {
+    wjxtLog('[heal] hidden-window SSO ticket exchange start')
+    const finalUrl = await hiddenNav(WJXT_SSO_LOGIN_URL, 6000)
+    wjxtLog(`[heal] hidden nav final=${String(finalUrl).slice(0, 120)}`)
+    // 换票是异步落地的：连探 3 次（间隔 1.2s），别一次没探到就放弃
+    for (let i = 1; i <= 3; i++) {
+      const ok = await probeLoggedIn()
+      wjxtLog(`[heal] probe#${i} loggedIn=${ok}`)
+      if (ok === true) return true
+      if (i < 3) await new Promise(r => setTimeout(r, 1200))
+    }
+  } catch (e: any) {
+    wjxtLog('[heal] failed: ' + String(e?.message || e))
+  }
+  return false
+}
+
 // ── H5 账号密码登录（备份登录方式）────────────────────────────────────────────
 /**
  * 站点自带的 **H5 登录页**（用户名 + 密码，knockout 写的移动端 SPA）：
@@ -813,11 +852,14 @@ async function wjxtWarmUp(force = false): Promise<void> {
     }
     loggedIn = await recheck('recheck#1')
 
-    // ② 隐藏窗口预热：SSO 换票靠 SPA 自己的 JS 流程（可见窗口能成、裸 fetch 不成），
-    //    所以再开一个**不显示**的窗口把首页跑一遍；成功则用户全程看不到窗口
+    // ② 隐藏窗口预热：SSO 换票靠浏览器上下文里的跳转链（可见窗口能成、裸 fetch 不成），
+    //    所以再开一个**不显示**的窗口跑一遍；成功则用户全程看不到窗口。
+    //    入口从 `/index.html` 改成 **SSO 入口**（2026-10-02 实证）：跑首页时隐藏窗口会停在
+    //    `iam…/idp/authCenter/authenticate`（日志 `hidden window off-site`）就被销毁，票换不成；
+    //    而 SSO 入口会把整条跳转链走完并回跳站点 —— 这正是用户手动点链接时有效的那条路径。
     if (loggedIn === false && bootstrapHiddenWindow) {
       try {
-        const ok = await bootstrapHiddenWindow(WJXT_LOGIN_URL, 2500)
+        const ok = await bootstrapHiddenWindow(WJXT_SSO_LOGIN_URL, 5000)
         wjxtLog(`[warmup] hidden bootstrap ok=${ok}`)
       } catch (e: any) {
         wjxtLog('[warmup] hidden bootstrap failed: ' + String(e?.message || e))
@@ -1383,39 +1425,62 @@ function toUserError(e: any): string {
  * ② 用户更想扫码时也只能先关掉再想办法；③ 回复里把「记住账号密码」当成常规建议，
  * 而站点本身并不提供这个能力（那是浏览器行为）。
  *
- * 现在：静默自愈（隐藏窗口跑首页）已在上游失败，于是返回**两个可点击的登录入口**让用户自己选：
+ * 现在：静默自愈（隐藏窗口跑 SSO 入口）已在上游失败，于是返回**两个可点击的登录入口**让用户自己选：
  *   - `h5LoginUrl`：站点自带 H5 页，账号密码，不经 IAM（白屏风险最低）
- *   - `qrLoginUrl`：IAM AC 登录页（`entityId=edoc2`），扫码或密码；`lck` 一次性，已现取
+ *   - `qrLoginUrl`：IAM AC 登录页（`entityId=edoc2`），扫码或密码；`lck` 一次性，已现取；
+ *     取不到时（`fresh=false`）是**站点 SSO 入口**，点开由站点自己跳转完成登录
  * 点开任意一个都会由渲染层在**应用内窗口**打开（共享登录分区），登录成功后
- * `startLoginWatch()` 会自动关掉该窗口，AI 随即重试原查询。
+ * 窗口会先显示「登录成功」再自动关闭（`showLoginSuccessThenClose`），AI 随即重试原查询。
  */
 async function reloginResult(code: 'NEED_RELOGIN' | 'WJXT_NO_SESSION'): Promise<any> {
   const qr = await wjxtQrLoginUrl()
-  wjxtLog(`need login (${code}) -> ask user to choose (h5=${WJXT_H5_LOGIN_URL} qr fresh=${qr.fresh})`)
+  // 换票有可能**就发生在刚才取 lck 的那次隐藏导航里**（它加载的正是 SSO 入口）。
+  // 2026-10-02 实证：导航结束落在 /index.html 之后约 2 秒登录态就建立了，但当时没有再探一次，
+  // 于是照样把两个链接丢给了用户 —— 用户以为必须手动点，其实那时已经登录成功了。
+  const ok = await probeLoggedIn()
+  wjxtLog(`need login (${code}) -> post-qr probe loggedIn=${ok} (h5=${WJXT_H5_LOGIN_URL} qr fresh=${qr.fresh})`)
+  if (ok === true) {
+    return {
+      ok: false,
+      error: 'WJXT_SESSION_RESTORED',
+      needLogin: false,
+      /** true = 本次已通过 SSO 自动恢复：调用方应立刻重试原查询，不要让用户登录 */
+      healed: true,
+      message: '登录态已通过 SSO **自动恢复**，请立刻用相同参数重新调用本工具重试一次（不要再让用户登录）。'
+    }
+  }
   // 无论用户点哪个入口，都开始监听：会话一建立就自动关掉登录窗口
   startLoginWatch()
+  // 文案要对得上实际给的地址：`fresh=false` 时是**站点 SSO 入口**，它会在应用内窗口里自动跳转
+  // （IAM 会话仍然有效时甚至不显示二维码就直接换票完成）—— 再叫「扫码登录」会让人以为会看到二维码。
+  const qrLabel = qr.fresh ? '扫码登录' : 'SSO 登录'
+  const qrNote = qr.fresh
+    ? 'IAM 二维码页，已生成一次性登录上下文'
+    : '站点 SSO 入口，打开后自动跳转完成登录（通常不会显示二维码）'
   return {
     ok: false,
     error: code,
     needLogin: true,
     /** 账号密码登录（站点自带 H5 页，不经 IAM） */
     h5LoginUrl: WJXT_H5_LOGIN_URL,
-    /** 扫码登录（IAM AC 页，entityId=edoc2；lck 一次性，已现取；取不到时是站点 SSO 入口） */
+    /** 登录入口（IAM AC 页 `entityId=edoc2`；取不到 lck 时为站点 SSO 入口） */
     qrLoginUrl: qr.url,
     /** 结构化列表，便于模型直接渲染成两个链接 */
     loginOptions: [
-      { type: 'password', label: '账号密码登录', url: WJXT_H5_LOGIN_URL },
-      { type: 'qrcode', label: '扫码登录', url: qr.url }
+      { type: 'password', label: '账号密码登录', url: WJXT_H5_LOGIN_URL, markdown: `[账号密码登录](${WJXT_H5_LOGIN_URL})` },
+      { type: qr.fresh ? 'qrcode' : 'sso', label: qrLabel, url: qr.url, markdown: `[${qrLabel}](${qr.url})` }
     ],
+    /** 拼好的 Markdown 片段：模型**照抄**即可（用户看到的是可点文字，而不是一长串 URL） */
+    loginLinksMarkdown: `[账号密码登录](${WJXT_H5_LOGIN_URL})  \n[${qrLabel}](${qr.url})`,
     message: (code === 'WJXT_NO_SESSION'
       ? '应用内还没有鸿翼文件系统（企业内容库）的登录态，已尝试无感恢复但未成功。'
       : '鸿翼文件系统（企业内容库）的登录态已失效，已尝试无感恢复但未成功。')
-      + '请**选一种方式登录**（点下面任一链接即可，会在应用内窗口打开；登录成功后窗口会自动关闭）：\n'
-      + `1. 账号密码登录（站点自带 H5 页，不经 IAM）：${WJXT_H5_LOGIN_URL}\n`
-      + `2. 扫码登录（IAM，${qr.fresh ? '已为你生成一次性登录上下文' : '由站点跳转到登录页'}）：${qr.url}\n`
+      + '请**选一种方式登录**（点下面任一链接即可，会在应用内窗口打开；登录成功后窗口会显示「登录成功」再自动关闭）：\n'
+      + `1. [账号密码登录](${WJXT_H5_LOGIN_URL}) —— 站点自带 H5 页，不经 IAM\n`
+      + `2. [${qrLabel}](${qr.url}) —— ${qrNote}\n`
+      + '**把上面两行原样输出为 Markdown 链接**：不要改写成裸 URL、不要放进代码块、不要加引号。\n'
       + '登录完成后回一句「已登录」，我就立刻重试刚才的查询。'
       + '（不要用系统浏览器打开这些地址：系统浏览器与应用不共享登录态。）'
-      + '若窗口是空白页，通常是内网/VPN 不通或站点 SSO 正在跳转，可换另一种方式再试。'
   }
 }
 
@@ -1645,6 +1710,8 @@ export async function runWjxtSearch(input: {
   mode?: WjxtMatchMode
   sort?: WjxtSort
   from?: number
+  /** 内部用：本次调用前已经跑过一次「SSO 无感换票」，避免自愈失败时无限递归 */
+  _healTried?: boolean
 }): Promise<any> {
   const keyword = String(input?.keyword || '').trim()
   if (!keyword && !input?.query) return { ok: false, error: 'MISSING_ARG', message: '缺少 keyword 参数' }
@@ -1745,7 +1812,20 @@ export async function runWjxtSearch(input: {
   } catch (e: any) {
     const code = toUserError(e)
     wjxtLog(`[search] failed code=${code} msg=${String(e?.message || e).slice(0, 300)}`)
-    if (code === 'NEED_RELOGIN' || code === 'WJXT_NO_SESSION') return await reloginResult(code as any)
+    if (code === 'NEED_RELOGIN' || code === 'WJXT_NO_SESSION') {
+      // ① 先自己试着把 SSO 链跑完（隐藏窗口 + 共享分区）：成功就无感，用户什么都不用做
+      if (!input?._healTried && await silentSsoHeal()) {
+        wjxtLog('[search] sso self-heal ok -> retry search once')
+        return await runWjxtSearch({ ...input, _healTried: true })
+      }
+      const r = await reloginResult(code as any)
+      // ② 取 lck 那次隐藏导航本身可能已完成换票（2026-10-02 实证）：直接重试，别让用户去点
+      if (r?.healed && !input?._healTried) {
+        wjxtLog('[search] session restored while preparing login options -> retry search once')
+        return await runWjxtSearch({ ...input, _healTried: true })
+      }
+      return r
+    }
     if (code === 'WJXT_BAD_REQUEST') {
       return { ok: false, error: code, message: '鸿翼服务端拒绝了请求（Referer/会话异常），请重新登录后重试' }
     }

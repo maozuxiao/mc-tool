@@ -22,7 +22,7 @@
 
 ---
 
-## 一、发布一个新版本（以 1.0.48 为例）
+## 一、发布一个新版本（以 1.0.49 为例）
 
 ### 1. 同步代码并提交
 
@@ -47,17 +47,17 @@ git push origin master
 
 | 文件 | 字段 | 格式 | 示例 |
 |---|---|---|---|
-| `package.json` | `version` | SemVer **三段** | `"1.0.48"` |
-| `electron-builder.yml` | `buildVersion` | **四位**文件版本 | `1.0.48.0` |
+| `package.json` | `version` | SemVer **三段** | `"1.0.49"` |
+| `electron-builder.yml` | `buildVersion` | **四位**文件版本 | `1.0.49.0` |
 
 ```jsonc
 // package.json
-{ "version": "1.0.48" }
+{ "version": "1.0.49" }
 ```
 
 ```yaml
 # electron-builder.yml
-buildVersion: 1.0.48.0
+buildVersion: 1.0.49.0
 ```
 
 > **两处必须同步**。
@@ -72,14 +72,14 @@ buildVersion: 1.0.48.0
 在 `MC Tool Release Notes.md` 的表格末尾追加一行：
 
 ```markdown
-| 1.0.48 | 1.0.48.0 | 本次改动说明 |
+| 1.0.49 | 1.0.49.0 | 本次改动说明 |
 ```
 
 提交版本号与 notes：
 
 ```bash
 git add -A
-git commit -m "chore: bump to 1.0.48"
+git commit -m "chore: bump to 1.0.49"
 git push origin master
 ```
 
@@ -107,9 +107,9 @@ npm run pack:win   # = electron-vite build && electron-builder --win --config el
 ```text
 dist/
 ├─ latest.yml                            # 自动更新元数据（关键）
-├─ MC物料查询 Setup 1.0.48.exe            # NSIS 安装包
-├─ MC物料查询 Setup 1.0.48.exe.blockmap  # 增量更新块映射
-└─ MC物料查询 1.0.48.exe                  # 便携版
+├─ MC物料查询 Setup 1.0.49.exe            # NSIS 安装包
+├─ MC物料查询 Setup 1.0.49.exe.blockmap  # 增量更新块映射
+└─ MC物料查询 1.0.49.exe                  # 便携版
 ```
 
 > `dist/` 已被 `.gitignore` 忽略，**不要 commit**。
@@ -138,6 +138,8 @@ dist/
 >     **为什么单列一条**：`lck` 是一次性的（由隐藏窗口现取），路径写死就会失效；且不能弹完窗就完事 —— 还要求登完自动关窗。
 > 16. **不再出现「记住账号密码」（1.0.48）**：整个登录过程（H5 或扫码）**都不应**再弹出保存口令的对话框；全仓也不该再有 `wjxt-login.json`。若看到，说明旧代码没被覆盖。
 > 17. **下载/预览是两个链接（1.0.48）**：搜一个文件，结果表最后一列必须是 `[预览](…) / [下载](…)` 两个**独立**链接（外加目录链接），不能是合并的「下载/预览」；若模型仍合并，检查 `wjxtSkill.ts` 里 `WJXT_SEARCH_TOOL_DEFINITION` 开头的链接规则是否被覆盖。
+> 18. **鸿翼登录自愈与链接形态（1.0.49）**：让文件系统登录态**单独**失效（退出 OA 登录后**不要重新扫码**，直接检索）—— 期望：多数情况下**不弹任何询问**，`wjxt.log` 里出现 `[heal] hidden-window SSO ticket exchange start` → `[heal] probe#N loggedIn=true` → `[search] sso self-heal ok -> retry search once`，随后直接给出结果；若 IAM 会话也已过期，回复里应是两个 **Markdown 可点文字链接**（`[账号密码登录](…)` / `[扫码登录](…)`，取不到二维码页时是 `[SSO 登录](…)`，**不是裸 URL**），点开后窗口顶部有蓝色提示条、登录成功后先显示「✅ 登录成功，正在返回应用…」再自动关窗。
+>     **为什么单列一条**：隐藏窗口原先等固定 2.5~3.5 秒就被销毁，跳转链断在 IAM 授权页（票换不成），用户只能手动点链接才通；而**退出后重新登录一次 OA 会让常驻隐藏窗口顺手把票换完**，于是「看起来正常」却根本测不到这条分支（1.0.49 提测时连续两轮都如此）。必须「退出后不重新登录」才能复现。
 
 ### 6. 发布到 GitHub Release
 
@@ -165,7 +167,7 @@ npx electron-builder --win --config electron-builder.yml --publish=always
 该命令会：
 
 1. 重新构建并打包到 `dist/`；
-2. 自动创建 git tag `v1.0.48`；
+2. 自动创建 git tag `v1.0.49`；
 3. 创建 GitHub Release；
 4. 上传 `latest.yml`、安装包、`.blockmap`。
 
@@ -181,7 +183,7 @@ npx electron-builder --win --config electron-builder.yml --publish=always
 $token = '你的token'
 $h = @{Authorization="Bearer $token"; "Content-Type"="application/json"}
 $rel = Invoke-RestMethod -Uri 'https://api.github.com/repos/maozuxiao/mc-tool/releases' -Headers $h
-$v = $rel | Where-Object { $_.tag_name -eq 'v1.0.48' }
+$v = $rel | Where-Object { $_.tag_name -eq 'v1.0.49' }
 $body = @{draft=$false} | ConvertTo-Json
 Invoke-RestMethod -Method PATCH -Uri "https://api.github.com/repos/maozuxiao/mc-tool/releases/$($v.id)" -Headers $h -Body $body
 ```
@@ -278,7 +280,7 @@ nsis:
   artifactName: MC物料查询-${buildVersion}-Setup.${ext}
 ```
 
-产物为 `MC物料查询-1.0.48.0-Setup.exe`，但 `latest.yml` 里产品版本仍是 `1.0.48`。仅用于测试，正式发布请改回统一命名。
+产物为 `MC物料查询-1.0.49.0-Setup.exe`，但 `latest.yml` 里产品版本仍是 `1.0.49`。仅用于测试，正式发布请改回统一命名。
 
 ---
 
@@ -288,7 +290,7 @@ nsis:
 npm run pack:mac
 ```
 
-- 产物：`dist/MC物料查询-1.0.48-<arch>.dmg`（命名来自 `mac.artifactName`）。
+- 产物：`dist/MC物料查询-1.0.49-<arch>.dmg`（命名来自 `mac.artifactName`）。
 - **签名与公证**：当前 `electron-builder.yml` 未配置 `identity` / `notarize`，打出的 DMG 未签名，macOS 会拦截（Gatekeeper）。若要正式分发 macOS 版，需补 Apple Developer 证书与公证配置。
 - **不建议在 Windows 上交叉编译 DMG**，请在 macOS 上执行。
 

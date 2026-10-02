@@ -91,8 +91,8 @@ Windows 任务栏右键菜单第一项（窗口名称）由主窗口 `title` 与
 ### 当前基线版本
 
 ```text
-package.json version:          1.0.48
-electron-builder buildVersion: 1.0.48.0
+package.json version:          1.0.49
+electron-builder buildVersion: 1.0.49.0
 ```
 
 打包命令：
@@ -166,15 +166,15 @@ nsis.artifactName: MC物料查询-${buildVersion}-Setup.${ext}
 
 ```text
 dist/update test/
-├── latest.yml                            # 指向 1.0.48
-├── MC物料查询 Setup 1.0.48.exe            # NSIS 安装包
-├── MC物料查询 Setup 1.0.48.exe.blockmap   # 增量更新块映射
-├── MC物料查询 1.0.48.exe                  # 便携版
+├── latest.yml                            # 指向 1.0.49
+├── MC物料查询 Setup 1.0.49.exe            # NSIS 安装包
+├── MC物料查询 Setup 1.0.49.exe.blockmap   # 增量更新块映射
+├── MC物料查询 1.0.49.exe                  # 便携版
 └── win-unpacked/                         # 免安装解压版
 ```
 
 测试方式：把该目录下的 `latest.yml` + `*.exe` + `*.exe.blockmap` 作为**草稿 Release** 的附件上传（`gh release create --draft`，
-或直接 `.\build_now.ps1 -Publish` 后先别发布），已安装的旧版本（如 1.0.43/1.0.47）客户端即可检测到 1.0.48 升级；
+或直接 `.\build_now.ps1 -Publish` 后先别发布），已安装的旧版本（如 1.0.43/1.0.47）客户端即可检测到 1.0.49 升级；
 验证完记得清理该草稿 Release（草稿不会被客户端看到，正式发布前不要把测试包设为 Published）。
 
 ### 更新进度优化（1.0.3 起）
