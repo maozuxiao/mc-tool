@@ -14,11 +14,45 @@ let currentLang: 'zh' | 'en' = 'zh'
  * 对象（不可调用）—— 渲染层既无法清理监听，也不能把它当 cleanup 用；React StrictMode 下
  * effect 会「挂载→卸载→再挂载」，没有 cleanup 就会注册两份监听，同一条事件被处理两次
  * （登录态、更新进度都会重复触发）。统一收敛成返回 disposer。
+ *
+ * 1.0.50 再修一层（`MaxListenersExceededWarning: 11 mc-download-progress listeners`）：
+ * 即便每个调用点都正确cleanup，**IpcRenderer 上的 listener 数仍会单调增长** ——
+ * `mc-download-progress` 在列表页与 AI 面板各有一处订阅，而这两个面板都会随视图切换反复挂载，
+ * 一旦某次挂载的 cleanup 没配平（dev 下 HMR / StrictMode 叠加），listener 就只增不减，
+ * 于是：① Node 打警告；② 每条进度事件被 N 个已废弃的回调重复处理（纯浪费 CPU）。
+ *
+ * 改成「**每个 channel 在 IpcRenderer 上永远只有 1 个真实 listener**，内部用订阅者集合分发」。
+ * 这样注册多少次对外都只占1 个槽位，最后一个订阅者退订时才真正摘掉 listener。
  */
+const channelSubs = new Map<string, { listener: (...args: any[]) => void; subs: Set<(...args: any[]) => void> }>()
+
 function subscribe(channel: string, cb: (...args: any[]) => void): () => void {
-  const listener = (_e: unknown, ...args: any[]) => cb(...args)
-  ipcRenderer.on(channel, listener)
-  return () => { ipcRenderer.removeListener(channel, listener) }
+  let entry = channelSubs.get(channel)
+  if (!entry) {
+    const subs = new Set<(...args: any[]) => void>()
+    const listener = (_e: unknown, ...args: any[]) => {
+      // 复制一份再遍历：回调里可能会退订自己（setState 触发卸载），直接遍历会跳元素
+      for (const fn of Array.from(subs)) {
+        try { fn(...args) } catch (err) { console.error('[preload] listener error', err) }
+      }
+    }
+    ipcRenderer.on(channel, listener)
+    entry = { listener, subs }
+    channelSubs.set(channel, entry)
+  }
+  entry.subs.add(cb)
+  let done = false
+  return () => {
+    if (done) return
+    done = true
+    const cur = channelSubs.get(channel)
+    if (!cur) return
+    cur.subs.delete(cb)
+    if (cur.subs.size === 0) {
+      ipcRenderer.removeListener(channel, cur.listener)
+      channelSubs.delete(channel)
+    }
+  }
 }
 
 const mcApi = {

@@ -1,0 +1,15 @@
+{
+  "_comment": "默认机器人实例配置（开箱即用）。继承 config.base.json 的登录态；chat_user_id 与 Cookie 由 mcp_auth 登录自动写入，禁止手填 auth.cookie_string。接入其它机器人时改 agent.uuid / mcp.tool_id / agent.name。",
+  "_path_note": "cache.session_path 留空即可 —— 由运行时按本机实际位置解析。",
+  "_merge_auth_from": "config.base.json",
+  "mcp": {
+    "tool_id": "tech_agent"
+  },
+  "agent": {
+    "uuid": "6ecae008-5346-49ad-a94d-68b04d3418e3",
+    "name": "Tech-agent"
+  },
+  "cache": {
+    "session_path": ""
+  }
+}

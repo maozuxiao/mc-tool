@@ -79,8 +79,13 @@ function listDirDirs(root: string): string[] {
 /** 全部技能（内置在前、导入在后）。启用状态由渲染层按会话维护，这里不返回 */
 export function listSkills(): AISkillInfo[] {
   // 「需 MCP」判定（1.0.46）：SKILL.md 提到 MCP 工具（chat_* / mcp_auth / mcpServers…）
-  // 但工具并不在本应用里 —— 必须在「MCP 服务」里登记并绑定后才能用，供 UI 徽标与诊断引导
-  const boundKeys = new Set(listMcpServers().map(s => s.skillKey).filter(Boolean))
+  // 但工具并不在本应用里 —— 必须在「MCP 服务」里登记并绑定后才能用，供 UI徽标与诊断引导
+  //
+  // 1.0.50：绑定判定改为**按裸 id** 比较（忽略 builtin:/user: 前缀）。
+  // MCP 服务登记的是「技能」而不是「某一份拷贝」，而同一个技能可能同时存在内置版与导入版
+  // （tech-agent-skill 内置化后就是这样）。按完整 key 比较会在来源一变时把徽标重新点亮，
+  // 用户会以为要重登服务；工具下发侧（mcpClient.cachedToolDefinitions）同样按裸 id 判定。
+  const boundIds = new Set(listMcpServers().map(s => bareSkillId(s.skillKey || '')).filter(Boolean))
   const out: AISkillInfo[] = []
   for (const [source, root] of [['builtin', builtinRoot()], ['user', userSkillRoot()]] as const) {
     for (const id of listDirDirs(root)) {
@@ -100,7 +105,7 @@ export function listSkills(): AISkillInfo[] {
         source,
         dir,
         needsMcp,
-        mcpBound: boundKeys.has(`${source}:${id}`)
+        mcpBound: boundIds.has(id)
       })
     }
   }

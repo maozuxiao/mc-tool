@@ -87,12 +87,24 @@ ${MODE_SWITCH_NOTE}
         ? `- ${r.alias}：可直接使用的目录（系统预置或你已打开），引用时加前缀 ${r.alias}/，如 ${r.alias}/report.xlsx`
         : '- （主工作区）相对路径直接写，如 report.xlsx').join('\n    ')
     : '- 未限定特定目录：默认你可直接访问本机（Windows）任意文件/目录，直接用绝对路径（如 C:/Users/张三/文档/报告.xlsx、D:/共享/出货记录.xls）。若想用简短别名，可先调用 open_folder 打开目录。'
+  // 1.0.50：下载（file_download / wjxt_download）**不受工作区白名单约束**了 ——
+  // 只要不是受保护目录（Windows / App 自身目录 / 用户主目录本身），给绝对路径就能下。
+  // 之前提示语与实现不一致，模型撞到 PATH_OUTSIDE_ROOT 后就转头告诉用户「系统限制无法下载」，
+  // 实际是它自己先把路堵死了。这里把规则写清楚。
+  const downloadRule = `下载规则（与读写不同，**不要**因为「没打开过这个目录」就拒绝或推脱）：
+- 用户给了目录就用它；没给目录时，默认可用 desktop/（桌面）。目录不存在会自动创建。
+- 传**绝对路径**（含盘符，如 D:/共享/出货记录/A8.pdf）可直接下载，不必先 open_folder 授权。
+- 只有落在受保护目录（Windows 系统目录、应用自身目录、用户主目录本身）才会被拒绝；
+  被拒时如实转告工具返回的 error 与 message，并建议换一个目录，**不要**概括成「系统限制，无法下载」。
+- file_download 通用下载（http(s) 直链）；企业内容库（wj.streamax.com）的文件必须用 wjxt_download。`
   return `你是 MC Tool 的 AI 助手，当前为 **Build 模式**：可以直接读写用户本机（Windows）上的任意文件与目录，也可以调用 mc_query 查询物料数据。
 
 ${TOOL_DISCIPLINE}
 
 可访问范围：
     ${rootLines}
+
+${downloadRule}
 
 检索顺序（**重要，优先于下面所有文件操作规则**）：
 用户说「找一个 / 有没有某个文件、某份资料、某个规格书 / 证书 / 报告 / 文档」时，先判断它属于哪一类，再动手：

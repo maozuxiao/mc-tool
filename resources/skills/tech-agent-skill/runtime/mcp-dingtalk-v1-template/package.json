@@ -1,0 +1,35 @@
+{
+  "name": "dingding-mcp-v2",
+  "version": "1.0.2",
+  "description": "DingTalk DEAP MCP Bridge V2 - Cookie方式",
+  "main": "src/index.js",
+  "bin": {
+    "dingding-mcp-v2": "src/index.js"
+  },
+  "scripts": {
+    "playwright:install": "playwright install chromium",
+    "install:fast": "npm install --registry=https://registry.npmmirror.com && playwright install chromium",
+    "test": "node tests/run-all.js",
+    "test:config": "node tests/config-chat-user-id.test.js",
+    "test:auth": "node tests/auth-chat-user-id.test.js",
+    "test:session": "node tests/cid-and-session.test.js",
+    "test:release": "node tests/release-safety.test.js",
+    "start": "node src/index.js"
+  },
+  "keywords": [
+    "mcp",
+    "dingtalk",
+    "deap",
+    "ai"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.28.0",
+    "playwright": "^1.61.1",
+    "zod": "^3.25.76"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

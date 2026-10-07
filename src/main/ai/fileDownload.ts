@@ -3,8 +3,9 @@ import http from 'http'
 import https from 'https'
 import { Readable } from 'stream'
 import { closeSync, createWriteStream, existsSync, mkdirSync, openSync, readSync, renameSync, unlinkSync } from 'fs'
-import { basename, join, resolve, sep } from 'path'
+import { basename, isAbsolute, join, resolve, sep } from 'path'
 import { OA_ORIGIN } from '@shared/constants'
+import { dirBlockReason } from './rootGuard'
 import type { AIExtraRoot } from '@shared/ai-types'
 
 /** 持久化 partition 名（与登录会话共用，Cookie 跨启动保留）。单一来源，index.ts 从这里取。 */
@@ -411,10 +412,21 @@ export async function downloadToDir(input: DownloadToDirInput): Promise<Download
   if (!dir) return { ok: false, error: 'MISSING_ARG', message: '缺少 dir 参数' }
 
   // 1) 目录归属到某个授权根（支持「别名/路径」前缀），越界直接拒绝
+  //
+  // 1.0.50 修正（build 模式下「系统限制无法下载文件」）：
+  // 原实现里 `roots.length === 1` 分支会把**任意绝对路径**当成「该根下的相对路径」，
+  // 于是 `D:\Downloads\x` 在桌面根下算出 absDir=D:\Downloads\x，接着被越界判据拦成
+  // PATH_OUTSIDE_ROOT —— 模型只能转头告诉用户「系统限制，无法下载」。
+  // 现在：**绝对路径按其字面意思解析**（不再二次归属），并对下载单独放宽：
+  // 落点只要不是受保护目录（Windows / App 资源 / userData / 用户主目录本身）就放行。
+  // 下载与读文件不同 —— 它把文件交给用户、不把内容喂进模型上下文，落地目录由用户自己选，
+  // 所以不需要「先 open_folder 授权」这一步。
   const roots = (input.roots || []).map(r => ({ alias: r.alias || '', path: resolve(r.path) }))
   let rootPath = ''
   let rest = dir
-  if (roots.length) {
+  const isAbsoluteDir = isAbsolute(dir)
+
+  if (roots.length && !isAbsoluteDir) {
     const m = /^([^/\\]+)[/\\]([\s\S]*)$/.exec(dir)
     const byAlias = m ? roots.find(r => r.alias && r.alias === m[1]) : undefined
     if (byAlias) {
@@ -452,6 +464,18 @@ export async function downloadToDir(input: DownloadToDirInput): Promise<Download
         ok: false,
         error: 'PATH_OUTSIDE_ROOT',
         message: `目标目录不在已授权工作区（${rootPath}）内，请先用 open_folder 打开该目录`
+      }
+    }
+  }
+  // 绝对路径且不在任何授权根内 → 交给「受保护目录」这一道闸门（复用 file_read/file_open_folder
+  // 同一套判据），保证「能下载到任意业务目录」的同时仍然不往系统目录里写。
+  if (!rootPath && isAbsoluteDir) {
+    const blocked = dirBlockReason(absDir)
+    if (blocked) {
+      return {
+        ok: false,
+        error: 'PATH_OUTSIDE_ROOT',
+        message: `该目录受保护，不允许下载到此处（${blocked}）：${absDir}`
       }
     }
   }

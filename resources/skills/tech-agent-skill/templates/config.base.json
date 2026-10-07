@@ -1,0 +1,20 @@
+{
+  "_comment": "Shared base config (default team corp_id prefilled). Multi-bot instances inherit login/Cookie from this file via _merge_auth_from. No accounts, passwords, tokens or cookies are stored here; cookies are written by mcp_auth after QR-login.",
+  "_path_note": "cache.cookie_path 留空即可 —— 由运行时按本机实际位置解析；填绝对路径会与他人机器不兼容，也是本包明令禁止的写法。",
+  "_choose_one": {
+    "use_default_team_instance": "Keep the corp_id below as-is. Other users in the same team can use the skill out of the box.",
+    "use_your_own_corp": "Replace corp_id with <YOUR_CORP_ID>. The default Tech-agent UUID in config.tech-agent.json is for the default team only; pair it with your own config.tech-agent.json (override agent.uuid)."
+  },
+  "auth": {
+    "corp_id": "ding6d9605c0b6ce935f"
+  },
+  "cache": {
+    "cookie_path": ""
+  },
+  "features": {
+    "file_upload": true,
+    "max_file_size_mb": 50,
+    "supported_formats": ["txt", "md", "pdf", "docx", "png", "jpg", "jpeg"]
+  },
+  "_session_placeholder": "Optional: leave as {} to inherit; runtime reads/writes session fields here."
+}

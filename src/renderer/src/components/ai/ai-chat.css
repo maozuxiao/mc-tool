@@ -399,7 +399,25 @@
 .ai-bubble table { width: 100%; border-collapse: collapse; font-size: 12px; display: block; overflow-x: auto; }
 .ai-bubble th, .ai-bubble td { border: 1px solid var(--mc-line); padding: 6px 8px; text-align: left; }
 .ai-bubble th { background: var(--mc-surface-2); }
-.ai-bubble code { background: var(--mc-surface-2); border-radius: 5px; padding: 1px 5px; }
+/* 行内 code（``文件名`` / ``路径`` / 参数名等短片段）
+ *
+ * 此前这条规则只给了背景/圆角/内边距，**没声明 font-family** —— 于是行内 <code>
+ * 直接落到浏览器默认的 monospace（Windows 上是 Consolas/Courier New 一类）。而 AI 回复里
+ * 模型习惯用反引号包文件名与目录路径，这些片段连同所在整行中文正文、表格单元格一起变成
+ * 等宽，呈现出「一段话里两种字体混排」的割裂感（用户反馈）。
+ *
+ * 现在：行内 code **跟随正文字体**（font-family: inherit），只留极浅底 + 细边 + 稍小字号，
+ * 继续承担「这是原文/标识符」的提示作用，但不再制造字体割裂。
+ * 保留 --mc-surface-2 作底色是为了兼容既有配色令牌（浅色主题下几乎不可见，深色主题下仍能区分）。 */
+.ai-bubble code {
+  font-family: inherit;
+  font-size: 0.92em;
+  font-weight: 600;
+  background: var(--mc-surface-2);
+  border: 1px solid var(--mc-line);
+  border-radius: 5px;
+  padding: 0 4px;
+}
 /* 代码块刻意保持深底浅字（语法可读性优先），不参与浅色换肤 */
 .ai-bubble pre {
   background: #332f2b;
@@ -407,8 +425,20 @@
   padding: 12px;
   border-radius: 10px;
   overflow-x: auto;
+  font-family: var(--mc-font-mono);
 }
-.ai-bubble pre code { background: transparent; color: inherit; padding: 0; }
+/* ⚠️ 这条是**必须**的，不是可选：上一条给 `.ai-bubble code` 加了 font-family: inherit，
+ * 而代码块里的 <code> 是它的后代，会被一起继承成无衬线 —— 代码块就毁了。
+ * 所以这里必须显式把等宽字体再声明回来（同时清掉行内 code 的底色/边框/字号）。 */
+.ai-bubble pre code {
+  font-family: var(--mc-font-mono);
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  padding: 0;
+}
 
 /* AI 消息里的链接：下载中时显示禁用态，避免用户重复点击 */
 .ai-bubble a.ai-md-link { text-decoration: underline; cursor: pointer; }
@@ -467,7 +497,8 @@
 .ai-mcp-log { border: 1px solid var(--mc-line); border-radius: 10px; margin: 8px 0; overflow: hidden; }
 .ai-mcp-log__head { display: flex; justify-content: space-between; align-items: center; padding: 5px 8px; font-size: 11.5px; color: var(--mc-ink-soft); background: var(--mc-surface-2); }
 .ai-mcp-log__cancel { border: 0; background: transparent; color: var(--mc-accent); cursor: pointer; font-size: 11.5px; }
-.ai-mcp-log__body { margin: 0; padding: 6px 8px; font-size: 11px; line-height: 1.5; max-height: 160px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; color: var(--mc-ink-soft); }
+/* MCP 日志正文是命令/事件输出，等宽才读得动；同时显式声明避免落到默认 monospace */
+.ai-mcp-log__body { margin: 0; padding: 6px 8px; font-size: 11px; line-height: 1.5; max-height: 160px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; font-family: var(--mc-font-mono); color: var(--mc-ink-soft); }
 .ai-mcp-form { border-top: 1px dashed var(--mc-line); margin-top: 10px; padding-top: 10px; }
 .ai-mcp-form__head { display: flex; justify-content: space-between; align-items: center; font-size: var(--mc-font-sm); font-weight: 700; color: var(--mc-ink); margin-bottom: 6px; }
 .ai-mcp-form__ops { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
@@ -539,6 +570,10 @@
   font-size: 11.5px;
   line-height: 1.7;
   font-weight: 600;
+  /* 与 `.ai-bubble pre` 用同一个等宽栈：这两条是同一份「深底代码块」的两种渲染路径
+   * （库 <CodeBlock> 与本类），此前两边都没声明 font-family，各自落到浏览器默认 monospace，
+   * 一旦系统默认字体不同就会一深一浅地对不齐。 */
+  font-family: var(--mc-font-mono);
   border-radius: 8px;
   background: #2b2118;
   border: 1px solid #3d3028;
@@ -1024,6 +1059,42 @@ html.win-idle .ai-jump-btn.is-live::after { animation-play-state: paused; }
   box-shadow: var(--mc-shadow);
 }
 .ai-skill-panel__head { padding: 2px 4px 8px; font-size: var(--mc-font-sm); font-weight: 700; color: var(--mc-ink); }
+/* 快速搜索框（1.0.50）：贴在标题下、列表 above，输入即过滤；清除按钮只在有内容时出现 */
+.ai-skill-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 8px;
+  padding: 5px 8px;
+  border: 1px solid var(--mc-line);
+  border-radius: 8px;
+  background: var(--mc-surface, #fff);
+  color: var(--mc-ink-soft);
+}
+.ai-skill-search:focus-within { border-color: var(--mc-accent); }
+.ai-skill-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--mc-ink);
+  font: inherit;
+  font-size: 12px;
+}
+.ai-skill-search input::placeholder { color: var(--mc-ink-soft); }
+.ai-skill-search__clear {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--mc-ink-soft);
+  cursor: pointer;
+}
+.ai-skill-search__clear:hover { background: color-mix(in srgb, var(--mc-ink) 10%, transparent); color: var(--mc-ink); }
 .ai-skill-empty { padding: 10px 6px; font-size: 12px; color: var(--mc-ink-soft); }
 /* 「技能默认不启用」明示（1.0.43）：只在一条都没勾选时出现，避免用户以为技能会自动生效 */
 .ai-skill-none {

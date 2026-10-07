@@ -932,6 +932,22 @@ export function ChatPanel({ disabled }: Props) {
   )
   // 下发给主进程的是「来源:id」（内置与导入同名时靠它区分注入哪一份）
   const enabledSkills = useMemo(() => enabledSkillInfos.map(s => skillKey(s)), [enabledSkillInfos])
+  // 快速搜索 + 排序（1.0.50）：
+  // 排序用 Intl.Collator('zh-Hans-CN') —— 浏览器原生 collation 就是**中文按拼音、英文按字母**
+  // 的混排规则，正好是「按首字拼音 / 字母 abc 排序」这个诉求，不需要引拼音库也不必手写映射表。
+  const [skillQuery, setSkillQuery] = useState('')
+  const skillQueryKey = skillQuery.trim().toLowerCase()
+  const visibleSkills = useMemo(() => {
+    const collator = new Intl.Collator('zh-Hans-CN', { sensitivity: 'base', numeric: true })
+    const q = skillQueryKey
+    return skills
+      .filter(s => !q
+        || s.name.toLowerCase().includes(q)
+        || (s.description || '').toLowerCase().includes(q)
+        || s.id.toLowerCase().includes(q))
+      .slice()
+      .sort((a, b) => collator.compare(a.name, b.name) || collator.compare(a.id, b.id))
+  }, [skills, skillQueryKey])
   // 勾选落库（1.0.46）：按会话持久化，重启/切回旧会话能恢复。'__new__' 还没有会话 id，跳过，
   // 等会话创建后由下面的迁移 effect 补落。落库失败不影响本次勾选。
   const persistSkillSel = useCallback((convId: string | null, keys: string[]) => {
@@ -1462,15 +1478,43 @@ export function ChatPanel({ disabled }: Props) {
                   {skillPanelOpen && (
                     <div className="ai-skill-panel">
                       <div className="ai-skill-panel__head">{t('aiSkillsTitle')}</div>
-                      {/* 技能默认全部不勾选（含内置技能），且勾选只对当前会话生效：给一句明示 */}
+                      {/* 快速搜索（1.0.50）：技能变多以后逐条找太慢，按名称/描述/ id 即时过滤。
+                          早先设了「技能数 > 4 才显示」，结果内置 3 个技能时搜索框整个不出现
+                          —— 而它的价值恰恰是**预防性**的：等技能多起来再显示，用户已经翻习惯了。
+                          现在只要有 2 个技能就显示（1 个时列表一眼可见，无需搜索）。*/}
+                      {skills.length >= 2 && (
+                        <div className="ai-skill-search">
+                          <Icon name="Search" size={12} />
+                          <input
+                            value={skillQuery}
+                            onChange={e => setSkillQuery(e.target.value)}
+                            placeholder={t('aiSkillSearch')}
+                            spellCheck={false}
+                          />
+                          {skillQuery && (
+                            <button
+                              type="button"
+                              className="ai-skill-search__clear"
+                              title={t('aiSkillSearchClear')}
+                              onClick={() => setSkillQuery('')}
+                            >
+                              <Icon name="Close" size={11} />
+                            </button>
+                          )}
+                        </div>
+                      )}
+                      {/* 技能默认全部不勾选（含内置技能），且勾选只对当前会话生效：给一句明示*/}
                       {skills.length > 0 && selectedSkillKeys.length === 0 && (
                         <div className="ai-skill-none">{t('aiSkillNoneOn')}</div>
                       )}
                       {skills.length === 0 && <div className="ai-skill-empty">{t('aiSkillEmpty')}</div>}
+                      {skills.length > 0 && visibleSkills.length === 0 && (
+                        <div className="ai-skill-empty">{t('aiSkillNoMatch')}</div>
+                      )}
                       {/* 列表单独滚动、头/底栏固定：英文下底部那三个按钮更宽更高，
                           以前整块面板一起滚，列表被挤成一小条、按钮还得滚动才看得见 */}
                       <div className="ai-skill-list">
-                      {skills.map(s => {
+                      {visibleSkills.map(s => {
                         const on = selectedSkillKeys.includes(skillKey(s))
                         return (
                         <div key={skillKey(s)} className={`ai-skill-item${on ? ' on' : ''}`}>

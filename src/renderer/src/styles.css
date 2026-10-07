@@ -48,6 +48,19 @@
   --mc-font-base: 13.5px;
   --mc-font-lg: 15px;
 
+  /* ── 等宽字体栈（唯一来源）────────────────────────────────────────────
+   * 此前**没有**任何等宽令牌，于是「需要等宽」的地方各自写死：
+   *   - ai-chat.css 的 `.ai-bubble code` 压根没写 font-family → 行内<code>
+   *     直接落到浏览器默认 monospace（Windows 上是 Consolas/Courier New），
+   *     而 AI 回复里模型习惯用反引号包文件名与目录路径，于是这些片段连同
+   *     所在整行中文正文、表格单元格一起变成等宽，呈现出「两种字体混排」的割裂感；
+   *   - styles.css 的 `.preview` / `.td-item` 各写一份 monospace。
+   * 收敛成令牌后：正文用 --animal-font-family，**代码性质**的区域统一取这里。
+   * 字体栈取自同项目 Katty/tools/md-to-island.html 的 --mono（保持两处观感一致）。
+   * 注意：不要在这里引入外部字体文件 —— Nunito / Noto Sans SC 的 woff2 已由
+   * animal-island-ui 自带并被 Vite 打包（见 out/renderer/assets/），字体本来就随应用分发。 */
+  --mc-font-mono: 'SF Mono', 'Fira Code', 'Cascadia Code', Consolas, 'Courier New', monospace;
+
   /* 按钮度量不再自建 token —— 统一交给库 <Button> 的 size 档位。 */
 
   /* ── 库 token 基线：把库默认值收敛到 mc-tool 调色板（一致性治理）── */
