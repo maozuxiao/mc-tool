@@ -4,7 +4,7 @@
 
 - 仓库：https://github.com/maozuxiao/mc-tool
 - 技术栈：Electron 33 + electron-vite + React 18 + TypeScript + Zustand，UI 组件库 [`animal-island-ui`](https://www.npmjs.com/package/animal-island-ui)；AI 面板里的操作类小图标用 [`naive-icons`](https://www.npmjs.com/package/naive-icons)（同为手绘 naive 风，按需引 `svg/*.svg?raw` 并改色跟随主题，见 `src/renderer/src/components/NaiveIcon.tsx`）
-- 当前版本：`1.0.49`（`package.json` 的 `version` 为准）
+- 当前版本：`1.0.50`（`package.json` 的 `version` 为准）
 
 ---
 
@@ -199,10 +199,12 @@
   1. **静默自愈**（无感）：静默 SSO + 隐藏窗口把**站点 SSO 入口**跑一遍 —— 会话还有效时**不会弹任何窗口**，检索直接出结果；
      1.0.49 起这条链路会**等到跳转链真正走完**（此前隐藏窗口等 2.5~3.5 秒就被销毁，跳转正停在 IAM 授权页，票换不成），并新增一步「SSO 无感换票」——
      多数情况下**你根本不用点任何链接**，AI 自己重试完就把结果给你。
+     1.0.50 修掉了这条链路的**鉴权根因**：此前给 iam.streamax.com / wj.streamax.com 的请求头塞进了**整个登录分区的全部 cookie**，且同名 cookie（REQID / usk 各两份）重复出现 —— 服务端因此认不出自己的会话，换票拿不到票据，轻则被误判成「IAM 过期」（明明刚扫码成功），重则窗口停在跳转中途**白屏**。现在 https 请求交回 Chromium 原生处理、主进程拼 Cookie 头时按域过滤并按名去重。**实测**：清空 cookie 冷启动 → 扫码一次 → 鸿翼直接可用，全程零询问。
   2. **询问并给两个入口**（自愈仍失败时）：AI 会问你想用**账号密码登录**还是**扫码登录**，并给出两个**可点文字链接**（Markdown 超链接，不是一长串裸 URL）——
      - 账号密码：站点自带的 H5 登录页（不经 IAM，最稳）；
      - 扫码 / SSO：IAM 登录页（`entityId=edoc2`；一次性登录上下文由应用**现取**，所以每次链接都不一样）；
        偶尔取不到二维码页时会改给「**SSO 登录**」（站点入口，打开后自动跳转完成登录，通常不显示二维码）。
+       1.0.50 起这条入口会**先探一次 IAM 会话**：IAM 已过期时不再给这个入口（那时它只会停在跳转中途、点进去一片空白），只给账号密码一种方式。
      点开即在**应用内窗口**打开（与工具共用登录分区），窗口顶部会显示「正在通过 SSO 自动登录…」提示条（不再是一片白）；
      **登录成功后先显示「✅ 登录成功，正在返回应用…」再自动关闭**，回一句「已登录」即可继续。
   3. **不再有「记住账号密码」**：站点没有让第三方保存口令的接口 —— 那是浏览器自己的行为；
@@ -400,9 +402,9 @@ npm run pack:all   # 全平台
 ```
 dist/
 ├─ latest.yml                            # 自动更新元数据
-├─ MC物料查询 Setup 1.0.49.exe            # NSIS 安装包
-├─ MC物料查询 Setup 1.0.49.exe.blockmap  # 增量更新块映射
-└─ MC物料查询 1.0.49.exe                  # 便携版
+├─ MC物料查询 Setup 1.0.50.exe            # NSIS 安装包
+├─ MC物料查询 Setup 1.0.50.exe.blockmap  # 增量更新块映射
+└─ MC物料查询 1.0.50.exe                  # 便携版
 ```
 
 > macOS 交叉编译在 Windows 上不可靠，DMG 请在 macOS 上打包。
