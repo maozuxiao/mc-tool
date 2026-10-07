@@ -1,10 +1,12 @@
 import { app } from 'electron'
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
-import { appendFileSync, existsSync, mkdirSync, statSync, unlinkSync } from 'fs'
+import { appendFileSync, accessSync, constants, cpSync, existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from 'fs'
 import { join } from 'path'
+import { bareSkillId } from '@shared/ai-types'
 import type { McpEvent, McpServerConfig, McpState, McpStatus } from '@shared/ai-types'
 import { ensureNodeWithNpm, killTree, resolveNodeBinary, resolveNpmCli } from './skillRuntime'
-import { getServerRaw, listServers, serversForSkillKeys } from './mcpStore'
+import { getServerRaw, listServers, saveServer, serversForSkillKeys } from './mcpStore'
+import { skillDirOf } from './skillRegistry'
 
 /**
  * MCP 客户端（1.0.46）—— 自研最小实现：stdio + 换行分隔 JSON-RPC 2.0。
@@ -59,8 +61,63 @@ export function expandVars(value: string): string {
 }
 
 /** 展开后的真实工作目录（空 = 未设置） */
+/**
+ * 解析一个 MCP 服务的工作目录（1.0.50）。
+ *
+ * 先用登记里填的 `cwd`（展开 `%APPDATA%` 等占位符）；**没填**时回退到「该服务所绑定技能
+ * 自带的 runtime 目录」—— 在 `<技能目录>/runtime` 下递归找第一个含 `package.json` 的目录
+ * （层级由技能包自己决定：tech-agent-skill 是 `runtime/mcp-dingtalk-v1-template`，两层）。
+ *
+ * 为什么要有回退：内置技能 tech-agent-skill 的 runtime **已随安装包分发**
+ * （`resources/skills/<id>/runtime/…`），但那条路径在安装版位于 Program Files 下、
+ * 开发版位于仓库目录 —— 两种形态的绝对路径都不一样，还随打包/部署变化。
+ * 让用户手填这么一条路径，必然出现「填了旧位置 → 工作目录不存在」（本机实测：
+ * 填的是导入技能的位置 `%APPDATA%/mc-material-query/skills/…`，而导入副本早已删除）。
+ * 绑定技能本来就是必填项，由它推断 cwd 既准确又免去一项用户负担。
+ *
+ * 注意「dev 下推断出仓库路径」是**预期行为**而非异常：那正是 `skillDirOf` 在未打包时
+ * 按 `app.getAppPath()/resources/skills` 定位的结果，打包后会自然指向安装目录。
+ */
 function resolvedCwd(cfg: McpServerConfig): string {
-  return expandVars(String(cfg.cwd || ''))
+  const filled = expandVars(String(cfg.cwd || ''))
+  if (filled && existsSync(filled)) return filled
+  if (!filled) {
+    // 没填才推断：避免把「填错了」静默改写成别处、让用户找不到问题出在哪
+    const inferred = inferRuntimeDir(cfg.skillKey)
+    if (inferred) return inferred
+  }
+  return filled
+}
+
+/** 由绑定技能的技能目录推断其自带 runtime 的**可运行目录**（找不到返回空串） */
+function inferRuntimeDir(skillKey: string): string {
+  try {
+    const dir = skillDirOf(String(skillKey || ''))
+    if (!dir) return ''
+    return findPkgDir(join(dir, 'runtime'), 0)
+  } catch { /* 技能目录定位失败就用登记值 */ }
+  return ''
+}
+
+/**
+ * 在有限深度内递归找**第一个含 package.json 的目录**。
+ *
+ * 为什么要递归而不是直接用 `<技能>/runtime`：runtime 里的层级由技能包自己决定 ——
+ * tech-agent-skill 是 `runtime/mcp-dingtalk-v1-template/package.json`（**两层**）。
+ * 早先实现直接返回 `<技能>/runtime`，少了那一层，于是报「工作目录没有 package.json」。
+ * 限深 3 层足够，又不会在目录树里乱钻（node_modules 直接跳过）。
+ */
+function findPkgDir(dir: string, depth: number): string {
+  if (depth > 3 || !existsSync(dir)) return ''
+  if (existsSync(join(dir, 'package.json'))) return dir
+  let entries
+  try { entries = readdirSync(dir, { withFileTypes: true }) } catch { return '' }
+  for (const e of entries) {
+    if (!e.isDirectory() || e.name === 'node_modules' || e.name.startsWith('.')) continue
+    const hit = findPkgDir(join(dir, e.name), depth + 1)
+    if (hit) return hit
+  }
+  return ''
 }
 
 function logLine(id: string, line: string): void {
@@ -148,8 +205,10 @@ export function listStatuses(): McpStatus[] {
   return listServers().map(s => statusById(s.id))
 }
 
-export function checkDependencies(cfg: { cwd?: string }): { needsInstall: boolean; hasPackageJson: boolean; cwd: string } {
-  const cwd = expandVars(String(cfg?.cwd || ''))
+export function checkDependencies(cfg: { cwd?: string; skillKey?: string }): { needsInstall: boolean; hasPackageJson: boolean; cwd: string } {
+  // 与 resolvedCwd 走同一套解析（含「cwd 没填时按绑定技能推断自带 runtime 目录」），
+  // 否则会出现「徽标说不用装、实际连接时却解析到别的目录」这类不一致。
+  const cwd = resolvedCwd(cfg as McpServerConfig)
   const hasPkg = !!cwd && existsSync(join(cwd, 'package.json'))
   const hasNm = !!cwd && existsSync(join(cwd, 'node_modules'))
   return { needsInstall: hasPkg && !hasNm, hasPackageJson: hasPkg, cwd }
@@ -361,8 +420,17 @@ export async function connect(cfg: McpServerConfig): Promise<void> {
     void exitCode
   })()
 
-  // 失败时清掉单飞标记，允许下次重试
-  conn.connecting.finally(() => { if (conns.get(cfg.id) === conn) conn.connecting = undefined })
+  // 失败时清掉单飞标记，允许下次重试。
+  //
+  // ⚠️ 这里**不能用 .finally()**：它返回的是**另一个** Promise，会跟着 reject 而且没人 catch ——
+  // 于是每次连接失败都会抛一次 UnhandledPromiseRejectionWarning（2026-10-07 实测复现：
+  // 「工作目录不存在」只是业务错误，却被 Node 报成未处理拒绝，Electron 主进程随时可能崩）。
+  // 改用 then(成功, 失败) 双分支处理，衍生 Promise 不会 reject。
+  const clearSingleFlight = () => { if (conns.get(cfg.id) === conn) conn.connecting = undefined }
+  conn.connecting.then(clearSingleFlight, clearSingleFlight).catch(() => { /* 双分支都不抛，这里只是兜底 */ })
+  // 另外 conn.connecting 本身也可能先于任何调用方的 await 被 reject（并发复用时尤甚），
+  // 挂一个空 catch 只消除 Node 的未处理拒绝警告 —— 真实错误仍由调用方的 try/catch 原样拿到。
+  conn.connecting.catch(() => { /* noop */ })
   return conn.connecting
 }
 
@@ -428,10 +496,14 @@ export async function prepareForSkills(
 
 /** 同步读取：已连接服务暴露的工具定义（OpenAI function 格式） */
 export function cachedToolDefinitions(enabledSkills: string[]): any[] {
-  const keys = new Set(enabledSkills || [])
+  // 按**裸 id** 比较（1.0.50）：服务登记里存的是绑定那一刻的来源前缀（user:/builtin:），
+  // 而用户勾选的是当前这一份（同一技能加了内置版后 key 就从 user: 变 builtin:）。
+  // 按完整 key 比较会让「已连接的工具」凭空消失 —— 表现为勾了技能却一个 MCP 工具都没有。
+  const keys = new Set((enabledSkills || []).map(bareSkillId).filter(Boolean))
   const out: any[] = []
   for (const conn of conns.values()) {
-    if (conn.state !== 'connected' || !conn.cfg.skillKey || !keys.has(conn.cfg.skillKey)) continue
+    if (conn.state !== 'connected' || !conn.cfg.skillKey) continue
+    if (!keys.has(bareSkillId(conn.cfg.skillKey))) continue
     conn.tools.forEach((t, i) => {
       out.push({
         type: 'function',
@@ -499,6 +571,52 @@ export function cancelInstall(id: string): void {
 }
 
 /**
+ * 为「一键准备依赖」准备一个**可写**的工作目录（1.0.50）。
+ *
+ * 为什么要这一步：内置技能的 runtime 源码随安装包分发在 `process.resourcesPath/skills/…`，
+ * 打包后位于 Program Files，普通用户**没有写权限** —— 在那里跑 `npm install` 必然失败
+ * （EPERM / EACCES）。而 dev 模式下同一个路径是仓库目录、**是可写的**，
+ * 所以「dev 能装上依赖」完全不能证明「安装版能装」，必须用运行时探测而非版本分支来判断。
+ *
+ * - 可写（dev、或用户已把服务放在自己的可写目录）→ 原地安装，行为不变，也**不会覆盖已有依赖**；
+ * - 不可写 → 把运行/安装所需的**最小集合**复制到 `userData/mcp/<id>/runtime`，
+ *   并把登记项的 cwd 切到该副本，之后「测试连接」与后续重装都落在副本上。
+ *
+ * 用白名单拷贝而不是整目录递归：万一今后有人把 node_modules 塞进内置包，
+ * 也不会被原样复制放大成几十 MB。
+ */
+function prepareWritableRuntime(
+  cfg: McpServerConfig,
+  cwd: string
+): { dir: string; migrated: boolean; error?: string } {
+  try {
+    accessSync(cwd, constants.W_OK)
+    return { dir: cwd, migrated: false }
+  } catch { /* 不可写 → 走迁移 */ }
+
+  const dst = join(LOG_DIR(), cfg.id, 'runtime')
+  const items = ['package.json', 'package-lock.json', 'src']
+  try {
+    mkdirSync(dst, { recursive: true })
+    for (const name of items) {
+      const from = join(cwd, name)
+      if (!existsSync(from)) continue
+      cpSync(from, join(dst, name), { recursive: true, force: true })
+    }
+    logLine(cfg.id, `[install] 工作目录只读，已复制到可写副本：${dst}`)
+  } catch (e: any) {
+    return { dir: cwd, migrated: false, error: `复制到可写目录失败：${e?.message || e}` }
+  }
+  // 持久化：把登记的 cwd 切到副本，否则这次装完，下次连接仍指向只读目录、直接启动失败
+  try {
+    saveServer({ id: cfg.id, cwd: dst })
+  } catch (e: any) {
+    return { dir: dst, migrated: true, error: `已复制到 ${dst}，但更新登记的工作目录失败：${e?.message || e}` }
+  }
+  return { dir: dst, migrated: true }
+}
+
+/**
  * 在服务工作目录执行依赖安装（默认 `npm install --no-audit --no-fund`，走 npmmirror 镜像，
  * 与该技能自带的 install:fast 一致；可用条目的 installArgs 覆盖）。
  * 进度按行推给 onProgress；可取消（杀整棵进程树）；不静默执行（由 UI 先征求用户同意）。
@@ -519,8 +637,13 @@ export async function installDependencies(
   try {
     if (!cwd) return { ok: false, error: '未设置工作目录：请在登记条目里填 MCP 服务所在目录（含 package.json）' }
     if (!existsSync(cwd)) return { ok: false, error: `工作目录不存在：${cwd}（环境变量未展开或路径无效）` }
-    if (!existsSync(join(cwd, 'package.json'))) {
-      return { ok: false, error: `工作目录没有 package.json：${cwd}` }
+    // 只读目录（典型：安装版的内置技能目录）→ 先复制到 userData 可写副本再装
+    const prep = prepareWritableRuntime(cfg, cwd)
+    if (prep.error) return { ok: false, error: prep.error }
+    const workDir = prep.dir
+    if (prep.migrated) logLine(cfg.id, `[install] 改用可写副本安装：${workDir}`)
+    if (!existsSync(join(workDir, 'package.json'))) {
+      return { ok: false, error: `工作目录没有 package.json：${workDir}` }
     }
     const node = await ensureNodeWithNpm(ac.signal)
     if (!node) {
@@ -536,12 +659,16 @@ export async function installDependencies(
       ? cfg.installArgs
       : ['install', '--no-audit', '--no-fund', '--registry=https://registry.npmmirror.com']
     const argv = [npmCli, ...base]
-    logLine(cfg.id, `[install] ${node.path} ${argv.join(' ')}`)
+    logLine(cfg.id, `[install] ${node.path} ${argv.join(' ')}（cwd=${workDir}）`)
     onProgress(`> ${base.join(' ')}`)
 
     const child = spawn(node.path, argv, {
-      cwd,
-      env: { ...process.env },
+      cwd: workDir,
+      // playwright 的 postinstall 会**另外下载一份 Chromium（约 150MB）**。本技能登录时
+      // 优先复用本机已装的 Google Chrome / Edge，两者都没有才需要浏览器
+      //（见 skills/tech-agent-skill/references/setup-mcp.md），所以这里统一跳过浏览器下载。
+      // 此前没设这个变量：装一次依赖会静默多下 150MB，与文档要求也不一致。
+      env: { ...process.env, PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1' },
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe']
     })

@@ -9,7 +9,7 @@ import { OA_LOGIN_URL, OA_ORIGIN } from '@shared/constants'
 import { IPC } from '@shared/types'
 import { initAutoUpdater, isUpdateDownloaded, startUpdateDownload } from './updater'
 import { registerAIIPC } from './ai/aiIpc'
-import { setWjxtLoginOpener, setWjxtBootstrap, setWjxtLoginCloser, setWjxtHiddenNav, wjxtResolveOriginUrl, wjxtH5Login, wjxtQrLoginUrl, startLoginWatch, wjxtDiag, wjxtProbeLoggedIn, WJXT_H5_LOGIN_URL, WJXT_ORIGIN } from './ai/wjxtSkill'
+import { setWjxtLoginOpener, setWjxtBootstrap, setWjxtLoginCloser, setWjxtHiddenNav, setWjxtSsoHttp, setWjxtIamProbe, wjxtResolveOriginUrl, wjxtH5Login, wjxtQrLoginUrl, startLoginWatch, wjxtDiag, wjxtProbeLoggedIn, WJXT_H5_LOGIN_URL, WJXT_ORIGIN } from './ai/wjxtSkill'
 import { translate, type Lang } from '@shared/i18n'
 import { listSkills } from './ai/skillRegistry'
 import { listStatuses as listMcpStatuses } from './ai/mcpClient'
@@ -550,6 +550,18 @@ function createWindow() {
   // 匹配范围从 oa.streamax.com 放宽到 *.streamax.com：窗口内的入口会跳到 IAM、MC 等兄弟站点，
   // 它们同样需要这份会话，只注入 OA 会让跳转后的页面继续落在登录页上。
   // 提取成函数：应用内窗口现在有两条入口（OA 工作台 / 内网地址直开），两条都必须装上它。
+  //
+  // 2026-10-07 修正（鸿翼「点 SSO 登录 = 白屏」的根因之一）：
+  // 此前对 **https 也在注入**，且注入的是「整个分区的全部 cookie」。日志实证：
+  //   `[oaCookie] inject http iam.streamax.com +19 cookies` / `wj.streamax.com +17 cookies`
+  // 也就是把 OA 的 SESSION/route/LtpaToken、wj 的 checkToken（同名两份）/copy/cut、MC 的票据
+  // 一股脑塞进 `iam.streamax.com/idp/authCenter/authenticate` 的请求头里。后果：
+  //   ① 同名 cookie 重复（`checkToken,checkToken`），服务端解析出的会话不是它要的那一个；
+  //   ② IAM 换票拿不到正确会话 → 不302 到 `/ac/#/index?lck=`，窗口停在 authenticate 页，
+  //      渲染出来就是**白屏**（用户点「SSO 登录」看到的正是这个）；
+  //   ③ 顺带把 `[iamKeepalive] iamSessionAlive=false` 变成常态，探活结论也失真了。
+  // 现在：**https 一律放行**（Chromium 原生就会带上该域应有的、含 Secure 的 cookie，本来就不缺），
+  // 只对**明文 http** 注入，且按请求 host 过滤 + 按名去重 —— 那才是 Chromium 唯一会漏发 Secure cookie 的场景。
   const ensureOaCookieInjector = (sess: Electron.Session) => {
     if (oaCookieInjectorInstalled) return
     oaCookieInjectorInstalled = true
@@ -557,18 +569,28 @@ function createWindow() {
       // 必须始终回调，否则该请求会一直挂起
       // （webContentsId 在类型上是 number | undefined：某些后台请求没有归属 webContents）
       if (details.webContentsId === undefined || !oaWebContentsIds.has(details.webContentsId)) return callback({})
+      // https 由 Chromium 原生处理：它只发该域该路径该secure 性别的 cookie，正是服务端要的
+      if (!/^http:\/\//i.test(details.url)) return callback({})
+      let host = ''
+      try { host = new URL(details.url).hostname.toLowerCase() } catch { return callback({}) }
       try {
         const cookies = await sess.cookies.get({})
-        const cookieStr = cookies.map(c => `${c.name}=${c.value}`).join('; ')
+        // 只保留「本该发给这个 host」的 cookie，并按名去重（同名多份时后取到的覆盖前一个）
+        const byName = new Map<string, string>()
+        for (const c of cookies) {
+          const d = String(c.domain || '').replace(/^\./, '').toLowerCase()
+          if (!d || (host !== d && !host.endsWith('.' + d))) continue
+          byName.set(c.name, c.value)
+        }
+        const cookieStr = [...byName.entries()].map(([k, v]) => `${k}=${v}`).join('; ')
         if (!cookieStr) return callback({})
         const requestHeaders = { ...details.requestHeaders }
         requestHeaders.Cookie = requestHeaders.Cookie ? `${requestHeaders.Cookie}; ${cookieStr}` : cookieStr
         // 诊断：按 host 只记一次，事后可核对「这个域到底补了什么 cookie」
         try {
-          const host = new URL(details.url).host
           if (!oaInjectLoggedHosts.has(host)) {
             oaInjectLoggedHosts.add(host)
-            debugLog(`[oaCookie] inject http ${host} +${cookies.length} cookies`)
+            debugLog(`[oaCookie] inject http ${host} +${byName.size} cookies`)
           }
         } catch { /* URL 解析失败不影响注入 */ }
         callback({ requestHeaders })
@@ -891,6 +913,51 @@ function createWindow() {
     }
   }
   setWjxtHiddenNav((url, settleMs) => hiddenNavUrl(url, settleMs))
+
+  // ── 鸿翼「纯 HTTP 走一遍 SSO 换票链」──────────────────────────────────
+  // 为什么必须有这条（2026-10-07，用户反馈「点 SSO 登录是白屏」的最后一环）：
+  // 隐藏窗口跑这条链时，最终 URL 常年停在 `idp/authCenter/authenticate`（本机日志实证），
+  // 既落不到 AC 登录页、也拿不到一次性 `lck` → 技能侧只能退回「SSO 入口」，
+  // 而那个入口在应用内窗口里就是一片空白。
+  // 但 OA 的二维码登录已经证明：**这套 IAM 的 302 链用纯 HTTP 走是可靠的**
+  // （QR-START 每次都能拿到 `/ac/#/index?lck=…&entityId=oa`，见 04:51:18 日志）。
+  // 同一段代码换一个入口就是 edoc2 的 AC 页 —— 于是「扫码登录」这个选项总能给出来。
+  // 返回值语义（由技能侧判定）：
+  //   - finalUrl 命中 `/ac/#/index?lck=` → 这是**扫码页地址**（fresh=true）
+  //   - finalUrl 落回站点且不在 /sso/auth/ → **无感换票已成功**，不必让用户登录
+  //   - null → 网络/跳转异常，调用方按原兜底处理
+  setWjxtSsoHttp(async (entry) => {
+    const ssoSess = session.fromPartition(PARTITION)
+    //站点 SSO 入口返回的是一份 1254 字节的 **HTML 壳页**（日志实证`len=1254`），
+    // 真正跳向 IAM 的地址写在页面脚本里 —— 纯 HTTP 看不见脚本，所以要自己从正文里捞出来。
+    //捞不到就说明形态变了，此时返回 null，调用方退回隐藏窗口那条老路。
+    const IAM_AUTH_RE = /https:\/\/iam\.streamax\.com\/idp\/authCenter\/authenticate\?[^\s'"<>)]+/i
+    const pickAc = (u: string) => (/iam\.streamax\.com\/ac\/#\/index\?lck=/i.test(u) ? u : null)
+    try {
+      const r = await httpJsonWithRedirect(entry, ssoSess, 6, 15000, true)
+      debugLog('[wjxtSsoHttp] step1 final=' + r.finalUrl.slice(0, 160) + ` len=${r.text.length}`)
+      const ac1 = pickAc(r.finalUrl)
+      if (ac1) return ac1
+      const authUrl = (String(r.text || '').match(IAM_AUTH_RE) || [])[0] || (/idp\/authCenter\/authenticate\?[^\s'"<>)]+/i.test(r.finalUrl) ? r.finalUrl : '')
+      if (!authUrl) {
+        debugLog('[wjxtSsoHttp] no IAM auth url in shell page -> give up')
+        return null
+      }
+      // 第二跳：直接打 IAM 的 authorize 端点，它会302 到 AC 登录页（带一次性 lck），
+      // 或者在 IAM 会话仍有效时一路 302 回站点（= 无感换票成功）。
+      const r2 = await httpJsonWithRedirect(authUrl, ssoSess, 4, 12000, true)
+      debugLog('[wjxtSsoHttp] step2 final=' + r2.finalUrl.slice(0, 160))
+      return r2.finalUrl
+    } catch (e: any) {
+      debugLog('[wjxtSsoHttp] failed: ' + String(e?.message || e))
+      return null
+    }
+  })
+
+  // 「IAM 会话是否还活着」探针：技能侧靠它决定要不要给「SSO 登录」入口。
+  // IAM 一旦idle 过期，SSO 入口只会停在 idp/authCenter/authenticate（应用内窗口 = 白屏），
+  // 那时应当只给 H5 账号密码入口。见 ai/wjxtSkill.ts 的 reloginResult。
+  setWjxtIamProbe(() => keepIamSessionAlive(session.fromPartition(PARTITION)))
 
   // 登录成功后由技能侧调用它自动关掉登录窗口（用户扫完码不用自己找关闭按钮）
   // target 为空串 = 关掉**所有**已登记的鸿翼登录窗口（用户点 H5 页或 IAM 扫码页都有可能）
@@ -1581,7 +1648,7 @@ function httpJsonWithRedirect(startUrl: string, sess: Electron.Session, maxRedir
       // 关键修复(2026-08-27)：每次重定向跟随都必须带上 partition 内已有的 streamax cookie
       // （尤其 IAM 票据 usk/REQID），否则 IAM 认为未登录 → authnEngine 返回重新认证而非种票据+回跳 OA →
       // OA 全程 reauth。getStreamaxCookieString 从 sess 实时读取（含上一跳 set-cookie 写入的新票据）。
-      const cookieStr = await getStreamaxCookieString(sess)
+      const cookieStr = await getStreamaxCookieString(sess, url)
       const req = mod.get({
         hostname: u.hostname,
         port: u.port || (u.protocol === 'https:' ? 443 : 80),
@@ -1630,7 +1697,7 @@ function httpPostFollow(startUrl: string, body: string, sess: Electron.Session, 
       if (redirectCount > maxRedirects) return reject(new Error('重定向次数过多'))
       const u = new URL(url)
       const mod = u.protocol === 'https:' ? https : http
-      const cookieStr = await getStreamaxCookieString(sess)
+      const cookieStr = await getStreamaxCookieString(sess, url)
       const req = mod.request({
         hostname: u.hostname,
         port: u.port || (u.protocol === 'https:' ? 443 : 80),
@@ -1753,13 +1820,52 @@ async function landOaViaHttp(sess: Electron.Session, loginToken: string): Promis
 }
 
 // 从 partition 读取 streamax 相关 cookie 并拼成 Cookie 字符串
-// 注意：这里**故意**是全量（不限域），因为 OA 的工具会话 cookie 本身就落在
-// iam.streamax.com 域（SESSION / usk / REQID），oa.streamax.com 的请求必须带上它们。
-async function getStreamaxCookieString(sess: Electron.Session): Promise<string> {
+//
+// 关于「域」：这里**故意**是全量（不限域），因为 OA 的工具会话 cookie 本身就落在
+// iam.streamax.com 域（SESSION / usk / REQID），oa.streamax.com 的请求必须带上它们；
+// 而且这些 cookie 多为 Secure，对明文的 oa.streamax.com 也要显式带上（这正是补齐的目的）。
+//
+// 2026-10-07 修正（鸿翼 SSO 一直换不到票的根因）：**同名 cookie 会重复出现**，
+// 因为它们按不同 path/domain 各存了一份（实测启动时 10 颗里有 REQID×2、usk×2）。
+// 原实现直接 `name=value` 拼上去，于是发出去的头是
+//   `...; REQID=A; usk=B; ...; REQID=A2; usk=B2; ...`
+// 服务端解析到的是**后出现的那份**，而它往往是 path 更窄/更旧的那份 —— IAM 于是判不出
+// 自己的会话，`/idp/authCenter/authenticate` 一律 302 回AC 登录页：
+//   · `[iamKeepalive] iamSessionAlive=false`（明明刚扫码登录成功，却一直报 IAM 过期）
+//   · 鸿翼换票停在 `authenticate`（本机日志实证），用户点「SSO 登录」看到的就是白屏。
+// 现在按浏览器规则**按名去重**：优先取 path 能匹配请求路径的 cookie，同长度取更通用的（path 更短）。
+async function getStreamaxCookieString(sess: Electron.Session, url?: string): Promise<string> {
   try {
     const all = await sess.cookies.get({})
-    const streamaxCookies = all.filter(c => /streamax/.test(c.domain || ''))
-    return streamaxCookies.map(c => `${c.name}=${c.value}`).join('; ')
+    let streamaxCookies = all.filter(c => /streamax/.test(c.domain || ''))
+    let reqPath = '/'
+    if (url) {
+      try {
+        const u = new URL(url)
+        reqPath = u.pathname || '/'
+        // 域名匹配：只保留「本该发给这个 host」的（cookie 域是后缀匹配语义）
+        const host = u.hostname.toLowerCase()
+        const byHost = streamaxCookies.filter(c => {
+          const d = String(c.domain || '').replace(/^\./, '').toLowerCase()
+          return !!d && (host === d || host.endsWith('.' + d))
+        })
+        // byHost 为空不能当"没 cookie"：url 解析正常但域不匹配时，仍退回全量（保持旧行为）
+        if (byHost.length) streamaxCookies = byHost
+      } catch { /* URL 不合法就不按域过滤 */ }
+    }
+    const byName = new Map<string, Electron.Cookie>()
+    for (const c of streamaxCookies) {
+      const prev = byName.get(c.name)
+      if (!prev) { byName.set(c.name, c); continue }
+      const cp = c.path || '/'
+      const pp = prev.path || '/'
+      const cHit = cp === '/' ? true : reqPath.startsWith(cp)
+      const pHit = pp === '/' ? true : reqPath.startsWith(pp)
+      // 命中的优先；都命中（或都不命中）时取path 更短的那份（更通用、活得更久）
+      const takeNew = cHit !== pHit ? cHit : (cp.length <= pp.length)
+      if (takeNew) byName.set(c.name, c)
+    }
+    return [...byName.values()].map(c => `${c.name}=${c.value}`).join('; ')
   } catch {
     return ''
   }
@@ -1793,7 +1899,7 @@ function keepIamSessionAlive(sess: Electron.Session): Promise<boolean> {
   if (iamKeepAliveInFlight) return iamKeepAliveInFlight
   iamKeepAliveInFlight = (async () => {
     try {
-      const cookieStr = await getStreamaxCookieString(sess)
+      const cookieStr = await getStreamaxCookieString(sess, IAM_SSO_ENTRY_URL)
       if (!cookieStr) return false
       const u = new URL(IAM_SSO_ENTRY_URL)
       const res = await new Promise<{ status: number; location: string; setCookie?: string[] }>((resolve, reject) => {
@@ -2057,7 +2163,8 @@ ipcMain.handle(IPC.OA_QR_LOGIN_START, () => {
     }
 
     // 登录页会种下 IAM/SSO cookie，后续接口必须带上，否则 queryAuthMethods 返回空或报错
-    const cookieStr = await getStreamaxCookieString(sess)
+    // （按 URL 取：这些接口都在 iam.streamax.com，只带 IAM 域该带的，别把 wj 的 checkToken 混进来）
+    const cookieStr = await getStreamaxCookieString(sess, 'https://iam.streamax.com/idp/authn/queryAuthMethods')
     debugLog(`[QR-START] cookies=${cookieStr ? cookieStr.split(';').length : 0} items`)
 
     // 2) 查询可用认证方式，获取扫码认证链 authChainCode（qr 模块的 chain）

@@ -104,6 +104,49 @@ export function setWjxtHiddenNav(fn: ((url: string, settleMs?: number) => Promis
 }
 
 /**
+ * 「IAM 会话是否还活着」的探针，由 index.ts 注入（复用它的 keepIamSessionAlive）。
+ *
+ * 用途（2026-10-07）：edoc2 的 SSO 换票**以 IAM 会话为前提**。IAM 一旦idle 过期，
+ * `sso/auth/goToLoginPage` 会停在 `iam…/idp/authCenter/authenticate` 不再往 AC 登录页跳 ——
+ * 应用内窗口里那一页没有任何可见内容，用户看到的就是**白屏**（本机日志实证：
+ * `[wjxtHiddenNav] lck=no finalUrl=https://iam.streamax.com/idp/authCenter/authenticate…`）。
+ * 所以「SSO 登录」这个入口**只在 IAM 会话还在时**才值得给出去；否则给H5 账号密码入口。
+ */
+let iamProbe: (() => Promise<boolean>) | null = null
+export function setWjxtIamProbe(fn: (() => Promise<boolean>) | null): void {
+  iamProbe = fn
+}
+
+/**
+ * 「纯 HTTP 走一遍 SSO 换票链」能力，由 index.ts 注入（见 setWjxtSsoHttp）。
+ *
+ * 存在的意义（2026-10-07）：隐藏窗口跑这条链时最终 URL 常年停在
+ * `iam…/idp/authCenter/authenticate`（本机日志实证），既落不到 AC 登录页也拿不到一次性 `lck`
+ * → 技能侧只能退回「SSO 入口」，而那个入口在应用内窗口里是**白屏**。
+ * OA 的二维码登录则证明这套 IAM 的 302 链**用纯 HTTP 走是可靠的**（`QR-START` 每次都拿到
+ * `/ac/#/index?lck=…&entityId=oa`）。同一段代码换个入口即得 edoc2 的 AC 页 ——
+ * 于是「扫码登录」这个入口总能给出来，用户不必再点那个会白屏的 SSO 地址。
+ *
+ * 返回：命中的 AC 页地址 / 落回站点的最终地址（= 已无感换票成功）/ null（异常）。
+ */
+let ssoHttp: ((entryUrl: string) => Promise<string | null>) | null = null
+export function setWjxtSsoHttp(fn: ((entryUrl: string) => Promise<string | null>) | null): void {
+  ssoHttp = fn
+}
+
+/** AC 扫码页（含一次性 lck）判据 */
+function isAcLoginUrl(u: string): boolean {
+  return /\/ac\/#\/index\?lck=/i.test(String(u || ''))
+}
+
+/** 最终落点是否已经回到站点域内且不在 SSO 入口上（= 换票链走完 = 已登录） */
+function landedBackOnSite(u: string): boolean {
+  try {
+    return new URL(u).hostname.toLowerCase() === 'wj.streamax.com' && !/\/sso\/auth\//i.test(u)
+  } catch { return false }
+}
+
+/**
  * 扫码登录页（IAM AC 登录页，`entityId=edoc2`）。
  *
  * 为什么必须**现取**：URL 里的 `lck`（`context_oauth2_…`）是一次性 OAuth2 上下文，
@@ -117,8 +160,12 @@ export function setWjxtHiddenNav(fn: ((url: string, settleMs?: number) => Promis
 export async function wjxtQrLoginUrl(): Promise<{ url: string; fresh: boolean }> {
   if (!hiddenNav) return { url: WJXT_SSO_LOGIN_URL, fresh: false }
   try {
-    const finalUrl = await hiddenNav(WJXT_SSO_LOGIN_URL, 3500)
-    if (finalUrl && /\/ac\/#\/index\?lck=/i.test(finalUrl)) {
+    // 预算给到 15s（hiddenNav 内部再加 3s 余量≈ 18s）：IAM 冷启动实测要 20~35s 才把
+    // 跳转链跑完（见 index.ts 的 QR-START 自适应预热，上限 70s）。此前这里只给 3.5s
+    // （总 6.5s），IAM 一冷就必然抓不到 lck → fresh=false → 只能退回「SSO 入口」，
+    // 而 IAM 会话不健康时那个入口必白屏（用户反馈）。多等几秒换一个真能用的扫码页划算。
+    const finalUrl = await hiddenNav(WJXT_SSO_LOGIN_URL, 15000)
+    if (finalUrl && isAcLoginUrl(finalUrl)) {
       wjxtLog(`[qr] fresh lck url ok (${finalUrl.split('?')[0]}…)`)
       return { url: finalUrl, fresh: true }
     }
@@ -126,7 +173,35 @@ export async function wjxtQrLoginUrl(): Promise<{ url: string; fresh: boolean }>
   } catch (e: any) {
     wjxtLog('[qr] hidden nav failed: ' + String(e?.message || e))
   }
+  //隐藏窗口没拿到 lck（常年停在 authenticate）→ 改用**纯 HTTP** 走一遍同一条链：
+  // OA 扫码登录已证明这条路可靠，能直接签发出 entityId=edoc2 的 AC 扫码页。
+  const ac = await mintAcLoginUrl(WJXT_SSO_LOGIN_URL)
+  if (ac) return { url: ac, fresh: true }
   return { url: WJXT_SSO_LOGIN_URL, fresh: false }
+}
+
+/**
+ * 用纯 HTTP 跑一遍 SSO 链，取回 edoc2 的 AC 扫码页（带一次性 lck）。
+ * 返回 null = 没拿到（网络异常 / IAM 跳转形态变了）。
+ *
+ * 注意：若 IAM 会话还在，这条链会一路 302 回站点（= 无感换票成功），此时返回 null ——
+ * 调用方紧接着的 `probeLoggedIn()` 会把它认成「已自动恢复」，不需要打扰用户。
+ */
+async function mintAcLoginUrl(entryUrl: string): Promise<string | null> {
+  if (!ssoHttp) return null
+  try {
+    const finalUrl = await ssoHttp(entryUrl)
+    if (!finalUrl) return null
+    if (isAcLoginUrl(finalUrl)) {
+      wjxtLog(`[qr] ac login page minted over http (${finalUrl.split('?')[0]}…)`)
+      return finalUrl
+    }
+    wjxtLog(`[qr] http sso chain landed on ${finalUrl.slice(0, 120)} (backOnSite=${landedBackOnSite(finalUrl)})`)
+    return null
+  } catch (e: any) {
+    wjxtLog('[qr] http sso chain failed: ' + String(e?.message || e))
+    return null
+  }
 }
 
 /** 上一次「SSO 无感换票」的尝试时刻（用于限频：失败后 30 秒内不重复跑，免得每次查询都多等几秒） */
@@ -164,6 +239,28 @@ export async function silentSsoHeal(): Promise<boolean> {
     }
   } catch (e: any) {
     wjxtLog('[heal] failed: ' + String(e?.message || e))
+  }
+  //隐藏窗口这条路常年停在 authenticate（票换不成）→ 再用**纯 HTTP** 走一遍同一条链。
+  // IAM 会话还在时它会一路 302 回站点并把 edoc2 会话种好，这正是「无感换票」想要的结果。
+  if (ssoHttp) {
+    try {
+      wjxtLog('[heal] http SSO ticket exchange start')
+      const finalUrl = await ssoHttp(WJXT_SSO_LOGIN_URL)
+      wjxtLog(`[heal] http chain final=${String(finalUrl).slice(0, 140)}`)
+      if (finalUrl && landedBackOnSite(finalUrl)) {
+        // cookie 是异步落地生效的，连探 3 次再下结论
+        for (let i = 1; i <= 3; i++) {
+          const ok = await probeLoggedIn()
+          wjxtLog(`[heal] http probe#${i} loggedIn=${ok}`)
+          if (ok === true) return true
+          if (i < 3) await new Promise(r => setTimeout(r, 1200))
+        }
+      }
+      // 落到 AC 登录页 = IAM 需要人登录，纯 HTTP 换不了票，交给上层给入口
+      if (finalUrl && isAcLoginUrl(finalUrl)) wjxtLog('[heal] landed on AC login page -> need user')
+    } catch (e: any) {
+      wjxtLog('[heal] http failed: ' + String(e?.message || e))
+    }
   }
   return false
 }
@@ -261,9 +358,19 @@ export function wjxtH5Login(): Promise<boolean> {
       return false
     } catch (e: any) {
       wjxtLog('[h5login] failed: ' + String(e?.message || e))
-      // H5 页都起不来 → 退回原来的 SSO 登录窗口（老路径，IAM 会话正常时仍可用）
-      try { openLoginWindow?.(WJXT_SSO_LOGIN_URL) } catch { /* ignore */ }
-      watchLoginUntilDone()
+      // H5 页都起不来 → 退回原来的 SSO 登录窗口（老路径，**仅 IAM 会话还在时可用**）：
+      // IAM 已过期时那个入口会停在 idp/authCenter/authenticate，用户点进去是白屏，
+      // 那就别开这个窗口了 —— 上层会把H5 入口重新给用户一次。
+      let iamAlive: boolean | null = null
+      if (iamProbe) {
+        try { iamAlive = await iamProbe() } catch { iamAlive = null }
+      }
+      if (iamAlive === true) {
+        try { openLoginWindow?.(WJXT_SSO_LOGIN_URL) } catch { /* ignore */ }
+        watchLoginUntilDone()
+      } else {
+        wjxtLog(`[h5login] fallback SSO window skipped (iamAlive=${iamAlive}) —— 会白屏`)
+      }
       return false
     } finally {
       h5Pending = null
@@ -1425,10 +1532,11 @@ function toUserError(e: any): string {
  * ② 用户更想扫码时也只能先关掉再想办法；③ 回复里把「记住账号密码」当成常规建议，
  * 而站点本身并不提供这个能力（那是浏览器行为）。
  *
- * 现在：静默自愈（隐藏窗口跑 SSO 入口）已在上游失败，于是返回**两个可点击的登录入口**让用户自己选：
- *   - `h5LoginUrl`：站点自带 H5 页，账号密码，不经 IAM（白屏风险最低）
+ * 现在：静默自愈（隐藏窗口跑 SSO 入口）已在上游失败，于是返回**可点击的登录入口**让用户自己选：
+ *   - `h5LoginUrl`：站点自带 H5 页，账号密码，不经 IAM（白屏风险最低，**任何时候都给**）
  *   - `qrLoginUrl`：IAM AC 登录页（`entityId=edoc2`），扫码或密码；`lck` 一次性，已现取；
- *     取不到时（`fresh=false`）是**站点 SSO 入口**，点开由站点自己跳转完成登录
+ *     取不到时（`fresh=false`）是**站点 SSO 入口** —— 但它**只在 IAM 会话还活着时才给**
+ *     （IAM 失效时点开就是白屏，见下面 reloginResult 里的注释）
  * 点开任意一个都会由渲染层在**应用内窗口**打开（共享登录分区），登录成功后
  * 窗口会先显示「登录成功」再自动关闭（`showLoginSuccessThenClose`），AI 随即重试原查询。
  */
@@ -1451,34 +1559,71 @@ async function reloginResult(code: 'NEED_RELOGIN' | 'WJXT_NO_SESSION'): Promise<
   }
   // 无论用户点哪个入口，都开始监听：会话一建立就自动关掉登录窗口
   startLoginWatch()
-  // 文案要对得上实际给的地址：`fresh=false` 时是**站点 SSO 入口**，它会在应用内窗口里自动跳转
-  // （IAM 会话仍然有效时甚至不显示二维码就直接换票完成）—— 再叫「扫码登录」会让人以为会看到二维码。
-  const qrLabel = qr.fresh ? '扫码登录' : 'SSO 登录'
-  const qrNote = qr.fresh
-    ? 'IAM 二维码页，已生成一次性登录上下文'
-    : '站点 SSO 入口，打开后自动跳转完成登录（通常不会显示二维码）'
+  //
+  // 「SSO 登录」这个入口要不要给（2026-10-07）：
+  // edoc2 的换票以 **IAM 会话**为前提。IAM 会话一旦 idle 过期，SSO 入口会永远停在
+  // `iam…/idp/authCenter/authenticate`（不再往 AC 登录页跳），应用内窗口里那页没有可见内容
+  // → 用户点进去看到的就是**白屏**。所以：
+  //   - `fresh=true`（已抓到一次性 lck）→ 给「扫码登录」，那是真能用的 AC 页；
+  //   - 否则探一次 IAM：活着才给「SSO 登录」（会秒换票），死了就**只给 H5 账号密码**。
+  let iamAlive: boolean | null = null
+  if (!qr.fresh && iamProbe) {
+    try {
+      iamAlive = await iamProbe()
+    } catch (e: any) {
+      wjxtLog('[needlogin] IAM probe failed: ' + String(e?.message || e))
+    }
+  }
+  const ssoUsable = qr.fresh || iamAlive === true
+  wjxtLog(`need login (${code}) -> iamAlive=${iamAlive} qrFresh=${qr.fresh} ssoUsable=${ssoUsable}`)
+  const options: Array<{ type: string; label: string; url: string; note: string; markdown: string }> = [
+    {
+      type: 'password',
+      label: '账号密码登录',
+      url: WJXT_H5_LOGIN_URL,
+      note: '站点自带 H5 页，不经 IAM',
+      markdown: `[账号密码登录](${WJXT_H5_LOGIN_URL})`
+    }
+  ]
+  if (ssoUsable) {
+    const fresh = qr.fresh
+    const label = fresh ? '扫码登录' : 'SSO 登录'
+    const note = fresh
+      ? 'IAM 二维码页，已生成一次性登录上下文'
+      : '站点 SSO 入口，打开后自动跳转完成登录（通常不会显示二维码）'
+    options.push({
+      type: fresh ? 'qrcode' : 'sso',
+      label,
+      url: qr.url,
+      note,
+      markdown: `[${label}](${qr.url})`
+    })
+  }
+  // 编号列表按**实际给出的入口**拼：IAM 失效时只有一个入口，就不要在文案里提到「选第2 种」
+  const optionLines = options.map((o, i) => `${i + 1}. ${o.markdown} —— ${o.note}`).join('\n')
+  const onlyOne = options.length === 1
   return {
     ok: false,
     error: code,
     needLogin: true,
     /** 账号密码登录（站点自带 H5 页，不经 IAM） */
     h5LoginUrl: WJXT_H5_LOGIN_URL,
-    /** 登录入口（IAM AC 页 `entityId=edoc2`；取不到 lck 时为站点 SSO 入口） */
+    /** 登录入口（IAM AC 页 `entityId=edoc2`；取不到 lck 时为站点 SSO 入口 —— 仅当 IAM 会话仍在） */
     qrLoginUrl: qr.url,
-    /** 结构化列表，便于模型直接渲染成两个链接 */
-    loginOptions: [
-      { type: 'password', label: '账号密码登录', url: WJXT_H5_LOGIN_URL, markdown: `[账号密码登录](${WJXT_H5_LOGIN_URL})` },
-      { type: qr.fresh ? 'qrcode' : 'sso', label: qrLabel, url: qr.url, markdown: `[${qrLabel}](${qr.url})` }
-    ],
-    /** 拼好的 Markdown 片段：模型**照抄**即可（用户看到的是可点文字，而不是一长串 URL） */
-    loginLinksMarkdown: `[账号密码登录](${WJXT_H5_LOGIN_URL})  \n[${qrLabel}](${qr.url})`,
+    /** IAM 会话是否还活着；false 时 SSO 入口必白屏，因此只给 H5 一个入口 */
+    iamSessionAlive: iamAlive,
+    /** 结构化列表，便于模型直接渲染成链接 */
+    loginOptions: options.map(o => ({ type: o.type, label: o.label, url: o.url, note: o.note })),
+    /** 拼好的 Markdown 片段：模型**照抄**即可（用户看到的是可点文字，而不是一长串URL） */
+    loginLinksMarkdown: options.map(o => o.markdown).join('  \n'),
     message: (code === 'WJXT_NO_SESSION'
       ? '应用内还没有鸿翼文件系统（企业内容库）的登录态，已尝试无感恢复但未成功。'
       : '鸿翼文件系统（企业内容库）的登录态已失效，已尝试无感恢复但未成功。')
-      + '请**选一种方式登录**（点下面任一链接即可，会在应用内窗口打开；登录成功后窗口会显示「登录成功」再自动关闭）：\n'
-      + `1. [账号密码登录](${WJXT_H5_LOGIN_URL}) —— 站点自带 H5 页，不经 IAM\n`
-      + `2. [${qrLabel}](${qr.url}) —— ${qrNote}\n`
-      + '**把上面两行原样输出为 Markdown 链接**：不要改写成裸 URL、不要放进代码块、不要加引号。\n'
+      + (onlyOne
+        ? '统一身份（IAM）会话已过期，SSO 入口此时会停在跳转中途、打开是一片空白，所以**只给这一个入口**：\n'
+        : '请**选一种方式登录**（点下面任一链接即可，会在应用内窗口打开；登录成功后窗口会显示「登录成功」再自动关闭）：\n')
+      + optionLines + '\n'
+      + '**把上面这些行原样输出为 Markdown 链接**：不要改写成裸 URL、不要放进代码块、不要加引号。\n'
       + '登录完成后回一句「已登录」，我就立刻重试刚才的查询。'
       + '（不要用系统浏览器打开这些地址：系统浏览器与应用不共享登录态。）'
   }
@@ -1497,6 +1642,11 @@ export const WJXT_SEARCH_TOOL_DEFINITION = {
       '**严禁**合并成 `[下载/预览](…)` 或只给其中一个；结果里每条都自带 `markdown` 字段（拼好的现成片段），' +
       '直接照抄即可（正例：`[预览](https://…/preview.html?fileid=…&) / [下载](https://…/preview.html?fileid=…&mcdl=1&name=…)`；' +
       '反例：`[下载/预览](…)`）。目录列用 `[打开目录](folderUrl)`。\n' +
+      '**目录必须始终是可点链接，不只是结果表里**：返回里还有 `folders[]`（本次结果覆盖的目录去重清单，' +
+      '每项自带 `markdown`），**凡是你在回复里写到目录的地方 —— 包括开头「资料分布在以下 N 个目录」' +
+      '这类归纳表、多轮追问后的总结、结论里的定位建议 —— 一律照抄 `folders[].markdown`**，' +
+      '**禁止**把目录路径写成点不开的纯文本（用户实测汇总表里的三个目录全是纯文本，' +
+      '而下方结果表的目录列却都有链接）。链接文字用 `folderPath`（真实路径名），不要用 `path`（数字 id 串）。\n' +
       '—— 以下是检索能力说明 ——\n' +
       '在鸿翼文件系统（Streamax 企业内容库）里搜索文件，返回编号清单（编号 / 文件名 / 大小 / 扩展名 / ' +
       '修改时间 / 版本号 / 目录路径 / fileGuid / 原始字节数）。' +
@@ -1750,6 +1900,28 @@ export async function runWjxtSearch(input: {
       const label = SORT_LABEL[k] || k
       notes.push(`该部署不支持服务端按${label}排序（会静默返回空结果集），工具已改用「相关度查询 + 本地按${label}排序」，结果已排好、不必自己再排`)
     }
+    // 本次结果覆盖到的目录（按 folderId 去重）。
+    // 为什么必须单独给一份清单：此前每条结果各自带 folderUrl，模型照抄结果表就有链接；
+    // 但它在回答**开头**把结果归纳成「资料分布在以下三个目录」时，手里只有一串路径文本 ——
+    // 要重新拼 `index.html#doc/enterprise/<folderId>` 只能凭记忆，于是写出**点不开的纯文本路径**
+    // （用户实测：汇总表三个目录全是纯文本，而下方结果表的目录列却都有链接）。
+    // 给出成对的 path + url + 现成 markdown，归纳场景就能直接抄。
+    const folderAgg = new Map<string, { path: string; url: string; count: number }>()
+    for (const f of files) {
+      const fid = String(f.parentFolderId || '')
+      if (!fid) continue
+      const hit = folderAgg.get(fid)
+      if (hit) { hit.count++; continue }
+      folderAgg.set(fid, {
+        path: f.relativePath || f.path || '',
+        url: `${WJXT_ORIGIN}/index.html#doc/enterprise/${fid}`,
+        count: 1
+      })
+    }
+    const folders = [...folderAgg.values()].map(d => ({ ...d, markdown: `[${d.path}](${d.url})` }))
+    if (folders.length) {
+      notes.push(`本次结果覆盖 ${folders.length} 个目录；**回复里凡提到目录，一律照抄 \`folders[].markdown\`（或结果行的 folderPath + folderUrl）给成可点链接**，不要把目录写成点不开的纯文本路径`)
+    }
     return {
       ok: true,
       total,
@@ -1759,6 +1931,8 @@ export async function runWjxtSearch(input: {
       strategy,
       sortMode,
       ...(notes.length ? { note: notes.join('；') } : {}),
+      /** 本次结果覆盖的目录清单（去重，含现成 markdown）—— 归纳/总结场景照抄它 */
+      folders,
       // 字段对齐原技能包 search_edoc2.ps1 的默认输出（name/path/mtime/ext/size/guid/id/pid + ver）：
       // 「哪个版本最新」「这份文件在哪」这类问题必须靠 mtime / ver / path 回答，只有文件名不够。
       files: files.map((f, i) => {
