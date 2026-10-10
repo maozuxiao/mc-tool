@@ -37,15 +37,22 @@
    会把同行两个 26×26 的图标按钮改写成「26 宽 × 30 高 + 左右各 14px 内边距」而挤压图标。
    现在头部只有 .ai-side-toggle / .ai-side-new 两个图标按钮，各自尺寸自洽，无需全局改写。 */
 .ai-history { flex: 1; overflow-y: auto; padding: 8px; }
-/* 左下角固定放 Markdown 编辑器入口，不随历史列表滚动 */
+/* 左下角固定放 Markdown 编辑器入口，不随历史列表滚动。
+   ⚠️ 必须是 **column**（2026-10-11 用户反馈布局冲突）：这里原本是 row，于是
+   「批量操作面板」与「Markdown 编辑」按钮被**并排**挤进同一行 —— 面板贴到左下角、
+   按钮被侧栏右边界裁掉一半（"Markdown 编辑" 后半截消失）。纵向排列才不会互相挤占。 */
 .ai-sidebar-foot {
   border-top: 1px solid var(--mc-line);
   padding: 10px;
   display: flex;
+  flex-direction: column;
+  gap: 8px;
+  /* 底部区域不参与压缩：否则列表项多的时候它会被压扁、按钮文字被裁 */
+  flex-shrink: 0;
 }
 /* Markdown 编辑器入口改用库 <Tooltip variant="default"> 后，按钮外面多了一层
    inline-flex wrapper（Tooltip 的 className 落在它身上），由它撑满一行，按钮再 fill。 */
-.ai-md-editor-tip { flex: 1; display: flex; }
+.ai-md-editor-tip { display: flex; width: 100%; flex: none; }
 /* 提示气泡的宽度。
    库给气泡类写的是 width:max-content + max-width:240px，而气泡的包含块就是这个
    34px 高的 wrapper（= 侧栏宽度 - 20px）。提示文案有 33 个字，max-content 远超 240px，
@@ -135,9 +142,50 @@
   gap: 4px;
   border-radius: 12px;
   padding: 4px 6px;
+  /* 「当前会话」用左侧主色竖条表达 —— 纯靠底色会和「已勾选」撞车，
+     用户根本分不清自己点的是哪个（2026-10-11 反馈）。*/
+  position: relative;
 }
 .ai-history-item:hover { background: var(--mc-surface-2); }
 .ai-history-item.active { background: var(--mc-accent-tint); }
+.ai-history-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--mc-accent);
+}
+/* 已勾选：浅主色底 + 主色描边。刻意与 active 的「竖条 + 更强底色」形成明显差异。 */
+.ai-history-item.selected {
+  background: color-mix(in srgb, var(--mc-accent) 14%, var(--mc-surface));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--mc-accent) 55%, transparent);
+}
+/* 两者同时成立（正在查看且已勾选）：保留竖条，底色用勾选色，视觉上「既是当前也是选中」 */
+.ai-history-item.active.selected { background: color-mix(in srgb, var(--mc-accent) 20%, var(--mc-surface)); }
+/* 多选模式入口按钮（侧栏头部，与「新建对话」同一规格） */
+/* 多选模式入口按钮（侧栏头部）。
+   规格与旁边的「新建对话」(.ai-side-new) **完全一致** —— 边框、底色、圆角、尺寸都一样，
+   两个并排的按钮看起来才是一套；透明底+无边框会显得像"飘在标题栏上"（用户反馈）。*/
+.ai-side-selmode {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  padding: 0;
+  border: 1px solid var(--mc-line);
+  border-radius: 8px;
+  background: var(--mc-surface);
+  color: var(--mc-ink);
+  line-height: 1;
+  cursor: pointer;
+}
+.ai-side-selmode:hover { background: var(--mc-surface-2); border-color: var(--mc-accent); }
+.ai-side-selmode.on { background: var(--mc-accent); border-color: var(--mc-accent); color: #fff; }
 .ai-history-title {
   flex: 1;
   min-width: 0;
@@ -409,6 +457,254 @@
  * 现在：行内 code **跟随正文字体**（font-family: inherit），只留极浅底 + 细边 + 稍小字号，
  * 继续承担「这是原文/标识符」的提示作用，但不再制造字体割裂。
  * 保留 --mc-surface-2 作底色是为了兼容既有配色令牌（浅色主题下几乎不可见，深色主题下仍能区分）。 */
+/* ── AI 回复里的大图（1.0.51）────────────────────────────────────────
+ * 缺陷复盘（2026-10-10，用户实测「没缩放到合适的大小」）：
+ * 第一版规则写成 `.ai-bubble .markdown-body img`，但 **`MessageItem` 里 ReactMarkdown 是
+ * 直接渲染进 `.ai-bubble` 的，根本没有 `.markdown-body` 这层包装**（本文件另一处
+ * `.ai-bubble .markdown-body` 的字号规则也因此一直失效）。选择器匹配不到 → 规则完全没生效 →
+ * 图片按原始像素渲染、撑满并溢出气泡。
+ * 现在改成给`MarkdownImg` 挂className、用**精确 class** 控制：
+ *   - `max-width: min(100%, 640px)`：窄窗口自动收到气泡宽度，宽窗口封顶 640px
+ *     （大幅技术图纸原本会横向撑到 1200px+，缩略后一眼能看全，点开才看细节）；
+ *   - `max-height: 380px`：长图不把气泡撑得过高；
+ *   - `object-fit: contain` + `width: auto`：小图不会被拉伸放大。
+ * 用 class 而非 `.ai-bubble img` 是为了**不误伤气泡内工具卡片**（ToolRunCard）自己的图标。 */
+.ai-msg-img {
+  display: block;
+  width: auto;
+  max-width: min(100%, 640px);
+  max-height: 380px;
+  object-fit: contain;
+  margin: 10px auto;
+  border-radius: 10px;
+  /* 刻意**不加白色背景**（2026-10-11 用户反馈）：知识库里大量 PNG 是透明底的图标/
+     截图，强加白底会出现「白方块」压在气泡上。底色交给所在容器（气泡 / 预览舞台）。*/
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08);
+  cursor: zoom-in;
+}
+.ai-msg-img:hover { box-shadow: 0 6px 16px rgba(0, 0, 0, 0.14); }
+/* 加载失败/空 src 的占位：给一句可读文案，而不是留一个破图空白 */
+.ai-img-broken {
+  display: inline-block;
+  padding: 6px 10px;
+  border: 1px dashed var(--mc-line);
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--mc-ink-soft);
+}
+/* ── 大图预览弹窗（1.0.51）──────────────────────────────────────────
+ * 曾做成右侧分栏（用户要「看图时继续读回答」），实测对话区被压到半宽、
+ * 窄窗口几乎没法看字，**已恢复为全屏弹窗**；翻页（←/→）能力保留。
+ *
+ * 尺寸基准必须是**内容区**而不是视口，两个坑都踩过：
+ *  · 用 `vw`（早先的 92vw）→ 比 Modal 内容区宽出一个内边距，底部挂出横向滚动条；
+ *  · 用 `vh` 去「猜」高度 → Modal 的 body 还要扣掉 header / footer / 工具条 / padding，
+ *    必然溢出（用户反馈「图高时 100% 仍有滚动条」）。
+ * 所以高度一律交给 flex 链：body `flex:1` → wrap `flex:1 1 auto` → 舞台/内容区
+ * `flex:1 1 auto` + `min-height:0`，body 因此不会长出多余滚动条。
+ * ⚠️ basis 必须 auto：取 0% 时，Modal 高度为 auto（图片较矮）容器初始高度为 0 且无处 grow。 */
+.ai-img-preview-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  /* Modal body 的 CSS 是 `align-items:flex-start`，本元素作为 flex item 会被
+     shrink-to-fit，必须 align-self:stretch 撑满宽度，否则内部 margin:auto 无处生效、图片贴左。 */
+  width: 100%;
+  align-self: stretch;
+  flex: 1 1 auto;
+  min-height: 0;
+  /* ⚠️ `min-width: 0` 同样关键（2026-10-11 用户反馈「切换到第二张时『复位』按钮显示不全」）：
+     flex item 的 `min-width:auto` 会拒绝收缩到内容以下，图片的固有宽度就把这一层顶宽，
+     进而把 Modal 撑到 `max-width` 上限 —— 表现为弹窗比正常时更宽、右上角按钮被裁掉一角。
+     窗口越矮越容易触发（图片被压扁后重排）。 */
+  min-width: 0;
+  overflow: hidden;
+}
+.ai-img-preview-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  /* ⚠️ `flex: none` 很重要（2026-10-11 用户反馈「复位按钮显示不全」）：
+     工具条是 flex item，默认 `flex-shrink: 1`，被 Modal body 的 flex 布局压缩后，
+     里面的按钮跟着一起被压扁、边框与文字裁掉一小块。 */
+  flex: none;
+  width: 100%;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--mc-ink-soft);
+}
+.ai-img-preview-count {
+  flex: none;
+  min-width: 46px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--mc-surface);
+  color: var(--mc-ink);
+}
+/* 缩放比例：滚轮缩放后需要数值反馈（用户反馈「不显示缩放比例」）。
+   tabular-nums 让百分比跳动时宽度稳定，不会推挤后面的提示文字。 */
+.ai-img-preview-ratio {
+  flex: none;
+  min-width: 52px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--mc-surface-2);
+  color: var(--mc-ink);
+  font-weight: 600;
+}
+/* 提示文字是 bar 里唯一「可牺牲」的项：`min-width: 0` + 省略号让它在窄窗口下收缩，
+   而不是把右侧的「复位」按钮挤出容器（那正是按钮显示不全的直接原因）。 */
+.ai-img-preview-tip {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.75;
+}
+.ai-img-preview-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+/* 「复位」用原生按钮而非库 Button（悬停被压扁/切图被裁，见组件注释里的说明）。
+   `flex: none` + `white-space: nowrap` 保证它永远不被挤压、不换行。
+   scale 已是 100% 时置灰 —— 没有可复位的东西还给一个可点的按钮，是噪声。 */
+.ai-img-reset-btn {
+  flex: none;
+  white-space: nowrap;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-family: inherit;
+  line-height: 1.6;
+  color: var(--mc-ink);
+  background: var(--mc-surface);
+  border: 1px solid var(--mc-line);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color .15s ease, border-color .15s ease;
+}
+.ai-img-reset-btn:hover:not(:disabled) { color: var(--mc-accent); border-color: var(--mc-accent); }
+.ai-img-reset-btn:disabled { opacity: 0.4; cursor: default; }
+/* 图片舞台：左右各一个翻页按钮，中间是可滚动/可缩放的内容区 */
+.ai-img-preview-stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  /* 与 wrap 同理：不写 min-width:0，图片的固有宽度会把这一层也顶宽 */
+  min-width: 0;
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+.ai-img-preview-stage > .ai-img-nav-btn { align-self: center; flex: none; }
+/* 缩放容器：origin 必须与 JS 的补偿公式一致 —— top left 时「内容坐标 × 比例」成立 */
+.ai-img-preview {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  background: #fff;
+  border-radius: 8px;
+  text-align: center;
+}
+.ai-img-preview.zoomed { cursor: grab; }
+.ai-img-preview.panning { cursor: grabbing; }
+.ai-img-preview__img {
+  display: block;
+  margin: 0 auto;
+  max-width: 100%;
+  /* 高度上限交给容器而不是视口单位 —— 容器高度已由 flex 算好，
+     图片只会「完整显示、不溢出」，因此不会出现多余的滚动条。 */
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 8px;
+  /* 同 .ai-msg-img：图上不刷白底，透明底图片才不会在预览里变成一块白方块。
+     白色由外层 `.ai-img-preview` 容器提供，视觉上仍是「白底看图」。 */
+  transform-origin: top left;
+  -webkit-user-drag: none;
+  user-select: none;
+}
+/* 翻页按钮 */
+.ai-img-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--mc-line);
+  border-radius: 8px;
+  background: var(--mc-surface);
+  color: var(--mc-ink-soft);
+  cursor: pointer;
+}
+.ai-img-nav-btn:hover:not(:disabled) { color: var(--mc-accent); border-color: var(--mc-accent); }
+.ai-img-nav-btn:disabled { opacity: 0.35; cursor: default; }
+
+/* ── 会话多选与批量删除（1.0.51）──────────────────────────────────── */
+.ai-history-all {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 8px 6px;
+  font-size: 11.5px;
+  color: var(--mc-ink-soft);
+  cursor: pointer;
+  user-select: none;
+}
+.ai-history-all input,
+.ai-history-check input { cursor: pointer; accent-color: var(--mc-accent); }
+.ai-history-all.on { color: var(--mc-ink); font-weight: 600; }
+.ai-history-check {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  padding-left: 2px;
+  cursor: pointer;
+}
+.ai-history-item.selected { background: color-mix(in srgb, var(--mc-accent) 14%, var(--mc-surface)); }
+/* 批量操作条：挤在侧栏底部，只在有勾选时出现。
+   box-sizing 必须显式写：库 Button 自带 border/padding，不锁住盒模型就会超出侧栏被裁。 */
+.ai-conv-batch {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px;
+  border: 1px solid var(--mc-line);
+  border-radius: 10px;
+  background: var(--mc-surface);
+}
+/* 列表项的删除按钮不参与压缩：否则标题挤压时它会被压扁，图标变形。 */
+.ai-history-delete { flex: none; }
+.ai-conv-batch__count { font-size: 12px; font-weight: 600; color: var(--mc-ink); }
+/* 「退出多选」：与计数同一行的文字出口 */
+.ai-conv-batch__exit {
+  align-self: flex-start;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--mc-ink-soft);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.ai-conv-batch__exit:hover { color: var(--mc-accent); }
+/* 「全选 / 清除选择」并排等宽，「删除所选」独占一行 —— 侧栏太窄，三个横排必然被挤换行，
+   而删除是破坏性操作，给它整行能减少误触。 */
+.ai-conv-batch__acts { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.ai-conv-batch__acts > *:last-child { grid-column: 1 / -1; width: 100%; box-sizing: border-box; }
+/* 批量删除确认弹窗 */
+.ai-conv-del-confirm__title { font-size: 15px; font-weight: 700; color: var(--mc-ink); }
+.ai-conv-del-confirm__hint { margin-top: 6px; font-size: 12.5px; color: var(--mc-ink-soft); line-height: 1.7; }
+
 .ai-bubble code {
   font-family: inherit;
   font-size: 0.92em;
@@ -481,7 +777,18 @@
 /* ── MCP 服务管理弹窗（1.0.46）────────────────────────────────── */
 .ai-mcp-modal { width: 640px; max-width: calc(100vw - 48px); max-height: min(640px, 84vh); display: flex; flex-direction: column; }
 .ai-mcp-modal .ai-prompt-modal-body { overflow-y: auto; }
-.ai-mcp-modal .ai-prompt-modal-foot { display: flex; justify-content: flex-end; padding-top: 8px; }
+/* MCP 弹窗底部操作区。
+   ⚠️ 原来只有 `padding-top: 8px`，**左右与底部完全没有内边距**（而 body 是 `padding:16px 18px`），
+   于是「关闭」按钮直接贴着弹窗的右边缘与底边缘，看起来像要掉出去（用户反馈「太边缘了」）。
+   现在左右与 body 对齐、底部留出呼吸位，并加一条细分隔线把操作区与内容区分开。 */
+.ai-mcp-modal .ai-prompt-modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 18px 16px;
+  border-top: 1px solid var(--mc-line);
+  flex: none;
+}
 .ai-mcp-item { border: 1px solid var(--mc-line); border-radius: 10px; padding: 8px 10px; margin-bottom: 8px; }
 .ai-mcp-item__head { display: flex; align-items: center; gap: 8px; }
 .ai-mcp-item__check input { accent-color: var(--mc-accent); }

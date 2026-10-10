@@ -9,9 +9,10 @@ import { OA_LOGIN_URL, OA_ORIGIN } from '@shared/constants'
 import { IPC } from '@shared/types'
 import { initAutoUpdater, isUpdateDownloaded, startUpdateDownload } from './updater'
 import { registerAIIPC } from './ai/aiIpc'
-import { setWjxtLoginOpener, setWjxtBootstrap, setWjxtLoginCloser, setWjxtHiddenNav, setWjxtSsoHttp, setWjxtIamProbe, wjxtResolveOriginUrl, wjxtH5Login, wjxtQrLoginUrl, startLoginWatch, wjxtDiag, wjxtProbeLoggedIn, WJXT_H5_LOGIN_URL, WJXT_ORIGIN } from './ai/wjxtSkill'
+import { setWjxtLoginOpener, setWjxtBootstrap, setWjxtLoginCloser, setWjxtHiddenNav, setWjxtSsoHttp, setWjxtIamProbe, markChromiumIamReachability, parseChromiumNetError, wjxtResolveOriginUrl, wjxtH5Login, wjxtQrLoginUrl, startLoginWatch, wjxtDiag, wjxtProbeLoggedIn, WJXT_H5_LOGIN_URL, WJXT_ORIGIN } from './ai/wjxtSkill'
 import { translate, type Lang } from '@shared/i18n'
 import { listSkills } from './ai/skillRegistry'
+import type { IamAlive as SharedIamAlive } from '@shared/ai-types'
 import { listStatuses as listMcpStatuses } from './ai/mcpClient'
 // 使用持久化 partition，让 OA 登录 Cookie 自动写入磁盘并跨启动保留。
 // 这是最可靠的方案：Electron 会为每个 persist:* partition 维护独立的
@@ -639,6 +640,38 @@ function createWindow() {
    */
   const injectLoginWindowTip = (win: BrowserWindow): void => {
     try {
+      // 失败页也要给提示（2026-10-10 补）：白屏现场是 `did-fail-load`
+      // （日志：`ERR_FAILED (-2)` / `ERR_CONNECTION_CLOSED (-100)`），此时页面**永远不会有内容**，
+      // 原来只挂在 `did-finish-load` 上的提示条压根不会执行 —— 用户只看到一片纯白，
+      // 连「正在登录 / 失败了」都无从分辨。改成加载失败时用 data URL 渲染一张说明页。
+      const onFail = (_e: unknown, code: number, desc: string, url: string, isMainFrame: boolean) => {
+        if (!isMainFrame || win.isDestroyed()) return
+        debugLog(`[openInternal] did-fail-load code=${code} desc=${desc} url=${String(url).slice(0, 120)}`)
+        // 登录窗口加载失败同样要反映到可达性上：用户点的就是这个窗口，
+        // 它打不开就等于「这条登录路径不可用」，下一轮 gating 就该只给 H5。
+        // ⚠️ 只认 **iam 域**的失败：H5 登录页在 wj 域，它失败不代表 SSO/扫码入口不可用
+        // （那正是当前唯一可用的路径，绝不能因此把 SSO 也一起砍掉）。
+        const netErr = parseChromiumNetError(String(code))
+        if (netErr && /iam\.streamax\.com/i.test(String(url))) {
+          markChromiumIamReachability(false, `loginWindow did-fail-load ${netErr}`)
+        }
+        try {
+          const msg = translate(uiLang || 'zh', 'wjxtWindowLoadFail')
+          void win.loadURL(
+            'data:text/html;charset=utf-8,' + encodeURIComponent(
+              `<!doctype html><meta charset="utf-8">` +
+              `<body style="margin:0;display:flex;align-items:center;justify-content:center;height:100vh;` +
+              `font:15px/1.9 'Microsoft YaHei',sans-serif;color:#333;background:#f7f3df;text-align:center">` +
+              `<div style="max-width:520px;padding:0 24px">` +
+              `<div style="font-size:34px;margin-bottom:10px">⚠</div>` +
+              `<div style="font-size:17px;font-weight:600;margin-bottom:10px">${msg}</div>` +
+              `<div style="font-size:13px;color:#777;word-break:break-all">${String(desc || code || '')}</div>` +
+              `</div></body>`
+            )
+          )
+        } catch { /* 窗口已销毁 */ }
+      }
+      win.webContents.on('did-fail-load', onFail)
       win.webContents.on('did-finish-load', () => {
         void win.webContents.executeJavaScript(
           `(function(){try{` +
@@ -828,8 +861,24 @@ function createWindow() {
       let done = false
       const finish = (ok: boolean) => { if (!done) { done = true; resolve(ok) } }
       // SPA 的握手是「页面加载完之后」才发的异步请求，等 did-finish-load 后再留一点时间
-      win.webContents.once('did-finish-load', () => setTimeout(() => finish(true), settleMs))
-      win.webContents.once('did-fail-load', () => finish(false))
+      win.webContents.once('did-finish-load', () => {
+        // 只有**真正落在 iam 域**才算「可达」。这个 bootstrap 跑的是 SSO 入口
+        // （首跳在 wj 域），若不校验落点，wj 页面加载成功就会把 iam 误标成可达，
+        // 从而让 gating 失效（用户反馈「SSO 入口本来是好的为什么要限制」）。
+        // 反过来，落在 iam 域但会话失效停在登录页是**内容问题**，
+        // 仍算可达 —— 否则会把 gating 永久锁死。
+        try {
+          if (/iam\.streamax\.com/i.test(win.webContents.getURL())) {
+            markChromiumIamReachability(true, 'bootstrap loaded iam page')
+          }
+        } catch { /* ignore */ }
+        setTimeout(() => finish(true), settleMs)
+      })
+      win.webContents.once('did-fail-load', (_e, code) => {
+        const netErr = parseChromiumNetError(String(code))
+        if (netErr) markChromiumIamReachability(false, `bootstrap did-fail-load ${netErr}`)
+        finish(false)
+      })
       setTimeout(() => finish(false), 15000)
     })
     try {
@@ -837,6 +886,9 @@ function createWindow() {
     } catch (e: any) {
       // 站内跳转会中断 loadURL（ERR_ABORTED），不代表失败 —— 以 settled 的结论为准
       debugLog('[wjxtBootstrap] loadURL rejected: ' + e?.message)
+      // 同 hiddenNavUrl：网络层失败要回传可达性，供 gating 决定 SSO/扫码入口给不给
+      const netErr = parseChromiumNetError(e?.message)
+      if (netErr) markChromiumIamReachability(false, `bootstrap net=${netErr}`)
     }
     const ok = await settled
     try { if (!win.isDestroyed()) win.destroy() } catch { /* ignore */ }
@@ -873,6 +925,11 @@ function createWindow() {
         await win.loadURL(url)
       } catch (e: any) {
         debugLog('[wjxtHiddenNav] loadURL rejected: ' + e?.message)
+        // 回传「Chromium 到 iam 域的可达性」：网络层错误（VPN/内网/DNS）会被
+        // 技能侧用来决定 SSO / 扫码入口还给不给 —— 那两个入口都在 Chromium 里，
+        // 打不开时给出去只会白屏（用户实测 2026-10-10）。
+        const netErr = parseChromiumNetError(e?.message)
+        if (netErr) markChromiumIamReachability(false, `hiddenNav net=${netErr}`)
       }
       // 轮询等待（**不再**用「首次 did-finish-load 后固定等 N 秒」那套）。
       //
@@ -1884,25 +1941,135 @@ async function getStreamaxCookieString(sess: Electron.Session, url?: string): Pr
 //   - 同一份 cookie 里 OA 业务接口 probe 仍是 200 → 两边确实是两套会话。
 // 而 IAM 一旦失效就无法静默恢复（必须扫码），所以唯一办法是**别让它闲置过期**。
 //
-// 做法：定期 GET IAM 的 OAuth 授权端点，**不跟随重定向**（因此不会真的产生
+// 做法：定期GET IAM 的 OAuth 授权端点，**不跟随重定向**（因此不会真的产生
 // oa 落地副作用，只是让 IAM 刷新该 session 的 idle 计时）。
-// 响应判据：Location 回到 oa.streamax.com 且带 code = IAM 侧仍登录；
-// 否则说明已过期（此时只能让用户重登一次，之后保活即可长期免登录）。
+//
+// ── 判据（1.0.51 重做）────────────────────────────────────────────────────
+// 原判据是「Location 回到 oa.streamax.com 且带 code = 仍登录」，它建立在一个
+// **已经失效**的假设上：2026-09-13 实测时 IAM 对未登录请求会302 到 AC 登录页
+//（Location=https://iam…/ac/#/index），登录态则302 带 code 回 OA。
+//
+// 但 2026-10-10 实测发现**同一端点的响应形态变了**：已登录时返回
+// **HTTP 200 且响应头无 Location**（日志 `[iamKeepalive] status=200 location=`），
+// 于是 `res.location` 为空串 → 判定恒为 false。同一时刻 `probeOaSession` 却是
+// `status=200 ok=true`（OA 会话确实有效）—— **探针与事实矛盾，探针错了**。
+// 连带影响两处：①「一键自检」把 IAM 恒报为过期；② 鸿翼「SSO 登录」入口
+// 被误gating 掉（1.0.50 刚加的功能自我失效）。
+//
+// 现在改为**三态** `true | false | null(null = 无法判定)`，判据分级：
+//   1. 302 + Location 指回oa 且带 code → true   （老形态，IAM 若恢复该行为仍正确）
+//   2. 401 / 403→ false
+//   3. 正文命中未登录特征 → false
+//   4. 正文命中已登录特征 → true
+//   5. 其余（200 形态未知 / 正文被截断 / 网络异常 / 超时）→ null
+//
+// **关键原则：不确定一律 null，绝不猜成 false。** gating 的目的是「不把用户送进
+// 必白屏的入口」，判据不确定时宁可多给一个入口（最坏是白屏，已有提示条兜住），
+// 也不能砍掉本来能用的 —— 那正是本次 bug 的形态。
+// 注意：超时绝不代表未登录（IAM 冷态实测需 20~30s，而这里只等 8s）。
 const IAM_SSO_ENTRY_URL =
   'https://iam.streamax.com/idp/authCenter/authenticate?response_type=code&client_id=oa' +
   `&redirect_uri=${encodeURIComponent(OA_LOGIN_URL)}&state=IAM_OA_SSO`
 
-let iamKeepAliveInFlight: Promise<boolean> | null = null
+/** IAM 会话判定：true=已登录 / false=已失效 / null=无法判定（定义在 shared/ai-types，两侧共用） */
+type IamAlive = SharedIamAlive
 
-/** 保活 + 探活 IAM 会话；返回 IAM 侧是否仍处于登录态 */
-function keepIamSessionAlive(sess: Electron.Session): Promise<boolean> {
+/** IAM 授权端点与登录页的响应体上限：判据特征总在页头附近，而 IAM 的 SPA 首页可能不小，
+ *  不限长会有内存与耗时风险（2026-10-10 起改为收集正文以支撑分级判据）。 */
+const IAM_BODY_CAP = 128 * 1024
+
+/** 正文特征判据（只记「命中了哪一条」，绝不把正文/票据写进日志）。
+ *  这些特征取自实测：未登录信封是站点自己的 `errorCode:ErrorCode4`；
+ *  已登录时 IAM 会下发一次性上下文 `context_oauth2_…` 或直接 302 到 AC 页（`#/index?lck=`）。
+ *
+ * 1.0.51 补`iamLoginPage`（用户实测「点 SSO 登录 = 白屏」的最后一环）：
+ * 对 `IAM_SSO_ENTRY_URL`（= `…/idp/authCenter/authenticate?client_id=oa…`）**不跟随重定向**时，
+ * IAM 会话无效的形态是「**HTTP 200 + 登录页正文**」，既不 302 去AC 页、也不带 code 回 OA：
+ *   `[iamKeepalive] status=200 location=(empty) body=1229 … by=status=200:unknown`
+ * 1229 字节既不含站点信封特征、也不含一次性 lck → 落进 unknown。而 1.0.51 的 gating 是
+ * 「unknown 放行」，于是又把这个**必然白屏**的 SSO 入口给了出去（用户第二次反馈白屏即此）。
+ * 这里把「IAM 自己的登录/授权页特征」补进未登录侧：会话无效时它只可能出现这些形态，
+ * 判false 的代价仅仅是少给一个入口（用户改用 H5 账号密码即可），而判错的代价是白屏。 */
+const IAM_BODY_SIGN = {
+  notLoggedIn: /ErrorCode4|\/sso\/auth\/goToLoginPage|authnEngine/i,
+  /** IAM 登录/授权页：表单、密码框、统一身份认证文案、以及 IAM 自身的鉴权端点回显 */
+  iamLoginPage: /<input[^>]+type=["']?password|idp\/authCenter\/authenticate|统一身份|身份认证|请\s*登录|账号登录|loginForm|passwordInput/i,
+  loggedIn: /context_oauth2_|#\/index\?lck=|"access_token"|"loginToken"/i
+}
+
+/**
+ * 取一段**脱敏**的正文摘要，供「判不出 IAM 会话状态」时校准判据（2026-10-10）。
+ *
+ * 迭代过两轮：先只记 title + 可见文本 → 实测打出 `{}`（IAM 返回的是纯脚本壳页）；
+ * 再加几种 `location.*` 写法 → 仍是 `(no title/text/jump found)`。
+ * 与其继续猜正则（跳转写法还有 `window.location =`、相对路径、`top.location`、表单 action、
+ * 站点自定义函数等等），不如**把「正文里出现的 URL」与「第一段脚本」原样带出来**
+ * —— 一次就能看清它到底跳向哪，不必反复复现。
+ *
+ * 脱敏：所有 ≥16 字符的 base64/hex 长串（token / lck / nonce / 签名）替换成 `…`，
+ * 因此凭证不会进日志。
+ */
+function summarizeIamBody(body: string): {
+  title?: string
+  urls?: string[]
+  js?: string
+  head?: string
+} {
+  const out: { title?: string; urls?: string[]; js?: string; head?: string } = {}
+  if (!body) return out
+  const mask = (s: string) => s.replace(/[A-Za-z0-9_+/=-]{16,}/g, '…')
+  const title = (/<title[^>]*>([\s\S]{0,200}?)<\/title>/i.exec(body) || [])[1]
+  if (title) out.title = mask(title.replace(/\s+/g, ' ').trim()).slice(0, 80)
+  // ① 正文里所有 URL（去重、最多 6 个）—— 跳转目标无论用什么写法写都在这里
+  const urls = body.match(/https?:\/\/[^\s'"<>)\\]+/gi) || []
+  const uniq = [...new Set(urls.map(mask))]
+  if (uniq.length) out.urls = uniq.slice(0, 6).map(u => u.slice(0, 160))
+  // ② 第一段脚本的摘要（剥掉注释与多余空白），用来识别它到底是哪种跳转写法
+  const js = (/<script[^>]*>([\s\S]{0,800}?)<\/script>/i.exec(body) || [])[1]
+  if (js) out.js = mask(js.replace(/<!--[\s\S]*?-->/g, ' ').replace(/\s+/g, ' ').trim()).slice(0, 300)
+  // ③ 可见文本（剥掉 script/style）
+  const text = body
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&[a-z#0-9]+;/gi, ' ')
+  const head = mask(text.replace(/\s+/g, ' ').trim())
+  if (head) out.head = head.slice(0, 200)
+  // 一项都没抓到 = 明确记出来，避免 `peek={}` 被误读成「没抓到东西」
+  if (!out.title && !out.urls?.length && !out.js && !out.head) out.head = '(nothing captured)'
+  return out
+}
+
+/** 按响应分级判定 IAM 会话状态；返回 [verdict, reason]，reason 只用于日志 */
+function judgeIamAlive(status: number, location: string, body: string, bodyTruncated: boolean): [IamAlive, string] {
+  // ① 老形态：302 带 code 回 OA —— IAM 会话有效（2026-09-13 实测）
+  if (/^https?:\/\/oa\.streamax\.com/i.test(location)) {
+    return /[?&]code=/.test(location) ? [true, '302→oa+code'] : [false, '302→oa-no-code']
+  }
+  // ② 明确的鉴权失败
+  if (status === 401 || status === 403) return [false, `status=${status}`]
+  // ③ 未登录特征（优先级高于已登录特征：ErrorCode4 信封里也可能带 lck 字样）
+  if (IAM_BODY_SIGN.notLoggedIn.test(body)) return [false, 'body:notLoggedIn']
+  // ③′ IAM 自己的登录/授权页（200 形态的会话失效，1.0.51 补）——
+  // 放在已登录特征之前：这个页面里可能同时出现 `authenticate` 与 lck 之类的字样
+  if (IAM_BODY_SIGN.iamLoginPage.test(body)) return [false, 'body:iamLoginPage']
+  // ④ 已登录特征
+  if (IAM_BODY_SIGN.loggedIn.test(body)) return [true, 'body:loggedIn']
+  // ⑤ 判不出来 —— 注意 200 且正文为空/陌生时也落在这里（宁可 null 别猜 false）
+  return [null, bodyTruncated ? 'body:truncated-unknown' : `status=${status}:unknown`]
+}
+
+let iamKeepAliveInFlight: Promise<IamAlive> | null = null
+
+/** 保活 + 探活 IAM 会话；true=已登录 / false=已失效 / null=无法判定（网络异常、超时、形态未知） */
+function keepIamSessionAlive(sess: Electron.Session): Promise<IamAlive> {
   if (iamKeepAliveInFlight) return iamKeepAliveInFlight
   iamKeepAliveInFlight = (async () => {
     try {
       const cookieStr = await getStreamaxCookieString(sess, IAM_SSO_ENTRY_URL)
-      if (!cookieStr) return false
+      if (!cookieStr) return null
       const u = new URL(IAM_SSO_ENTRY_URL)
-      const res = await new Promise<{ status: number; location: string; setCookie?: string[] }>((resolve, reject) => {
+      const res = await new Promise<{ status: number; location: string; setCookie?: string[]; body: string; truncated: boolean }>((resolve, reject) => {
         const req = https.get({
           hostname: u.hostname,
           port: u.port || 443,
@@ -1914,26 +2081,46 @@ function keepIamSessionAlive(sess: Electron.Session): Promise<boolean> {
             'Cookie': cookieStr
           }
         }, (r) => {
-          // 不跟随重定向：读到头就断开，绝不真的走到 OA 落地
-          r.resume()
-          resolve({
+          // 不跟随重定向：读完响应头与正文就断开，绝不真的走到 OA 落地。
+          // 2026-10-10 起**收集正文**（此前是 r.resume() 直接丢弃），因为 200 形态下
+          // 只能靠正文区分「授权页 / 登录页」；限长 IAM_BODY_CAP，超出截断并标记。
+          let body = ''
+          let truncated = false
+          r.on('data', (chunk: Buffer) => {
+            if (truncated) return
+            body += chunk.toString('utf8')
+            if (body.length > IAM_BODY_CAP) { body = body.slice(0, IAM_BODY_CAP); truncated = true }
+          })
+          r.on('end', () => resolve({
             status: r.statusCode || 0,
             location: String(r.headers.location || ''),
-            setCookie: r.headers['set-cookie'] as string[] | undefined
-          })
+            setCookie: r.headers['set-cookie'] as string[] | undefined,
+            body,
+            truncated
+          }))
+          // 出错也要 resolve（否则挂到超时才结束，白等 8 秒）
+          r.on('error', () => resolve({ status: r.statusCode || 0, location: '', setCookie: undefined, body: '', truncated: false }))
         })
         req.on('error', reject)
-        // IAM 冷态可能要 20~30s：这里只是后台保活，超时就放弃，绝不影响 UI
+        // IAM 冷态可能要 20~30s：这里只是后台保活，超时就放弃，绝不影响 UI。
+        // 超时按「无法判定」处理（catch 分支返回 null），**不能当成未登录**。
         req.setTimeout(8000, () => { req.destroy(); reject(new Error('timeout')) })
       })
       // IAM 顺手刷新的票据（如新的 REQID）写回分区，避免下次又用旧值
       if (res.setCookie?.length) await setCookiesFromHeader(sess, res.setCookie)
-      const alive = /^https?:\/\/oa\.streamax\.com/i.test(res.location) && /[?&]code=/.test(res.location)
-      debugLog(`[iamKeepalive] status=${res.status} location=${res.location.split('?')[0]} iamSessionAlive=${alive}`)
+      const [alive, reason] = judgeIamAlive(res.status, res.location, res.body, res.truncated)
+      // 判不出来时**额外记一段脱敏正文摘要**（2026-10-10 补）。
+      // 为什么必须有：`iamLoginPage` 那组特征是按推断写的，真实页面一变就判不出，
+      // 而日志只有 `by=status=200:unknown` + 字节数 —— 无法据此校准，只能反复复现。
+      // 这里刻意只留「结构性信息」：标签里的文字 + 可见文本的前若干字，
+      // 并把长串随机值（token / lck / nonce）替换掉，避免把票据写进日志。
+      const peek = alive === null ? summarizeIamBody(res.body) : ''
+      debugLog(`[iamKeepalive] status=${res.status} location=${res.location.split('?')[0] || '(empty)'} body=${res.body.length}${res.truncated ? '(truncated)' : ''} iamSessionAlive=${alive} by=${reason}${peek ? ` peek=${JSON.stringify(peek)}` : ''}`)
       return alive
     } catch (e: any) {
-      debugLog('[iamKeepalive] error: ' + (e?.message || e))
-      return false
+      // 超时 / 网络异常 / 冷态一律 null（= 无法判定），不是 false
+      debugLog('[iamKeepalive] error: ' + (e?.message || e) + ' -> verdict=null')
+      return null
     } finally {
       iamKeepAliveInFlight = null
     }
@@ -2740,7 +2927,10 @@ ipcMain.handle('mc-wjxt-diagnose', async (_e, langRaw?: string) => {
   }
 
   // IAM 会话（edoc2 的 SSO 换票前提）——只用于选结论文案 + 写日志
-  let iam: boolean | null = null
+  // 1.0.51：keepIamSessionAlive 改为三态（true/false/null=无法判定），
+  // 这里的 `null` 分支此前**永远不命中**（函数只返回 boolean），于是 IAM 一旦
+  // 探针形态变化就被报成 expired；现在能区分「明确失效」与「判不出来」。
+  let iam: IamAlive = null
   try {
     iam = await keepIamSessionAlive(sess)
   } catch (e: any) {
@@ -2789,8 +2979,12 @@ ipcMain.handle('mc-wjxt-diagnose', async (_e, langRaw?: string) => {
   let verdict: string
   if (!oaOk) verdict = tr('aiDiagVdOaDown')
   else if (edoc2 === false) verdict = backupExists ? tr('aiDiagVdFsDownRestart') : tr('aiDiagVdFsDownLogin')
-  else if (edoc2 === true) verdict = iam ? tr('aiDiagVdAllOk') : tr('aiDiagVdIamStale')
-  else verdict = tr('aiDiagVdFsUnknown')
+  // IAM 现在是**三态**（1.0.51）：true=已登录 / false=明确失效 / null=无法判定（超时、响应形态变化）。
+  // 原写法 `iam ? AllOk : Stale` 会把 null 也算成「过期」——探针一超时或IAM 换了响应形态，
+  // 诊断就报「IAM 会话过期」，而实际上只是判不出来（2026-10-10 误报即此）。
+  else if (edoc2 === true) {
+    verdict = iam === false ? tr('aiDiagVdIamStale') : iam ? tr('aiDiagVdAllOk') : tr('aiDiagVdIamUnknown')
+  } else verdict = tr('aiDiagVdFsUnknown')
 
   // detail 不含结论：弹窗顶部已经单独显示结论，重复一遍是噪音（v1 就重复了）
   const detail = lines.join('\n')

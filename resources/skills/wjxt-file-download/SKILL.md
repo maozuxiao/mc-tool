@@ -195,6 +195,28 @@ edoc2（鸿翼）的会话与应用的 OA / 钉钉登录是**两件事**：分�
 | `PATH_OUTSIDE_ROOT` | 目标目录不在已授权工作区 | 引导用户用 `open_folder` 打开该目录（或改到自己工作区内的目录）后再下载 |
 | 无结果（`ok:true, count:0`） | 关键词没命中，或该账号/范围内确实看不到这份文件（工具已自动去掉范围前缀条件放宽重搜过一次） | 先换 1~2 个更宽的关键词（型号前缀、版本号段）再搜；仍无则如实说没找到，**不要**编造文件名、也不要说「文件不存在」；可以提醒用户：换词、或确认这份文件是否在该文件系统的权限范围内 |
 
+## 已知限制（2026-10-10 观察，暂未修，供后续排查用）
+
+现象：**OA 已登录、但 edoc2 换票仍失败** —— 隐藏窗口反复停在
+`iam…/idp/authCenter/authenticate?…client_id=edoc2&redirect_uri=https://wj.streamax.com:9443/sso/auth/callback&state=…`，
+`GetCurrentUser loggedIn=false`（`ErrorCode4`）。本节只记录**已观察到的两条线索**，不是让你去绕开它们：
+
+1. **站点 SSO 链的 `redirect_uri` 新增了 `state` 参数**。
+   - 10/07 观测：`…/idp/authCenter/authenticate?…client_id=edoc2&redirect_uri=https://wj.streamax.com:9443/sso/auth/c…`（未见 `state`）
+   - 10/10 观测：`…&redirect_uri=https://wj.streamax.com:9443/sso/auth/callback&state=…`
+   - 影响面：① `mintAcLoginUrl` 解析 SSO 壳页（1254 字节 HTML）里 JS 跳转地址的正则；
+     ② 主进程 `hiddenNavUrl` 的落回站点判据 `isBackOnSite = host==='wj.streamax.com' && !/\/sso\/auth\//`
+     —— **新的 `/sso/auth/callback` 仍然含 `/sso/auth/`**，所以真正的回跳（携code 落回站点）
+     可能不会被判成「已落回」，从而白等到超时。
+
+2. **扫码成功时 `usk` 只有 `path=/idp`、缺 `path=/` 那一份**。
+   - 10/07 成功那次：`[COOKIE] set usk for iam.streamax.com path=/idp` **+ `[COOKIE] replicate usk path=/idp -> / ok`**
+   - 10/10 只有前者，没有 `replicate`；而 `replicate` 由 `setCookiesFromHeader` 产生，
+     说明两次 `authnEngine` 响应头内容不同（可能与上面新增的 `state` 参数带来的会话初始化差异有关）。
+
+排查时**先看这两条**，不要重新发明轮询/重试策略：应用侧已有覆盖（隐藏窗口 + 纯 HTTP 双通道取 `lck`、
+`getStreamaxCookieString` 按域过滤 + 同名去重、IAM 探针三态化），继续加重试只会掩盖真正的会话问题。
+
 ## 预览窗白屏 / 降级通道（1.0.47 起已内置处置，这里只说明给用户怎么讲）
 
 - **点「预览」打开一个空白窗**：那是**登录态失效**的表现 —— 预览页需要站点自己的会话，未登录时被跳到 SSO 登录页，

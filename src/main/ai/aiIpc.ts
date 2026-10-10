@@ -9,7 +9,7 @@ import { listProviders, saveProvider, getSuggestedModels, getPreferences, savePr
 import { dirBlockReason, makeAlias } from './rootGuard'
 import {
   createConversation, deleteConversation, getConversation,
-  listConversations, renameConversation, setConversationSkills
+  listConversations, renameConversation, setConversationSkills, setConversationMode
 } from './historyStore'
 import { sendMessage, stopMessage } from './chatService'
 import { listPrompts, savePrompt, updatePrompt, deletePrompt } from './promptStore'
@@ -99,6 +99,12 @@ export function registerAIIPC(): void {
   // 记住本会话启用的技能（1.0.46）：勾选仍按会话独立，但要跨重启/切回保留（见 historyStore 注释）
   ipcMain.handle(AI_IPC.SET_CONV_SKILLS, (_e, id: string, keys: string[]) => {
     setConversationSkills(String(id || ''), Array.isArray(keys) ? keys.map(k => String(k)) : [])
+    return { ok: true }
+  })
+  // 记住本会话上次用的模式（1.0.51）：与技能同构 —— 恢复只发生在用户主动打开该会话时，
+  // 不会变成「一启动就是 Build」，所以原先「Build 高风险、不做持久化」的顾虑不成立。
+  ipcMain.handle(AI_IPC.SET_CONV_MODE, (_e, id: string, mode: string) => {
+    setConversationMode(String(id || ''), String(mode || ''))
     return { ok: true }
   })
 

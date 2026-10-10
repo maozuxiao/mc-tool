@@ -3,7 +3,7 @@ import { app, BrowserWindow, session } from 'electron'
 import { appendFileSync } from 'fs'
 import { join } from 'path'
 import { PARTITION, downloadToDir, type DownloadToDirResult } from './fileDownload'
-import type { AIExtraRoot } from '@shared/ai-types'
+import type { AIExtraRoot, IamAlive } from '@shared/ai-types'
 
 /**
  * 鸿翼文件系统（edoc2 企业内容库）查询与下载 —— 应用内置技能的执行层（1.0.43）。
@@ -104,6 +104,54 @@ export function setWjxtHiddenNav(fn: ((url: string, settleMs?: number) => Promis
 }
 
 /**
+ * 「Chromium 能不能打开 `iam.streamax.com`」—— 由 index.ts 在真正 loadURL 的地方回传（2026-10-10）。
+ *
+ * 为什么要单独记一个可达性，而不是只看 IAM 会话探针：
+ *  用户实测（05:10~05:14）**VPN 隧道不通**时，Node https 探针一切正常（200 + 壳页），
+ *  但 Chromium 加载 `iam.streamax.com` 直接 `SSL error code 1 / ERR_CONNECTION_CLOSED`。
+ *  而 edoc2 的换票、SSO 登录入口、扫码页**全都发生在 Chromium 里** —— 于是
+ *  「AI 说该登录 → 给出 SSO 入口 → 用户点开一片空白」。
+ *
+ * 关键差别：**`wj` 域在同样情况下是通的**（日志里 `[main] POST WebCore status=200` 一直正常），
+ * 所以此时唯一能走通的是 H5 账号密码入口（在 `wj` 域）。本状态就是用来把用户
+ * 从「必然白屏的 SSO 入口」引导过去的。
+ */
+let iamUnreachable = false
+export function isChromiumIamUnreachable(): boolean {
+  return iamUnreachable
+}
+/** @param reason 仅用于日志，说明是哪个错误码 */
+export function markChromiumIamReachability(ok: boolean, reason = ''): void {
+  if (ok === !iamUnreachable) return
+  iamUnreachable = !ok
+  wjxtLog(`[iamReach] Chromium -> iam.streamax.com ${ok ? 'reachable' : 'UNREACHABLE'} ${reason}`)
+}
+
+/** Chromium 的网络层错误码（`did-fail-load` / `loadURL` reject 都可能出现）。
+ *  这些错误说明「请求根本没送达服务端」，与「页面内容不对」是两回事，必须区别对待：
+ *  它们恰恰是最有诊断价值的一类 —— 直接指向 VPN / 内网 / DNS。 */
+const CHROMIUM_NET_ERRORS = new Set([
+  '-2',    // ERR_FAILED
+  '-6',    // ERR_FILE_NOT_FOUND
+  '-7',    // ERR_TIMED_OUT
+  '-19',// ERR_INTERNET_DISCONNECTED
+  '-21',   // ERR_NETWORK_CHANGED
+  '-100',  // ERR_CONNECTION_CLOSED
+  '-105',  // ERR_NAME_NOT_RESOLVED
+  '-107',  // ERR_SSL_PROTOCOL_ERROR
+  '-109',  // ERR_ADDRESS_UNREACHABLE
+  '-118',  // ERR_CONNECTION_TIMED_OUT
+  '-324'   // ERR_EMPTY_RESPONSE
+])
+
+/** 从 loadURL 的错误消息里解析出网络层错误码；不是网络类问题则返回 null */
+export function parseChromiumNetError(msg: string): string | null {
+  const m = /(-?\d+)/.exec(String(msg || ''))
+  if (!m) return null
+  return CHROMIUM_NET_ERRORS.has(m[1]) ? m[1] : null
+}
+
+/**
  * 「IAM 会话是否还活着」的探针，由 index.ts 注入（复用它的 keepIamSessionAlive）。
  *
  * 用途（2026-10-07）：edoc2 的 SSO 换票**以 IAM 会话为前提**。IAM 一旦idle 过期，
@@ -111,9 +159,12 @@ export function setWjxtHiddenNav(fn: ((url: string, settleMs?: number) => Promis
  * 应用内窗口里那一页没有任何可见内容，用户看到的就是**白屏**（本机日志实证：
  * `[wjxtHiddenNav] lck=no finalUrl=https://iam.streamax.com/idp/authCenter/authenticate…`）。
  * 所以「SSO 登录」这个入口**只在 IAM 会话还在时**才值得给出去；否则给H5 账号密码入口。
+ *
+ * 1.0.51：返回值改为**三态** `true | false | null`（null = 无法判定：探针超时/ 响应形态变化）。
+ * 二态会把「判不出来」当成「已失效」，进而砍掉本来能用的 SSO 入口（这正是 1.0.50 的缺陷形态）。
  */
-let iamProbe: (() => Promise<boolean>) | null = null
-export function setWjxtIamProbe(fn: (() => Promise<boolean>) | null): void {
+let iamProbe: (() => Promise<IamAlive | null>) | null = null
+export function setWjxtIamProbe(fn: (() => Promise<IamAlive | null>) | null): void {
   iamProbe = fn
 }
 
@@ -361,15 +412,17 @@ export function wjxtH5Login(): Promise<boolean> {
       // H5 页都起不来 → 退回原来的 SSO 登录窗口（老路径，**仅 IAM 会话还在时可用**）：
       // IAM 已过期时那个入口会停在 idp/authCenter/authenticate，用户点进去是白屏，
       // 那就别开这个窗口了 —— 上层会把H5 入口重新给用户一次。
+      // 1.0.51：探针改三态后判据同步放宽为 `!== false`（无法判定时也开），
+      // 与 reloginResult 的 gating 保持一致，避免同一个探针在两处给出相反结论。
       let iamAlive: boolean | null = null
       if (iamProbe) {
         try { iamAlive = await iamProbe() } catch { iamAlive = null }
       }
-      if (iamAlive === true) {
+      if (iamAlive !== false) {
         try { openLoginWindow?.(WJXT_SSO_LOGIN_URL) } catch { /* ignore */ }
         watchLoginUntilDone()
       } else {
-        wjxtLog(`[h5login] fallback SSO window skipped (iamAlive=${iamAlive}) —— 会白屏`)
+        wjxtLog('[h5login] fallback SSO window skipped（IAM 明确失效）—— 会白屏')
       }
       return false
     } finally {
@@ -499,6 +552,50 @@ function destroyCtxWin(): void {
   }
 }
 
+/**
+ * 只在「当前持有的仍是这一个窗口」时才销毁它（2026-10-10）。
+ *
+ * 缺陷：`destroyCtxWin()` 销毁的是**模块级 ctxWin 的当前值**，而调用点手里往往握着
+ * 另一个 `win`（`ensureCtxWin` 的局部变量、或`pageFetch` 进入时的快照）。一旦两者错位
+ * （例如 pageFetch 超时丢窗后，紧接着另一次请求已重建了新窗口），旧调用点的迟到清理就会
+ * **误杀新窗口** —— 现场日志正是这个形态：
+ *   `[page] hidden context ready` → `executeJavaScript failed…drop hidden context`
+ *   → `[page] hidden context load failed: Object has been destroyed` → 重建 → 再超时…
+ * 形成「超时→销毁→重建→又超时」的抖动，既拖慢又让 `[page] fetch … failed: Failed to fetch` 刷屏。
+ */
+function destroyCtxWinIf(win: BrowserWindow | null): void {
+  // 已经不是这一个窗口了 → 说明有更新的窗口接管，绝不能动它
+  if (!win || ctxWin !== win) return
+  destroyCtxWin()
+}
+
+/**
+ * 本次工具调用的取消信号（2026-10-10，修复「点停止没反应」）。
+ *
+ * 背景：chatService 的 `dispatchTool` 已把 `toolController.signal` 传进来，stop 时会 abort，
+ * 但**鸿翼执行链从头到尾没有读这个 signal** —— 于是用户点「停止」后，
+ * `pageFetch` 照旧超时、照旧销毁并重建隐藏窗口，工具调用一直不返回，界面永远转圈。
+ *
+ * 为什么用模块级而不是逐层传参：底层三个阻塞函数（`ensureCtxWin` / `pageFetch` / `wjxtWarmUp`）
+ * 被 search、download、preview、diag 多条路径共享，逐层加参数会把 signal 扩散到无关路径。
+ * chatService 的工具是**串行**执行的（`for (const call of toolCalls)` 逐个 await），
+ * 同一时刻只有一个工具在跑，所以「当前信号」不会串味；后台的登录监听（`startLoginWatch`）
+ * 不读它，因此也不受影响。
+ */
+let currentSignal: AbortSignal | null = null
+export function setWjxtSignal(signal: AbortSignal | null): void {
+  currentSignal = signal
+}
+
+/** 已取消则抛出 AbortError（chatService 识别 `name === 'AbortError'` 并据此走「用户已停止」分支） */
+function throwIfCancelled(where: string): void {
+  if (!currentSignal?.aborted) return
+  const err: any = new Error(`aborted at ${where}`)
+  err.name = 'AbortError'
+  wjxtLog(`[cancel] ${where} -> AbortError`)
+  throw err
+}
+
 // 退出时收掉这两个工具侧窗口，别留下游离的渲染进程
 app.on('will-quit', () => {
   destroyCtxWin()
@@ -511,10 +608,17 @@ app.on('will-quit', () => {
 
 /** 创建（或复用）隐藏窗口，并等站点首页加载完成。返回 false = 页面上下文不可用。 */
 async function ensureCtxWin(timeoutMs = 25000): Promise<boolean> {
+  throwIfCancelled('ensureCtxWin.enter')
   if (ctxWin && !ctxWin.isDestroyed()) return true
   if (!ctxLoading) {
-    ctxLoading = (async () => {
-      const win = new BrowserWindow({
+    // 用局部变量持有本次 promise 与窗口句柄：
+    //  - `mine`：`finally` 里按引用比对才能只清自己那一个。原实现无条件 `ctxLoading = null`，
+    //    会把「期间新建的那一个」也清掉，于是下一个 ensureCtxWin 又建一个窗口 —— 抖动的雪球。
+    //  - `win`：`.catch()` 里要按引用比对，只销毁「我建的那个」，不能误杀已被换上的新窗口
+    //    （现场日志的 `Object has been destroyed` 正是误杀出来的）。
+    let win: BrowserWindow | null = null
+    const mine: Promise<void> = (async () => {
+      win = new BrowserWindow({
         show: false,
         skipTaskbar: true,
         width: 1280,
@@ -528,28 +632,32 @@ async function ensureCtxWin(timeoutMs = 25000): Promise<boolean> {
           backgroundThrottling: false
         }
       })
-      ctxWin = win
-      win.on('closed', () => { if (ctxWin === win) { ctxWin = null; ctxLoading = null } })
+      const w = win
+      ctxWin = w
+      w.on('closed', () => { if (ctxWin === w) { ctxWin = null; ctxLoading = null } })
       await new Promise<void>((resolve, reject) => {
         const timer = setTimeout(() => reject(new Error('load timeout')), timeoutMs)
-        win.webContents.once('did-finish-load', () => { clearTimeout(timer); resolve() })
-        win.webContents.once('did-fail-load', (_e, code, desc) => {
+        w.webContents.once('did-finish-load', () => { clearTimeout(timer); resolve() })
+        w.webContents.once('did-fail-load', (_e, code, desc) => {
           clearTimeout(timer)
           reject(new Error(`did-fail-load ${code} ${desc}`))
         })
         // 与可见登录窗口同一个入口：/index.html（未登录时站点自己会跳 SSO）
-        void win.loadURL(WJXT_LOGIN_URL)
+        void w.loadURL(WJXT_LOGIN_URL)
       })
       // 站点首页的握手（SystemManager/GetSystemInitStatus → WebClient/GetCurrentUser）是异步的，
       // 给页面一点时间把它跑完；随后由 readJson 按站点判据复核登录态，这里只求「别抢跑」。
       await new Promise(r => setTimeout(r, 1200))
-      wjxtLog(`[page] hidden context ready url=${win.webContents.getURL().slice(0, 160)}`)
+      wjxtLog(`[page] hidden context ready url=${w.webContents.getURL().slice(0, 160)}`)
     })().catch((e: any) => {
       wjxtLog('[page] hidden context load failed: ' + String(e?.message || e))
-      destroyCtxWin()
-    }).finally(() => { ctxLoading = null })
+      destroyCtxWinIf(win)
+    }).finally(() => { if (ctxLoading === mine) ctxLoading = null })
+    ctxLoading = mine
   }
+  throwIfCancelled('ensureCtxWin')
   await ctxLoading
+  throwIfCancelled('ensureCtxWin.done')
   return !!ctxWin && !ctxWin.isDestroyed()
 }
 
@@ -575,14 +683,59 @@ async function reloadCtxWin(): Promise<void> {
  * 在页面上下文里发一次请求（唯一被验证能拿到数据的通道）。
  * 返回 null = 页面上下文不可用 / eval 失败 —— 调用方降级到 mainFetch，而不是把它当成业务结论。
  */
+/**
+ * 页面通道熔断（2026-10-10）。
+ *
+ * 实测问题：edoc2 未登录时，隐藏窗口「URL 仍在站内、但 SPA 正处在跳转途中」，
+ * 页内 fetch 既不 resolve 也不 reject —— `executeJavaScript` 只能等超时。
+ * 于是每轮业务请求都先白等一次超时才降级到主进程通道，而**主进程通道始终是好的**
+ * （20~50ms 就返回）。15 分钟内空转 273 次、重建隐藏窗口 160 次，还把 wjxt.log 刷到535KB；
+ * 每次重建又会向 IAM 发起一次新的 SSO 跳转（`state=` 每次不同），等于自己制造风控压力。
+ *
+ * 所以：**连续失败 N 次就短路一段时间**，期间直接走主进程通道。
+ * 熔断只影响「先试页面还是先试主进程」的顺序，不影响业务结论 —— 未登录的判据由
+ * `readJson` 依据响应内容给出，与通道无关。
+ */
+const PAGE_CHAN_FAIL_LIMIT = 3
+const PAGE_CHAN_COOLDOWN_MS = 30_000
+let pageChanFails = 0
+let pageChanDisabledUntil = 0
+
+function pageChanTripped(): boolean {
+  return Date.now() < pageChanDisabledUntil
+}
+
+function pageChanNoteFailure(reason: string): void {
+  pageChanFails++
+  if (pageChanFails >= PAGE_CHAN_FAIL_LIMIT && !pageChanTripped()) {
+    pageChanDisabledUntil = Date.now() + PAGE_CHAN_COOLDOWN_MS
+    wjxtLog(`[page] channel tripped after ${pageChanFails} consecutive failures (${reason}) -> ` +
+      `use main-process fetch for ${PAGE_CHAN_COOLDOWN_MS / 1000}s`)
+  }
+}
+
+function pageChanNoteSuccess(): void {
+  if (pageChanFails) wjxtLog(`[page] channel recovered (reset ${pageChanFails} consecutive failures)`)
+  pageChanFails = 0
+  pageChanDisabledUntil = 0
+}
+
 async function pageFetch(
   path: string,
   opts: { method?: string; form?: string; timeoutMs?: number } = {}
 ): Promise<WjxtResponse | null> {
+  // 熔断中：连窗口都不建，省掉「建窗口 → 等 1.2s → 导航 → 超时 → 销毁」这一整套空转
+  if (pageChanTripped()) return null
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
-  if (!(await ensureCtxWin(Math.min(timeoutMs, 25000)))) return null
+  if (!(await ensureCtxWin(Math.min(timeoutMs, 25000)))) {
+    pageChanNoteFailure('ensureCtxWin')
+    return null
+  }
   const win = ctxWin
-  if (!win || win.isDestroyed()) return null
+  if (!win || win.isDestroyed()) {
+    pageChanNoteFailure('no-window')
+    return null
+  }
 
   // 未登录 / SSO 换票失败时，隐藏窗口会被 302 到 iam.streamax.com（或 /sso/）——
   // 此时页内**相对** fetch('WebCore') 会解析成跨域请求，浏览器直接回 `Failed to fetch`。
@@ -592,6 +745,8 @@ async function pageFetch(
   //   · 也不能拿它当业务结论 —— 交给降级通道去给出明确的「未登录」判据。
   if (!isOnSite(win.webContents.getURL())) {
     wjxtLog(`[page] hidden window off-site (${win.webContents.getURL().slice(0, 120)}) -> not logged in, skip page-context fetch`)
+    // 站外同样计入失败：这是「未登录」最典型的表现，会把我们拖进上面那条抖动回路
+    pageChanNoteFailure('off-site')
     void renavigateCtxWinIfStale()
     return null
   }
@@ -630,20 +785,26 @@ async function pageFetch(
   } catch (e: any) {
     // 超时与「页面崩了」都按「上下文不可用」处理：丢掉窗口，下次重建；本次交给降级通道
     wjxtLog(`[page] executeJavaScript failed (${String(e?.message || e)}) -> drop hidden context`)
-    destroyCtxWin()
+    destroyCtxWinIf(win)
+    pageChanNoteFailure('eval')
+    throwIfCancelled('pageFetch.eval')
     return null
   } finally {
     if (timer) clearTimeout(timer)
   }
   if (raw === undefined || raw === null) {
     wjxtLog('[page] empty eval result -> drop hidden context')
-    destroyCtxWin()
+    destroyCtxWinIf(win)
+    pageChanNoteFailure('empty-eval')
+    throwIfCancelled('pageFetch.empty')
     return null
   }
   let parsed: any
   try { parsed = JSON.parse(String(raw)) } catch {
     wjxtLog('[page] eval result not JSON: ' + String(raw).slice(0, 200))
-    destroyCtxWin()
+    destroyCtxWinIf(win)
+    pageChanNoteFailure('bad-json')
+    throwIfCancelled('pageFetch.parse')
     return null
   }
   if (parsed?.error) {
@@ -651,11 +812,21 @@ async function pageFetch(
     wjxtLog(`[page] fetch ${path} failed: ${msg}`)
     // 走到这里说明窗口仍在站点域内（站外的情况已在上面拦掉），这种 Failed to fetch 才是
     // 「页面上下文真坏了」→ 丢窗口重建；同样不作为业务结论，交给降级通道
-    if (/failed to fetch|networkerror|load failed|err_/i.test(msg)) { destroyCtxWin(); return null }
+    if (/failed to fetch|networkerror|load failed|err_/i.test(msg)) {
+      destroyCtxWinIf(win)
+      pageChanNoteFailure('fetch')
+      throwIfCancelled('pageFetch.fetch')
+      return null
+    }
+    pageChanNoteFailure('fetch-error')
     return null
   }
   const { count, names } = await cookieNamesFor(url)
   wjxtLog(`[page] ${opts.method || 'GET'} ${url} status=${parsed.status} final=${String(parsed.url).slice(0, 200)} ct=${parsed.ct} len=${String(parsed.body).length} cookies=${count} names=${names}`)
+  // 只有「拿到了完整响应」才算通道健康 —— 注意不是「HTTP 200」：
+  // 未登录时页面 fetch 也能成功，只是正文是 ErrorCode4 信封，那种情况由readJson 判业务，
+  // 对通道而言仍是「通的」（页面上下文确实建立了会话绑定）。
+  pageChanNoteSuccess()
   return {
     status: Number(parsed.status) || 0,
     body: String(parsed.body ?? ''),
@@ -861,24 +1032,40 @@ export function startLoginWatch(): void {
 function watchLoginUntilDone(): void {
   if (loginWatchTimer) return
   let tries = 0
-  loginWatchTimer = setInterval(() => {
-    void (async () => {
-      tries++
+  // 探测进行中标志（2026-10-10）：`probeLoggedIn` 走页面通道，未登录时要等超时（可达数十秒），
+  // 而定时器是 2 秒一跳 —— 上一跳还没回来，下一跳就又发一次，实测堆到几十个并发探测，
+  // 每个都建窗口/发请求，且 `tries` 仍照加，于是 3 分钟的判定被提前触发几十次
+  //（现场日志 `[loginWatch] give up` 打了 41 次）。
+  // 改成：**上一跳 settle 后才排下一跳**，探测再慢也不会并发。
+  let probing = false
+  const finish = (why: string) => {
+    if (loginWatchTimer) { clearInterval(loginWatchTimer); loginWatchTimer = null }
+    wjxtLog(`[loginWatch] ${why}`)
+  }
+  const tick = async () => {
+    if (probing) return
+    probing = true
+    tries++
+    try {
       const ok = await probeLoggedIn()
       if (ok === true) {
-        if (loginWatchTimer) { clearInterval(loginWatchTimer); loginWatchTimer = null }
-        wjxtLog(`[loginWatch] session established after ${tries} polls -> auto-close login window`)
+        finish(`session established after ${tries} polls -> auto-close login window`)
         // 传空串 = 关掉所有已登记的登录窗口：用户可能点的是 H5 页，也可能是 IAM 扫码页
         try { closeLoginWindow?.('') } catch { /* ignore */ }
         warmedUp = false
         // 隐藏窗口里的页面还是「登录前」那份上下文：重新导航一次让它用新会话重新绑定
         void reloadCtxWin()
-      } else if (tries >= 90) {
-        if (loginWatchTimer) { clearInterval(loginWatchTimer); loginWatchTimer = null }
-        wjxtLog('[loginWatch] give up after 3 minutes (still not logged in)')
+        return
       }
-    })()
-  }, 2000)
+    } catch (e: any) {
+      wjxtLog('[loginWatch] probe failed: ' + String(e?.message || e))
+    } finally {
+      probing = false
+    }
+    // 90 次 ×2 秒 ≈ 3 分钟；按「实际完成的探测次数」计，而不是被放大的计数
+    if (tries >= 90) finish('give up after 3 minutes (still not logged in)')
+  }
+  loginWatchTimer = setInterval(() => { void tick() }, 2000)
 }
 
 /**
@@ -1363,6 +1550,7 @@ export async function wjxtSearch(
   let usedFallback = false
   let parsed: { files: WjxtFileInfo[]; total: number; docList: any } = { files: [], total: 0, docList: {} }
   for (const s of strategies) {
+    throwIfCancelled('search.strategies')
     wjxtLog(`[search] try strategy=${s.name} query=${s.query} sort=${usedServerSort ? sortKey : 'score'}`)
     const r = await attempt(s.query)
     usedStrategy = s.name
@@ -1518,8 +1706,12 @@ function toUserError(e: any): string {
   if (/^WJXT_HTTP_5\d\d$/.test(msg)) return 'WJXT_HTTP_5XX'
   if (/^WJXT_SERVER_ERROR/.test(msg)) return 'WJXT_SERVER_ERROR'
   if (e?.name === 'TimeoutError' || /timeout/i.test(msg)) return 'WJXT_TIMEOUT'
-  return msg
-}
+    // 1.0.51：用户主动停止（throwIfCancelled 抛的 AbortError）。**必须原样抛出**，
+    // 不能落到下面的兜底里被当成一次普通的检索失败 —— 否则界面会把「已停止」
+    // 渲染成「检索失败并给一堆建议」，用户点了停止却看到一段报错，既怪又误导。
+    if (e?.name === 'AbortError' || /aborted at /.test(msg)) return 'WJXT_ABORTED'
+    return msg
+  }
 
 /**
  * 需要登录时的统一处置：弹一次应用内登录窗口 + 给出可执行提示。
@@ -1560,12 +1752,18 @@ async function reloginResult(code: 'NEED_RELOGIN' | 'WJXT_NO_SESSION'): Promise<
   // 无论用户点哪个入口，都开始监听：会话一建立就自动关掉登录窗口
   startLoginWatch()
   //
-  // 「SSO 登录」这个入口要不要给（2026-10-07）：
+  // 「SSO 登录」这个入口要不要给（2026-10-07，判据于 10-10 修正）：
   // edoc2 的换票以 **IAM 会话**为前提。IAM 会话一旦 idle 过期，SSO 入口会永远停在
   // `iam…/idp/authCenter/authenticate`（不再往 AC 登录页跳），应用内窗口里那页没有可见内容
   // → 用户点进去看到的就是**白屏**。所以：
   //   - `fresh=true`（已抓到一次性 lck）→ 给「扫码登录」，那是真能用的 AC 页；
-  //   - 否则探一次 IAM：活着才给「SSO 登录」（会秒换票），死了就**只给 H5 账号密码**。
+  //   - 否则探一次 IAM：**只有明确判定为失效（false）才不给**「SSO 登录」。
+  //
+  // 1.0.51 修正：探针已改成三态（true/false/null=null 无法判定），而这里原先写的是
+  // `iamAlive === true` —— 于是「探针超时/网络异常/形态未知」也被当成失效，
+  // 把本来能用的入口砍掉（这正是 IAM 探针缺陷最典型的表现：恒报 false）。
+  // 现在改成 `!== false`：**不确定时倾向放行**。多给一个入口最坏是白屏（已有提示条兜住），
+  // 而砍掉能用的入口用户就只能去输账号密码了。
   let iamAlive: boolean | null = null
   if (!qr.fresh && iamProbe) {
     try {
@@ -1574,8 +1772,12 @@ async function reloginResult(code: 'NEED_RELOGIN' | 'WJXT_NO_SESSION'): Promise<
       wjxtLog('[needlogin] IAM probe failed: ' + String(e?.message || e))
     }
   }
-  const ssoUsable = qr.fresh || iamAlive === true
-  wjxtLog(`need login (${code}) -> iamAlive=${iamAlive} qrFresh=${qr.fresh} ssoUsable=${ssoUsable}`)
+  // VPN / 内网不通时，Chromium 根本打不开 iam 域 —— SSO 与扫码两个入口**都在 Chromium 里**，
+  //  给出去必然白屏（用户实测 2026-10-10）。此时只留 H5：它在 `wj` 域，同样情况下是通的。
+  const iamUnreachable = isChromiumIamUnreachable()
+  const ssoUsable = qr.fresh || (iamAlive !== false && !iamUnreachable)
+  wjxtLog(`need login (${code}) -> iamAlive=${iamAlive} qrFresh=${qr.fresh} ` +
+    `chromiumIamUnreachable=${iamUnreachable} ssoUsable=${ssoUsable}`)
   const options: Array<{ type: string; label: string; url: string; note: string; markdown: string }> = [
     {
       type: 'password',
@@ -1612,6 +1814,8 @@ async function reloginResult(code: 'NEED_RELOGIN' | 'WJXT_NO_SESSION'): Promise<
     qrLoginUrl: qr.url,
     /** IAM 会话是否还活着；false 时 SSO 入口必白屏，因此只给 H5 一个入口 */
     iamSessionAlive: iamAlive,
+    /** Chromium 打不开 iam 域（VPN / 内网不通）。true 时同样只给 H5 一个入口 */
+    chromiumIamUnreachable: iamUnreachable,
     /** 结构化列表，便于模型直接渲染成链接 */
     loginOptions: options.map(o => ({ type: o.type, label: o.label, url: o.url, note: o.note })),
     /** 拼好的 Markdown 片段：模型**照抄**即可（用户看到的是可点文字，而不是一长串URL） */
@@ -1620,7 +1824,11 @@ async function reloginResult(code: 'NEED_RELOGIN' | 'WJXT_NO_SESSION'): Promise<
       ? '应用内还没有鸿翼文件系统（企业内容库）的登录态，已尝试无感恢复但未成功。'
       : '鸿翼文件系统（企业内容库）的登录态已失效，已尝试无感恢复但未成功。')
       + (onlyOne
-        ? '统一身份（IAM）会话已过期，SSO 入口此时会停在跳转中途、打开是一片空白，所以**只给这一个入口**：\n'
+        ? (iamUnreachable
+          // 网络层原因要说清楚，否则用户会以为是应用坏了，反复点
+          ? '检测到**内网 / VPN 未连通**（统一身份页面 iam.streamax.com 打不开），'
+            + '此时 SSO 与扫码入口都会打开一片空白，所以**只给账号密码这一个入口**：\n'
+          : '统一身份（IAM）会话已过期，SSO 入口此时会停在跳转中途、打开是一片空白，所以**只给这一个入口**：\n')
         : '请**选一种方式登录**（点下面任一链接即可，会在应用内窗口打开；登录成功后窗口会显示「登录成功」再自动关闭）：\n')
       + optionLines + '\n'
       + '**把上面这些行原样输出为 Markdown 链接**：不要改写成裸 URL、不要放进代码块、不要加引号。\n'
@@ -1767,7 +1975,8 @@ export interface WjxtDownloadItem {
 /** 下载一个或多个文件（逐个串行，失败不中断其余） */
 export async function runWjxtDownload(
   input: { fileGuid?: string; fileGuids?: string[]; dir: string; names?: string[]; sizes?: Array<number | string> },
-  roots: AIExtraRoot[] = []
+  roots: AIExtraRoot[] = [],
+  signal?: AbortSignal
 ): Promise<{
   ok: boolean
   dir?: string
@@ -1791,7 +2000,14 @@ export async function runWjxtDownload(
 
   const items: WjxtDownloadItem[] = []
   let needReloginCode: 'NEED_RELOGIN' | 'WJXT_NO_SESSION' | '' = ''
+  // 同 runWjxtSearch：把取消信号挂到模块级（见 setWjxtSignal），让 pageFetch / ensureCtxWin 能读到。
+  // 栈式还原（存旧值、finally 恢复）以支持自愈重试的嵌套调用。
+  const prevSignal = currentSignal
+  setWjxtSignal(signal || null)
+  try {
   for (let i = 0; i < guids.length; i++) {
+    // 1.0.51：用户点「停止」后立刻退出，不再逐个文件继续下
+    throwIfCancelled('download.loop')
     const gid = guids[i]
     try {
       const url = await wjxtResolveOriginUrl(gid)
@@ -1827,6 +2043,8 @@ export async function runWjxtDownload(
       })
     } catch (e: any) {
       const code = toUserError(e)
+      // 1.0.51：用户点了「停止」→ 原样抛出，不要把它记成某个文件的下载失败
+      if (code === 'WJXT_ABORTED') throw e
       if (code === 'NEED_RELOGIN' || code === 'WJXT_NO_SESSION') {
         needReloginCode = code as 'NEED_RELOGIN' | 'WJXT_NO_SESSION'
         items.push({ fileGuid: gid, ok: false, error: code, message: '鸿翼文件系统的登录态不可用' })
@@ -1850,6 +2068,10 @@ export async function runWjxtDownload(
     items,
     ...(ok ? {} : { message: '部分或全部文件下载失败，详见 items' })
   }
+  } finally {
+    // 恢复上一个信号（与 runWjxtSearch 同理，不能带着本次的 signal 去跑下一次调用）
+    setWjxtSignal(prevSignal)
+  }
 }
 
 /** 搜索工具的执行入口：错误统一转成结构化结果，让模型知道下一步怎么做 */
@@ -1862,11 +2084,15 @@ export async function runWjxtSearch(input: {
   from?: number
   /** 内部用：本次调用前已经跑过一次「SSO 无感换票」，避免自愈失败时无限递归 */
   _healTried?: boolean
-}): Promise<any> {
+}, opts?: { signal?: AbortSignal }): Promise<any> {
   const keyword = String(input?.keyword || '').trim()
   if (!keyword && !input?.query) return { ok: false, error: 'MISSING_ARG', message: '缺少 keyword 参数' }
   const from = Math.max(0, Math.round(Number(input?.from) || 0))
   wjxtLog(`[search] keyword=${keyword} size=${input?.size ?? '-'} mode=${input?.mode || 'word'} sort=${input?.sort || 'score'} from=${from} query=${input?.query ? 'yes' : 'no'}`)
+  // 把取消信号挂到模块级（见 setWjxtSignal 的说明）：底层 pageFetch / ensureCtxWin / warmup
+  // 都会检查它，finally 里**必须**清掉，否则会污染下一次无关调用。
+  const prevSignal = currentSignal
+  setWjxtSignal(opts?.signal || null)
   try {
     const { total, files, strategy, sortMode, nameReranked, fallback } = await wjxtSearch(keyword, {
       size: input?.size,
@@ -1990,13 +2216,13 @@ export async function runWjxtSearch(input: {
       // ① 先自己试着把 SSO 链跑完（隐藏窗口 + 共享分区）：成功就无感，用户什么都不用做
       if (!input?._healTried && await silentSsoHeal()) {
         wjxtLog('[search] sso self-heal ok -> retry search once')
-        return await runWjxtSearch({ ...input, _healTried: true })
+        return await runWjxtSearch({ ...input, _healTried: true }, opts)
       }
       const r = await reloginResult(code as any)
       // ② 取 lck 那次隐藏导航本身可能已完成换票（2026-10-02 实证）：直接重试，别让用户去点
       if (r?.healed && !input?._healTried) {
         wjxtLog('[search] session restored while preparing login options -> retry search once')
-        return await runWjxtSearch({ ...input, _healTried: true })
+        return await runWjxtSearch({ ...input, _healTried: true }, opts)
       }
       return r
     }
@@ -2019,6 +2245,13 @@ export async function runWjxtSearch(input: {
     if (code === 'WJXT_SERVER_ERROR') {
       return { ok: false, error: code, message: '鸿翼服务端返回了业务错误码：' + String(e?.message || e) }
     }
+    // 1.0.51：用户点了「停止」—— 原样抛出，让 chatService 走它自己的 AbortError 分支
+    //（结束本轮、标记 stopped）。**不要**在这里组织成 ok:false 的返回值。
+    if (code === 'WJXT_ABORTED') throw e
     return { ok: false, error: 'SEARCH_FAILED', message: String(e?.message || e) }
+  } finally {
+    // 恢复上一个信号：模块级变量不能带着上一次调用的 signal 去跑下一次（嵌套自愈重试
+    // 会再次进来并覆盖，这里按栈式还原，保证嵌套调用结束后回到外层的 signal）
+    setWjxtSignal(prevSignal)
   }
 }

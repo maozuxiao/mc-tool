@@ -70,6 +70,18 @@ export interface AIConversation {
    * 存进会话记录既不破坏「按会话独立」，又能做到「重启 / 切回旧会话恢复原样」。
    */
   enabledSkills?: string[]
+  /**
+   * 本会话上次使用的模式（ask / mc / build），1.0.51 起**按会话持久化**。
+   *
+   * 此前 mode 是纯渲染层 `useState('mc')`，**从不落盘**（代码里写着「刻意不做持久化：
+   * Build 是高风险模式，每次启动都回到 mc」）。但这个顾虑在「按会话恢复」的语义下并不成立：
+   * 恢复只发生在**用户主动打开该会话时**，不会变成「一启动就是 Build」。
+   *
+   * 不修的实际后果（用户反馈「重启后打开历史对话，模式变回物料」）：同一个会话里
+   * 技能勾选会恢复、模式却不恢复 —— 两边行为不一致。用户看到的是「明明选了 Build 和技能，
+   * 重启后工具栏却显示物料」，而下轮提问就因为模式不对下发不了文件工具，白跑一轮。
+   */
+  mode?: AIAgentMode
 }
 
 export type AIMessageRole = 'user' | 'assistant' | 'tool'
@@ -240,6 +252,8 @@ export const AI_IPC = {
   DELETE_CONVERSATION: 'ai:delete-conversation',
   // 记住某会话启用的技能（1.0.46）：勾选按会话独立，但要跨重启/切回保留
   SET_CONV_SKILLS: 'ai:set-conv-skills',
+  /** 记录会话上次使用的模式（1.0.51，按会话持久化，与 SET_CONV_SKILLS 同构） */
+  SET_CONV_MODE: 'ai:set-conv-mode',
   SEND_MESSAGE: 'ai:send-message',
   STOP_MESSAGE: 'ai:stop-message',
   // Build 模式的工作区根目录：由主进程弹系统目录选择框，避免渲染层直接操作 fs
@@ -283,6 +297,20 @@ export const AI_IPC = {
 // ── MCP 服务（1.0.46）────────────────────────────────────────────────────────────
 
 /** 一个已登记的 stdio MCP 服务 */
+/**
+ * IAM 会话判定结果（1.0.51）：`true` 已登录 / `false` 明确失效 / `null` **无法判定**。
+ *
+ * 为什么要三态：主进程的 IAM 探针过去只有boolean，而它的判据依赖 IAM 的响应形态。
+ * 2026-10-10 实测 IAM 对同一端点改返回 `200 +无 Location`（此前是 `302 + Location`），
+ * 于是 `location` 为空 → 判定恒为 false—— 同一时刻 `probeOaSession` 却报 `ok=true`，
+ * **探针与事实矛盾**。二值模型里「判不出来」只能被塞进 false，进而让所有依赖它的
+ * gating（鸿翼 SSO 登录入口、启动自检诊断）把能用的路径当成失效。
+ *
+ * 定在共享类型里：主进程（index.ts 产出）与技能侧（wjxtSkill.ts 消费）都要用，
+ * 放index.ts 会造成 wjxtSkill → index 的循环依赖。
+ */
+export type IamAlive = boolean | null
+
 export interface McpServerConfig {
   id: string
   /** 展示名（也是日志文件名的一部分） */

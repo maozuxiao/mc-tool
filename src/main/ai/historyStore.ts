@@ -171,6 +171,22 @@ export function setConversationSkills(id: string, keys: string[]): void {
   persist()
 }
 
+/**
+ * 记录会话上次使用的模式（1.0.51）。
+ * 与 setConversationSkills 同构：**刻意不动 `updatedAt`** —— 模式只是「顺手记一下」，
+ * 不该把会话顶到列表最前（那会让用户正在看的历史会话突然跳走）。
+ */
+export function setConversationMode(id: string, mode: string): void {
+  const data = load()
+  const c = data.conversations.find(x => x.id === id)
+  if (!c) return
+  // 只接受已知模式，脏值（历史文件被手改 / 旧版本残留）一律忽略
+  if (mode !== 'ask' && mode !== 'mc' && mode !== 'build') return
+  if (c.mode === mode) return
+  c.mode = mode
+  persist()
+}
+
 export function renameConversation(id: string, title: string): void {
   const data = load()
   const c = data.conversations.find(x => x.id === id)

@@ -70,6 +70,16 @@ interface State {
   // 行展开状态持久化到 store：切换 tab 时不丢失展开行与按钮点击事件
   matExpandedKeys: Set<string>
   bomExpandedKeys: Set<number>
+  // 1.0.51：AI 回复里的大图预览（点开大图）。
+  // 为什么放 store 而不是组件内部 state：触发方是**每条消息内部**的 markdown <img>，
+  // 而预览层要**全局面板只挂一个**（历史消息很多，逐条挂 Modal 会让 DOM 节点膨胀）。
+  // 用 store 串起「气泡内 img → 顶层预览层」，且 zustand 的 action 引用在 set 时不变，
+  // 可以安全地被 memo 包裹的 MarkdownImg 依赖（不会打穿 MessageItem 的记忆化）。
+  //
+  // 1.0.51 追加：`srcs` 是**当前这条消息里的全部图片**，用于「上一张 / 下一张」切换；
+  // `index` 是当前查看的那一张。之前是全屏 Modal，会把对话整个遮住 ——
+  // 看图时无法继续滚动阅读上下文，用户要求改成右侧分栏。
+  imgPreview: { srcs: string[]; index: number; alt?: string } | null
 
   // actions
   t: (key: string, vars?: Record<string, string | number>) => string
@@ -112,6 +122,11 @@ interface State {
   setBomKw: (v: string) => void
   setBomKwNot: (v: string) => void
   bomSortBy: (k: string) => void
+  // 1.0.51：AI 回复大图预览的开关（见 imgPreview 字段的说明）
+  openImgPreview: (p: { srcs: string[]; index: number; alt?: string }) => void
+  closeImgPreview: () => void
+  /** 在当前预览的图片列表里切换（delta = ±1，自动环绕） */
+  stepImgPreview: (delta: number) => void
 
   setActiveTab: (t: Tab) => void
   toggleCol: (k: string) => void
@@ -217,6 +232,8 @@ export const useStore = create<State>((set, get) => ({
   updateInfo: { hasUpdate: false, checking: false },
   matExpandedKeys: new Set(),
   bomExpandedKeys: new Set(),
+  // 1.0.51：AI 回复大图预览（null = 未打开）
+  imgPreview: null,
   // 软件版本号：从主进程 app.getVersion() 实时读取，保持与 package.json 一致
   appVersion: (() => { try { return window.mcApi.appVersion() } catch { return '1.0.10' } })(),
 
@@ -417,6 +434,25 @@ export const useStore = create<State>((set, get) => ({
   },
 
   setActiveTab: (t) => set({ activeTab: t }),
+
+  // 1.0.51：点开/关闭 AI 回复里的大图预览（右侧分栏，不遮住对话）。
+  // src 做了 trim + 过滤：markdown 允许 `![](  )` 这类空 src，进来直接不预览。
+  // `srcs` 会被去重（同一张图在一条消息里可能引用多次），index 按**去重后**的下标定位。
+  openImgPreview: (p) => {
+    const srcs = (p?.srcs || []).map(s => String(s || '').trim()).filter(Boolean)
+    if (!srcs.length) return
+    const idx = Math.min(Math.max(0, Math.round(Number(p?.index) || 0)), srcs.length - 1)
+    set({ imgPreview: { srcs, index: idx, alt: p?.alt } })
+  },
+  closeImgPreview: () => set({ imgPreview: null }),
+  stepImgPreview: (delta) => set(s => {
+    const cur = s.imgPreview
+    if (!cur || cur.srcs.length < 2) return s
+    // 取模实现「最后一张的下一张 = 第一张」，翻页不必判断边界
+    const n = cur.srcs.length
+    const next = (((cur.index + Math.round(delta)) % n) + n) % n
+    return { imgPreview: { ...cur, index: next } }
+  }),
 
   // 手风琴式展开：点击已展开行则收起，否则仅展开当前行并关闭其他行
   toggleMatExpanded: (k) => set(s => {

@@ -58,11 +58,14 @@ const REGISTRY: Record<string, ToolEntry> = {
   // ── 内置技能「鸿翼文件查询下载」提供的工具（仅 build 模式 + 已启用该技能时下发）──
   wjxt_search: {
     definition: WJXT_SEARCH_TOOL_DEFINITION,
-    run: (input) => runWjxtSearch(input)
+    // 1.0.51：透传 signal —— 用户点「停止」时 chatService 会 abort 它，
+    // 鸿翼执行链（pageFetch / ensureCtxWin / warmup / 策略循环）据此立刻抛 AbortError 退出。
+    // 此前这里没传，内部也从不读 signal，于是「停止」按钮对 wjxt_search 完全无效（用户实测）。
+    run: (input, ctx) => runWjxtSearch(input, { signal: ctx.signal })
   },
   wjxt_download: {
     definition: WJXT_DOWNLOAD_TOOL_DEFINITION,
-    run: (input, ctx) => runWjxtDownload(input, ctx.allowedRoots)
+    run: (input, ctx) => runWjxtDownload(input, ctx.allowedRoots, ctx.signal)
   },
   file_read: {
     definition: FILE_TOOL_DEFINITIONS[0],

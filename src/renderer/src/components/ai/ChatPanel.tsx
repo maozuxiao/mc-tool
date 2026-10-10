@@ -7,7 +7,8 @@ import type { AIAgentMode, AIAttachment, AIConversation, AIMessage, AIProviderCo
 import { AI_PROTOCOL_LABELS, skillKey } from '@shared/ai-types'
 import { OA_ORIGIN } from '@shared/constants'
 import { useStore } from '../../store'
-import { Button, CodeBlock, Collapse, Icon, Tooltip } from 'animal-island-ui'
+import { Button, CodeBlock, Collapse, Icon, Modal, Tooltip } from 'animal-island-ui'
+import ImagePreviewModal from './ImagePreviewModal'
 // naive-icons（手绘 naive 风，MIT，1.1.0）：AI 面板里这几枚「操作类」图标改用它 ——
 // 库内置图标是**固定 9 色填充**的手绘风，塞进主题色药丸/小按钮里会显得花。
 // 封装见 components/NaiveIcon.tsx（按需引原始 SVG 资源 + 改色跟随主题，见该文件顶部说明）。
@@ -274,9 +275,29 @@ export function ChatPanel({ disabled }: Props) {
   streamingIdsRef.current = streamingIds
   pendingNewStreamRef.current = pendingNewStream
   // 运行模式：ask 纯对话 / mc 物料查询 / build 文件读写与命令。
-  // 刻意不做持久化：Build 是高风险模式，每次启动都回到 mc，由用户主动切换。
-  const [mode, setMode] = useState<AIAgentMode>('mc')
+  //
+  // 1.0.51 起**按会话持久化**（此前是纯 useState、从不落盘）。原注释写的是
+  // 「刻意不做持久化：Build 是高风险模式，每次启动都回到 mc」—— 但在「按会话恢复」的
+  // 语义下这个顾虑不成立：恢复只发生在用户**主动打开该会话**时，不会变成「一启动就是 Build」。
+  // 不修的实际后果：技能勾选恢复了、模式却没恢复，用户看到「明明选了 Build 和技能，
+  // 重启后工具栏显示物料」，下一轮就因模式不对下发不了文件工具，白跑一轮。
+  const [mode, setModeRaw] = useState<AIAgentMode>('mc')
   const [notice, setNotice] = useState('')
+  /**
+   * 切换模式，并**顺手记到当前会话**（1.0.51）。
+   *
+   * 落盘放在 setState 的**外面**（与 persistSkillSel 同款做法）：StrictMode 下 updater
+   * 会被调用两次，放进去就会重复写 IPC。写失败（会话 id 为空 / 主进程异常）静默忽略 ——
+   * 模式切换本身已经在界面上生效了，不该因为存不下去而阻塞用户。
+   */
+  const setMode = useCallback((m: AIAgentMode) => {
+    setModeRaw(m)
+    const convId = conversationIdRef.current
+    // '__new__' 是「尚未落库的新会话」槽位，没有真实 id，落盘会找不到会话 —— 与 persistSkillSel 同一判断
+    if (!convId || convId === '__new__') return
+    try { void window.mcApi.ai.setConvMode?.(convId, m) } catch { /* 忽略 */ }
+  }, [])
+
   // 会话历史栏收起/展开：记住用户偏好，跨启动保留
   const [sideCollapsed, setSideCollapsed] = useState(() => {
     try { return localStorage.getItem('ai.sidebarCollapsed') === '1' } catch { return false }
@@ -650,10 +671,18 @@ export function ChatPanel({ disabled }: Props) {
       // 恢复该会话上次的勾选（1.0.46）：只在内存里还没有这条会话的记录时用库里的值 ——
       // 同一进程内用户刚改过的勾选以内存为准，不能被旧值覆盖回去。
       const saved = data?.conversation?.enabledSkills
-      if (Array.isArray(saved)) {
-        setSkillSel(prev => (prev[id] ? prev : { ...prev, [id]: saved.map(String) }))
-      }
-      pendingScrollRef.current = { id }
+            if (Array.isArray(saved)) {
+            setSkillSel(prev => (prev[id] ? prev : { ...prev, [id]: saved.map(String) }))
+            }
+            // 恢复该会话上次用的模式（1.0.51）：必须与上面技能恢复**成对存在** ——
+          // 此前只恢复技能、不恢复模式，于是「重启后打开历史会话」看到的是「技能勾还在、
+            // 工具栏却显示物料」，而物料模式不下发文件工具，下一轮必然白跑（用户反馈）。
+            // 用 setModeRaw 而非 setMode：这是**读回**而不是用户切换，落盘没有意义。
+            const savedMode = data?.conversation?.mode
+            if (savedMode === 'ask' || savedMode === 'mc' || savedMode === 'build') {
+              setModeRaw(savedMode)
+            }
+            pendingScrollRef.current = { id }
       // 注意：AI 配置（服务商 / 模型）是全局的，不随会话切换而改变。
       // 历史会话仍然用它当时记录的服务商与模型，只有「当前工具栏选择」保持全局。
     } catch (e: any) { setNotice(e.message) }
@@ -978,6 +1007,19 @@ export function ChatPanel({ disabled }: Props) {
     // 迁移的同时落库：会话刚创建，把新会话的勾选写进它的记录，重启/切回才能恢复
     persistSkillSel(conversationId, pending)
   }, [conversationId, persistSkillSel])
+
+  // 新会话第一次拿到 id 时，把当时的模式补写进它的记录（1.0.51）。
+  //
+  // 为什么必须单独一个 effect、而不是并进上面那个：上面在 `pending.length === 0` 时
+  // **提前 return**（没勾技能就不必迁移勾选），于是「选了 Build 但没勾技能」的会话
+  // 永远拿不到 mode —— 而这恰恰是最需要记住模式的场景（文件工具不依赖技能）。
+  // 另：`prev` 判断沿用同一套「仅首次拿到 id」的语义，避免每次切会话都重复落盘。
+  const modeMigratedRef = useRef(false)
+  useEffect(() => {
+    if (!conversationId || modeMigratedRef.current) return
+    modeMigratedRef.current = true
+    try { void window.mcApi.ai.setConvMode?.(conversationId, mode) } catch { /* 忽略 */ }
+  }, [conversationId, mode])
   // 「诊断」：一键体检三条会话线（OA / IAM / 鸿翼 edoc2），结论弹窗、明细同时写进 wjxt.log。
   // 用途：用户报「搜不到文件 / 让登录」时，让 TA 点一下就能拿到「到底是哪一条线断了」。
   const runDiag = async () => {
@@ -1049,15 +1091,93 @@ export function ChatPanel({ disabled }: Props) {
   }
 
   const removeConversation = async (id: string) => {
-    await window.mcApi.ai.deleteConversation(id)
-    if (id === conversationId) {
-      setActiveConversation(null)
-      setMessages([])
+      await window.mcApi.ai.deleteConversation(id)
+      if (id === conversationId) {
+        setActiveConversation(null)
+        setMessages([])
+      }
+      // 清掉该会话的草稿，避免内存里残留无主草稿
+   setDrafts(prev => { const n = { ...prev }; delete n[id]; return n })
+      refreshConversations()
     }
-    // 清掉该会话的草稿，避免内存里残留无主草稿
-    setDrafts(prev => { const n = { ...prev }; delete n[id]; return n })
-    refreshConversations()
-  }
+
+    // ── 会话多选与批量删除（1.0.51）───────────────────────────��────────
+    // 多选是**显式模式**：默认只显示「单条删除」，点侧栏头部的「多选」才进入多选态出现复选框。
+    // 之前复选框常驻 —— 侧栏本来就窄，每行多个复选框让噪音很大，而且「当前会话(active)」
+    // 与「已勾选(selected)」都用同一套高亮，用户根本分不清自己点的是哪个（用户反馈）。
+    const [selMode, setSelMode] = useState(false)
+    const [selConvIds, setSelConvIds] = useState<Set<string>>(() => new Set())
+    const [batchDeleteOpen, setBatchDeleteOpen] = useState(false)
+    const [batchDeleting, setBatchDeleting] = useState(false)
+
+    // 退出多选态时清空勾选：残留的勾选会让下次进入多选时「莫名其妙选中了几个」
+    const exitSelMode = useCallback(() => {
+      setSelMode(false)
+      setSelConvIds(new Set())
+      setBatchDeleteOpen(false)
+    }, [])
+
+    const enterSelMode = useCallback(() => {
+      setSelMode(true)
+    }, [])
+
+    const toggleSelectMode = useCallback(() => {
+      if (selMode) exitSelMode(); else enterSelMode()
+    }, [selMode, exitSelMode, enterSelMode])
+
+    // 会话被外部删掉（单删 / 批量删 / 另一窗口）后，勾选集里不能留悬空 id，
+        // 否则「已选 N 项」会与列表对不上、全选态也会算错。
+        useEffect(() => {
+          setSelConvIds(prev => {
+      if (!prev.size) return prev
+            const alive = new Set(conversations.map(c => c.id))
+            const next = new Set([...prev].filter(id => alive.has(id)))
+            return next.size === prev.size ? prev : next
+     })
+        }, [conversations])
+
+      const toggleConvSel = useCallback((id: string) => {
+          setSelConvIds(prev => {
+            const next = new Set(prev)
+        if (next.has(id)) next.delete(id); else next.add(id)
+       return next
+          })
+        }, [])
+
+        // 全选 / 取消全选：以「当前是否已全选」为准，避免出现「全选后取消一项就整体变半选」
+      // ——那种中间态对用户没有实际意义，反而让人以为漏选了。
+        const allSelected = conversations.length > 0 && selConvIds.size === conversations.length
+      const toggleSelectAll = useCallback(() => {
+          setSelConvIds(prev => (prev.size === conversations.length ? new Set() : new Set(conversations.map(c => c.id))))
+        }, [conversations])
+
+      const clearConvSel = useCallback(() => setSelConvIds(new Set()), [])
+
+        const batchDeleteConversations = async () => {
+          const ids = [...selConvIds]
+          if (!ids.length || batchDeleting) return
+          setBatchDeleting(true)
+          try {
+            for (const id of ids) {
+     await window.mcApi.ai.deleteConversation(id)
+       // 逐个清掉内存里的关联状态：草稿、滚动位置、技能勾选。
+       // 漏掉任何一项都会留下「无主」残留（切回去才发现草稿还在之类）。
+              if (id === conversationId) { setActiveConversation(null); setMessages([]) }
+      setDrafts(prev => { const n = { ...prev }; delete n[id]; return n })
+              scrollPositionsRef.current.delete(id)
+              setSkillSel(prev => { if (!(id in prev)) return prev; const n = { ...prev }; delete n[id]; return n })
+     }
+          clearConvSel()
+                setBatchDeleteOpen(false)
+                refreshConversations()
+                // 删完就退出多选态：此时列表已经变了，继续留在多选里只会让人困惑
+                exitSelMode()
+       } catch (e: any) {
+            setNotice(e?.message || String(e))
+          } finally {
+          setBatchDeleting(false)
+          }
+        }
 
   const title = useMemo(() => conversations.find(c => c.id === conversationId)?.title || t('aiNewChatTitle'), [conversations, conversationId, t])
   // 原生 <datalist> 的下拉弹层由浏览器绘制，CSS 无法控制其高度，模型一多就没有滚动条。
@@ -1076,6 +1196,7 @@ export function ChatPanel({ disabled }: Props) {
   ], [providers.providers, t])
 
   return (
+    <>
     <div className={`ai-page${sideCollapsed ? ' side-collapsed' : ''}${isNarrow && drawerOpen ? ' side-open' : ''}`}>
       {isNarrow && drawerOpen && (
         <div className="ai-side-backdrop" onClick={closeDrawer} />
@@ -1101,28 +1222,93 @@ export function ChatPanel({ disabled }: Props) {
             title={t('aiNewChat')}
             onClick={() => { setActiveConversation(null); setMessages([]); if (isNarrow) setDrawerOpen(false) }}
           ><Icon name="Plus" size={16} /></button>
-        </div>
-        <div className="ai-history">
-          {conversations.map(c => (
-            <div key={c.id} className={`ai-history-item${c.id === conversationId ? ' active' : ''}`}>
-              {/* 窄窗口下点会话后自动收起抽屉，避免浮层挡住对话区 */}
-              <button className="ai-history-title" onClick={() => { void openConversation(c.id); setDrawerOpen(false) }}>{c.title}</button>
-              {/* 该会话正在生成时给个标记：并发生成时才能一眼看出哪条在跑（1.0.43） */}
-              {streamingIds.includes(c.id) && (
-                <span className="ai-history-running" title={t('aiStreamingBadge')}>
-                  <span className="ai-history-running__dot" />
-                </span>
-              )}
-              <button className="ai-history-delete" title={t('delete')} onClick={() => removeConversation(c.id)} data-cursor="pointer">
-                <NaiveIcon name="close" size={13} />
-              </button>
-            </div>
-          ))}
-        </div>
+                    {/* 多选模式开关（1.0.51）：默认关闭，此时列表只显示单条删除。
+                        明确给出「进入 / 退出」入口，而不是让复选框常驻 —— 常驻既吵，
+                        又让「当前会话」与「已勾选」两种高亮混在一起分不清（用户反馈）。*/}
+                    {(!sideCollapsed || isNarrow) && conversations.length > 0 && (
+                      <button
+                        type="button"
+                        className={`ai-side-selmode${selMode ? ' on' : ''}`}
+                        title={selMode ? t('aiConvExitSelMode') : t('aiConvEnterSelMode')}
+                        onClick={toggleSelectMode}
+                      >
+                        <Icon name={selMode ? 'Close' : 'Check'} size={13} />
+                      </button>
+                    )}
+                  </div>
+                  <div className="ai-history">
+                    {/* 全选行：仅多选态出现。勾选态与「是否已全选」严格同步，
+                        不做 indeterminate ——「取消一项后整体变半选」的语义对用户没有价值。*/}
+                  {selMode && conversations.length > 0 && (
+                   <label className={`ai-history-all${allSelected ? ' on' : ''}`}>
+                    <input
+                      type="checkbox"
+                      checked={allSelected}
+           onChange={toggleSelectAll}
+             />
+          <span>{allSelected ? t('aiConvDeselectAll') : t('aiConvSelectAll')}</span>
+                 </label>
+                  )}
+        {conversations.map(c => {
+                const checked = selConvIds.has(c.id)
+                return (
+                  <div key={c.id} className={`ai-history-item${c.id === conversationId ? ' active' : ''}${checked ? ' selected' : ''}`}>
+                    {/* 复选框：点它只改勾选、不打开会话（stopPropagation 是必须的 ——
+           否则点复选框会同时触发下面的「打开会话」，勾选和切换混在一起）*/}
+            {/* 复选框**只在多选态出现**：默认态只显示单条删除，侧栏噪音更低。
+            点它只改勾选、不打开会话（stopPropagation 是必须的 ——
+                     否则点复选框会同时触发下面的「打开会话」，勾选和切换混在一起）。*/}
+                        {selMode && (
+                          <label className="ai-history-check" onClick={e => e.stopPropagation()}>
+                            <input type="checkbox" checked={checked} onChange={() => toggleConvSel(c.id)} />
+                       </label>
+                        )}
+                    {/* 点标题**始终是打开会话**（不是切勾选）：会话列表的基本职责就是查看历史，
+                          若多选态下点击只看勾不看内容，就失去了浏览历史的意义。多选靠复选框与
+                          「全选 / 删除所选」，不靠点标题（用户反馈曾以为点击行为应只切勾选）。*/}
+                        <button className="ai-history-title" onClick={() => { void openConversation(c.id); setDrawerOpen(false) }}>{c.title}</button>
+           {/* 该会话正在生成时给个标记：并发生成时才能一眼看出哪条在跑（1.0.43） */}
+          {streamingIds.includes(c.id) && (
+                   <span className="ai-history-running" title={t('aiStreamingBadge')}>
+          <span className="ai-history-running__dot" />
+                  </span>
+                      )}
+                {/* 单条删除：**多选态下全部隐藏**（用户反馈）。默认态才显示 ——
+                    多选时批量删除是唯一入口，两种删除并存会让人犹豫点哪个，
+                    且删除图标的有无还会让各行标题的可用宽度不一致、省略号位置参差。*/}
+                           {!selMode && (
+                      <button className="ai-history-delete" title={t('delete')} onClick={() => removeConversation(c.id)} data-cursor="pointer">
+                    <NaiveIcon name="close" size={13} />
+                     </button>
+                      )}
+                </div>
+          )
+               })}
+                </div>
         <div className="ai-sidebar-foot">
-          {/* 提示改用库 <Tooltip variant="default">（文档 #/tooltip 的 default 风格）：
-              原生 title 的浏览器气泡延迟长、方头方脑，与全站视觉无关。
-              Tooltip 会把触发器包进一层 inline-flex wrapper，宽度改由 .ai-md-editor-tip 撑满。 */}
+                  {/* 批量操作条（1.0.51）：只在**多选态**出现，挤在侧栏底部 ——
+                            放顶部会跟「新建对话」抢位置；放底部则离鼠标最近，批量操作时少抬手。*/}
+                            {selMode && (
+                      <div className="ai-conv-batch">
+                            <span className="ai-conv-batch__count">
+                                  {selConvIds.size > 0 ? t('aiConvSelected', { n: selConvIds.size }) : t('aiConvSelHint')}
+                                 </span>
+                               {/* 「退出多选」在批量条里也放一个：侧栏头部那个只是 26px 的小图标，
+                                      多选态下一旦滚动/折叠就够不着了，这里给一个带文字的明确出口。*/}
+                                <button type="button" className="ai-conv-batch__exit" onClick={exitSelMode}>
+                                {t('aiConvExitSelMode')}
+                                    </button>
+                        <div className="ai-conv-batch__acts">
+                      {/* 未勾选任何项时「清除选择 / 删除所选」禁用：按钮可点但没反应会让人以为是坏了 */}
+                     <Button size="small" onClick={toggleSelectAll}>{allSelected ? t('aiConvDeselectAll') : t('aiConvSelectAll')}</Button>
+                      <Button size="small" ghost onClick={clearConvSel} disabled={selConvIds.size === 0}>{t('aiConvClearSel')}</Button>
+                              <Button size="small" danger disabled={selConvIds.size === 0} onClick={() => setBatchDeleteOpen(true)}>{t('aiConvDeleteSelected')}</Button>
+                  </div>
+                      </div>
+                            )}
+                  {/* 提示改用库 <Tooltip variant="default">（文档 #/tooltip 的 default 风格）：
+                 原生 title 的浏览器气泡延迟长、方头方脑，与全站视觉无关。
+           Tooltip 会把触发器包进一层 inline-flex wrapper，宽度改由 .ai-md-editor-tip 撑满。 */}
           <Tooltip className="ai-md-editor-tip" variant="default" placement="top" title={t('aiMdEditorTip')}>
             <Button
               className="ai-md-editor-btn"
@@ -1710,6 +1896,28 @@ export function ChatPanel({ disabled }: Props) {
         </div>
       )}
     </div>
+      {/* AI 回复大图预览（1.0.51）：**全页面只挂这一个**弹窗。
+          触发方是每条消息内部的 markdown <img>（历史消息很多），逐条挂弹窗会让 DOM 膨胀。
+          曾经试过改成分栏让「看图时能继续读回答」，实测对话区被压到半宽、窄窗口几乎没法
+          看字，已恢复为弹窗；翻页（←/→）能力保留。放在 `.ai-page` 之外（Fragment 兄弟）
+          则不受其 overflow / transform 影响，fixed 定位稳定。 */}
+      <ImagePreviewModal />
+      {/* 批量删除确认（1.0.51）。单条删除原本没有确认（删错一条还能忍，删错一批没法挽回），
+          所以批量必须确认。用库 Modal 而非 showMessage：数量与「不可撤销」的措辞要自己排版。*/}
+      <Modal
+     open={batchDeleteOpen}
+        onClose={() => { if (!batchDeleting) setBatchDeleteOpen(false) }}
+   onOk={() => { void batchDeleteConversations() }}
+        typewriter={false}
+        width="420px"
+        maskClosable={!batchDeleting}
+      >
+        <div className="ai-conv-del-confirm">
+          <div className="ai-conv-del-confirm__title">{t('aiConvDeleteTitle', { n: selConvIds.size })}</div>
+     <div className="ai-conv-del-confirm__hint">{t('aiConvDeleteHint')}</div>
+      </div>
+      </Modal>
+    </>
   )
 }
 
@@ -1775,6 +1983,66 @@ function parseWjxtLink(raw: string): { fileGuid: string; download: boolean; name
   } catch {
     return null
   }
+}
+
+/**
+ * AI 回复里的图片（1.0.51）。
+ *
+ * 此前 markdown 的 `img` 完全走默认渲染、也没有任何 CSS 约束，于是图片按**原始像素尺寸**
+ * 撑开，超出气泡宽度后被裁掉 —— 知识库里的大幅技术图纸/线束图只能看到左侧一条（用户反馈）。
+ * 现在两件事一起做：
+ *   1. 尺寸交给 CSS（`.ai-msg-img`：自适应宽度 + 限高 + zoom-in 光标）；
+ *   2. 点击时把**整条消息里的全部图片**交给右侧分栏预览（ESC 收起、←/→ 翻页）。
+ *
+ * 只依赖 store 的 action（引用在 set 时不变），所以不会打穿 MessageItem 的 memo 记忆化 ——
+ * 若在这里订阅 `imgPreview` 本身，每开一次预览就会让**所有历史消息**重渲染一次。
+ *
+ * `srcs` / `index` 由 MessageItem 闭包捕获（列表由 message.content 派生，依赖一致）。
+ */
+const MarkdownImg = memo(function MarkdownImg(props: {
+  src?: string
+  alt?: string
+  /** 当前这条消息里的全部图片，供预览分栏翻页 */
+  srcs: string[]
+  /** 本张图在 srcs 里的下标 */
+  index: number
+}) {
+  const { src, alt, srcs, index } = props
+  const t = useStore(s => s.t)
+  const openImgPreview = useStore(s => s.openImgPreview)
+  const [broken, setBroken] = useState(false)
+  const url = String(src || '').trim()
+  // 图片地址常带鉴权参数与失效时间，onError 必须有兜底：否则就是一个破图空白，
+  // 用户完全不知道是链接过期了还是网络断了。
+  if (broken || !url) {
+    return <span className="ai-img-broken">{t('aiImgLoadFail')}</span>
+  }
+  return (
+    <img
+      className="ai-msg-img"
+      src={url}
+      alt={alt || ''}
+      loading="lazy"
+      decoding="async"
+      title={t('aiImgZoomHint')}
+      onError={() => setBroken(true)}
+      onClick={() => openImgPreview({ srcs, index, alt })}
+    />
+  )
+})
+
+/** 从 markdown 源码里取出全部图片地址（与渲染结果一致：`! [alt] (url)`）。
+ *  用于「上一张 / 下一张」—— 必须按**同一份顺序与去重规则**，
+ *  否则分栏计数会与实际图片对不上（`index` 是按这个列表定位的）。 */
+function extractImageUrls(content: string): string[] {
+  const out: string[] = []
+  const re = /!\[[^\]]*\]\(\s*([^)\s]+)(?:\s+["'][^"']*["'])?\s*\)/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(content || ''))) {
+    const u = m[1].trim()
+    if (u && !out.includes(u)) out.push(u)
+  }
+  return out
 }
 
 function MarkdownLink({ href, children }: { href?: string; children?: React.ReactNode }) {
@@ -1947,12 +2215,25 @@ const MessageItem = memo(function MessageItem({ message, thinking, emptyHint, on
   // （每次 delta、每次切视图、每次改语言或主题）就会把**全部历史消息**重新解析一遍。
   // 按 content 记忆化后，内容未变的消息永远复用上一次的结果；叠加 memo，
   // 流式期间只有正在增长的那一条会重新解析。
+  //
+  // 2026-10-11：顺带提取本条消息的全部图片，供预览分栏「上一张/下一张」用。
+  // 与 rendered 共用同一个依赖（message.content），所以不会额外破坏记忆化。
+  const images = useMemo(() => extractImageUrls(message.content), [message.content])
   const rendered = useMemo(
     () => (
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeSanitize, rehypeHighlight]}
-        components={{ a: MarkdownLink }}
+        components={{
+          a: MarkdownLink,
+          img: (props: { src?: string; alt?: string }) => (
+            <MarkdownImg
+              {...props}
+              srcs={images}
+              index={Math.max(0, images.indexOf(String(props?.src || '').trim()))}
+            />
+          )
+        }}
       >
         {message.content}
       </ReactMarkdown>
