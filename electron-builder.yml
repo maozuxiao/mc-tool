@@ -2,7 +2,7 @@ appId: com.streamax.mcquery
 productName: MC物料查询
 copyright: Copyright © 2026 Sean Mao
 # 应用/文件版本号（四位，区别于 package.json 三段产品版本）
-buildVersion: 1.0.51.0
+buildVersion: 1.0.52.0
 
 directories:
   output: dist
@@ -36,9 +36,13 @@ extraResources:
   #（src/ + package.json + package-lock.json，约 95KB），**不含 node_modules**。
   # 依赖由用户在「MCP 服务 → 一键准备依赖」时按需安装（playwright 约 28MB），
   # 这样安装包体积基本不变，也让「依赖装在哪」由用户数据目录决定 ——
-  # 安装到 Program Files 下的 resources/ 没有写权限，npm install 会失败。
-  # ⚠️ 因此这个目录**不能直接运行**：它是只读的安装内容，必须先经一键准备依赖
-  # 复制到 userData 的可写副本并装好依赖，登记的 cwd 才会切到那个副本。
+  # 依赖一旦装进本目录，下次更新时会被新包覆盖（下面的 filter 排除了 node_modules），
+  # 用户就得重装一次（1.0.52 修掉的正是这个）。
+  # ⚠️ 因此这个目录**不能直接运行**：它必须先经「一键准备依赖」复制到 userData
+  # 的可写副本并装好依赖，登记的 cwd 才会切到那个副本。
+  # 对照file-office-local（下面那条）：它的 node_modules 是**随包分发**的、不受更新影响，
+  # 所以**不能**迁移 —— mcpClient.prepareWritableRuntime 的第一条判据就是
+  # 「目录里有没有 node_modules」，两者刻意相反，改动时务必一起看。
   - from: resources/skills/tech-agent-skill
     to: skills/tech-agent-skill
     filter:

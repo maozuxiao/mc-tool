@@ -1,5 +1,5 @@
 import { app, safeStorage } from 'electron'
-import { existsSync, readFileSync, writeFileSync } from 'fs'
+import { existsSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { randomUUID } from 'crypto'
 import type { McpImportResult, McpServerConfig } from '@shared/ai-types'
@@ -27,6 +27,25 @@ interface StoreFile {
 
 let cache: StoreFile | null = null
 
+/**
+ * 把解析失败的库存文件挪成带时间戳的旁车备份（1.0.52）。
+ *
+ * 为什么不直接丢弃：`readStore` 遇到损坏会返回空库存，**内存里的 cache 就是空的**，
+ * 而任何一次保存（改个名字、启停一下、导入一条）都会拿这个空库存把原文件覆盖掉 ——
+ * 用户全部 MCP 配置静默消失，且毫无报错。挪走原文件既保住数据又让新库从干净状态起步。
+ */
+function quarantineCorruptStore(err: unknown): void {
+  const p = STORE_PATH()
+  try {
+    if (!existsSync(p)) return
+    const bak = `${p}.corrupt-${Date.now()}`
+    renameSync(p, bak)
+    console.error(`[mcpStore] mcp-servers.json 解析失败，已备份到 ${bak}，本次按空库存处理：`, err)
+  } catch (e: any) {
+    console.error('[mcpStore] mcp-servers.json 解析失败，且备份失败（原文件保留）：', err, e)
+  }
+}
+
 function readStore(): StoreFile {
   if (cache) return cache
   try {
@@ -37,16 +56,27 @@ function readStore(): StoreFile {
         cache = { version: 1, servers: parsed.servers as McpServerConfig[] }
         return cache
       }
+      // 结构不对也要当损坏处理：此前的写法只是落空库存而不留痕迹，
+      // 于是「下次保存覆盖」这条数据丢失路径没有任何提示。
+      throw new Error(`结构不符合预期（期望顶层含 servers 数组，实际得到 ${Array.isArray(parsed?.servers) ? '未知' : typeof parsed}）`)
     }
-  } catch { /* 损坏则当作空库，下次保存覆盖 */ }
+  } catch (e: any) {
+    quarantineCorruptStore(e)
+  }
   cache = { version: 1, servers: [] }
   return cache
 }
 
+/**
+ * 写盘。**失败必须抛出**（1.0.52）。
+ *
+ * 此前是「写盘失败就 catch 掉、不再抛出」—— 磁盘满、文件被占用、杀软拦截时一律静默通过，
+ * 调用方照样返回「已保存」，UI 也照常刷新。于是用户看到保存成功，重启后配置全部归零，
+ * 且没有任何线索可查。抛出去之后，`prepareWritableRuntime` 的 try/catch 能如实上报，
+ * IPC 层的 `MCP_SAVE` 也会 reject 到渲染层。
+ */
 function persist(): void {
-  try {
-    writeFileSync(STORE_PATH(), JSON.stringify(readStore(), null, 2), 'utf8')
-  } catch { /* 写盘失败不抛：下次保存再试 */ }
+  writeFileSync(STORE_PATH(), JSON.stringify(readStore(), null, 2), 'utf8')
 }
 
 function encryptValue(key: string, value: string): string {
@@ -102,21 +132,41 @@ export function serversForSkillKeys(enabledKeys: string[]): McpServerConfig[] {
     .map(s => ({ ...s, env: decryptEnv(s.env) }))
 }
 
-function normalize(input: Partial<McpServerConfig>, fallbackName: string): McpServerConfig {
-  const name = String(input.name || fallbackName || 'mcp').trim().slice(0, 60) || 'mcp'
+/**
+ * 归一化成完整的服务配置。
+ *
+ * 1.0.52：`old` 存在时**缺省字段沿用旧值**，而不是填默认值。
+ * 此前这里是纯「全量替换」语义，而 `mcpClient.prepareWritableRuntime` 调的是
+ * `saveServer({ id, cwd: dst })`（只给两个字段）—— 于是每次迁移到可写副本，
+ * `command` / `args` / `env` / `skillKey` 都会被默认值清空，服务当场报废。
+ * 一律用 `??` 而非 `||`：空串是**有意义的清空值**（`cwd: ""` 表示「交给绑定技能自行推断」），
+ * 用 `||` 会把「显式清空」和「未提供」混为一谈。
+ */
+function normalize(
+  input: Partial<McpServerConfig>,
+  fallbackName: string,
+  old?: McpServerConfig
+): McpServerConfig {
+  const name = String(input.name || old?.name || fallbackName || 'mcp').trim().slice(0, 60) || 'mcp'
   return {
-    id: String(input.id || `mcp_${randomUUID().slice(0, 8)}`),
+    id: String(input.id || old?.id || `mcp_${randomUUID().slice(0, 8)}`),
     name,
-    skillKey: String(input.skillKey || '').trim(),
+    skillKey: String(input.skillKey ?? old?.skillKey ?? '').trim(),
     transport: 'stdio',
-    command: String(input.command || '').trim(),
-    args: Array.isArray(input.args) ? input.args.map(a => String(a)) : [],
-    env: input.env && typeof input.env === 'object' ? { ...input.env } : {},
-    cwd: String(input.cwd || '').trim(),
-    enabled: input.enabled !== false,
-    installArgs: Array.isArray(input.installArgs) ? input.installArgs.map(a => String(a)) : undefined,
-    timeoutMs: Number.isFinite(Number(input.timeoutMs)) && Number(input.timeoutMs) > 0 ? Number(input.timeoutMs) : undefined,
-    createdAt: Number(input.createdAt) || Date.now()
+    command: String(input.command ?? old?.command ?? '').trim(),
+    args: Array.isArray(input.args) ? input.args.map(a => String(a)) : [...(old?.args || [])],
+    env: input.env && typeof input.env === 'object' ? { ...input.env } : { ...(old?.env || {}) },
+    cwd: String(input.cwd ?? old?.cwd ?? '').trim(),
+    enabled: input.enabled === undefined ? old?.enabled !== false : input.enabled !== false,
+    installArgs: Array.isArray(input.installArgs)
+      ? input.installArgs.map(a => String(a))
+      : old?.installArgs
+        ? [...old.installArgs]
+        : undefined,
+    timeoutMs: Number.isFinite(Number(input.timeoutMs)) && Number(input.timeoutMs) > 0
+      ? Number(input.timeoutMs)
+      : old?.timeoutMs,
+    createdAt: Number(old?.createdAt) || Number(input.createdAt) || Date.now()
   }
 }
 
@@ -124,7 +174,7 @@ function normalize(input: Partial<McpServerConfig>, fallbackName: string): McpSe
 export function saveServer(input: Partial<McpServerConfig>): McpServerConfig {
   const store = readStore()
   const old = input.id ? store.servers.find(s => s.id === input.id) : undefined
-  const norm = normalize({ ...input, id: input.id || old?.id }, input.name || old?.name || 'mcp')
+  const norm = normalize({ ...input, id: input.id || old?.id }, input.name || old?.name || 'mcp', old)
 
   // 合并 env：打码占位符 = 「用户没改这个值」→ 保留旧存储值；其余按需加密
   const mergedEnv: Record<string, string> = {}

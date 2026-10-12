@@ -143,29 +143,54 @@ export function McpModal({ open, onClose, skills }: Props): React.ReactElement |
       : emptyDraft())
   }
 
+  /**
+   * 把主进程抛回的异常转成一句可读文案（1.0.52）。
+   *
+   * 为什么要加：主进程 `mcpStore.persist` 现在写盘失败会**抛出**，经 IPC 传回时 Electron
+   * 会套一层 `Error invoking remote method '…': Error: <原因>`。直接显示会让用户看到一串
+   * 与自己无关的内部信息；不捕获则这四个操作在写盘失败时**毫无反馈**（unhandled rejection），
+   * 正是本次要消灭的那种「操作没生效却没人报错」。
+   */
+  const errText = (e: any, fallback: string): string => {
+    const raw = String(e?.message || e || '').trim()
+    if (!raw) return fallback
+    const m = raw.match(/Error:\s*([\s\S]+)$/)
+    return (m ? m[1] : raw).slice(0, 300) || fallback
+  }
+
   const saveDraft = async () => {
     if (!draft) return
     if (!draft.name.trim() || !draft.command.trim()) { setNotice(t('mcpErrRequired')); return }
-    const res: any = await window.mcApi.ai.mcpSave({
-      id: draft.id,
-      name: draft.name.trim(),
-      command: draft.command.trim(),
-      args: draft.args.trim() ? draft.args.trim().split(/\s+/) : [],
-      cwd: draft.cwd.trim(),
-      env: textToEnv(draft.env),
-      skillKey: draft.skillKey,
-      enabled: draft.enabled
-    })
-    setDraft(null)
-    setNotice(res?.id ? t('mcpSaved') : t('aiRequestFailed'))
-    void refresh()
+    try {
+      const res: any = await window.mcApi.ai.mcpSave({
+        id: draft.id,
+        name: draft.name.trim(),
+        command: draft.command.trim(),
+        args: draft.args.trim() ? draft.args.trim().split(/\s+/) : [],
+        cwd: draft.cwd.trim(),
+        env: textToEnv(draft.env),
+        skillKey: draft.skillKey,
+        enabled: draft.enabled
+      })
+      // 失败时**保留草稿**（setDraft(null) 只在成功后执行）：写盘失败后若把表单清掉，
+      // 用户刚填的 command/env 就没了，只能从头重填。
+      if (res?.id) setDraft(null)
+      setNotice(res?.id ? t('mcpSaved') : t('aiRequestFailed'))
+      if (res?.id) void refresh()
+    } catch (e: any) {
+      setNotice(`${t('aiRequestFailed')}：${errText(e, t('mcpSaveFailed'))}`)
+    }
   }
 
   const doImport = async () => {
     if (!importText.trim()) { setNotice(t('mcpErrRequired')); return }
-    const res: any = await window.mcApi.ai.mcpImportJson(importText, draft?.skillKey || '')
-    setNotice(res?.ok ? (res.message || t('mcpImportOk')) : (res?.message || t('aiRequestFailed')))
-    if (res?.ok) { setImportText(''); void refresh() }
+    try {
+      const res: any = await window.mcApi.ai.mcpImportJson(importText, draft?.skillKey || '')
+      setNotice(res?.ok ? (res.message || t('mcpImportOk')) : (res?.message || t('aiRequestFailed')))
+      if (res?.ok) { setImportText(''); void refresh() }
+    } catch (e: any) {
+      setNotice(`${t('aiRequestFailed')}：${errText(e, t('mcpImportOk'))}`)
+    }
   }
 
   const doTest = async (id: string) => {
@@ -178,6 +203,8 @@ export function McpModal({ open, onClose, skills }: Props): React.ReactElement |
       else if (r?.needsInstall) setNotice(t('mcpTestNeedInstall'))
       else setNotice(`${s?.name || id}：${r?.error || t('aiRequestFailed')}`)
       void refresh()
+    } catch (e: any) {
+      setNotice(errText(e, t('aiRequestFailed')))
     } finally { setTestBusy(null) }
   }
 
@@ -185,8 +212,14 @@ export function McpModal({ open, onClose, skills }: Props): React.ReactElement |
     setInstalling(id)
     setLogs({ id, lines: [] })
     setNotice('')
-    const r: any = await window.mcApi.ai.mcpPrepare(id)
-    if (!r?.ok) { setInstalling(null); setNotice(r?.error || t('aiRequestFailed')) }
+    try {
+      const r: any = await window.mcApi.ai.mcpPrepare(id)
+      if (!r?.ok) { setInstalling(null); setNotice(r?.error || t('aiRequestFailed')) }
+    } catch (e: any) {
+      // 依赖装到一半主进程抛错时同样要收尾：installing 不复位的话按钮会一直转
+      setInstalling(null)
+      setNotice(errText(e, t('aiRequestFailed')))
+    }
   }
 
   // 「生成本机运行配置」：技能包常把**作者本机的绝对路径**写进自带配置（实测 Tech-agent 写死

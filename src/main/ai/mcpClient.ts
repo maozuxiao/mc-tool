@@ -1,12 +1,12 @@
 import { app } from 'electron'
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
 import { appendFileSync, accessSync, constants, cpSync, existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from 'fs'
-import { join } from 'path'
+import { isAbsolute, join, relative, resolve } from 'path'
 import { bareSkillId } from '@shared/ai-types'
 import type { McpEvent, McpServerConfig, McpState, McpStatus } from '@shared/ai-types'
 import { ensureNodeWithNpm, killTree, resolveNodeBinary, resolveNpmCli } from './skillRuntime'
 import { getServerRaw, listServers, saveServer, serversForSkillKeys } from './mcpStore'
-import { skillDirOf } from './skillRegistry'
+import { builtinRoot, skillDirOf } from './skillRegistry'
 
 /**
  * MCP 客户端（1.0.46）—— 自研最小实现：stdio + 换行分隔 JSON-RPC 2.0。
@@ -187,7 +187,12 @@ function emitStatus(id: string): void {
 function statusById(id: string): McpStatus {
   const cfg = listServers().find(s => s.id === id)
   const conn = conns.get(id)
-  const dep = checkDependencies({ cwd: cfg?.cwd || '' })
+  // 1.0.52：**必须带上 skillKey**。此前只传 cwd，而 `checkDependencies` 在 cwd 为空时
+  // 要靠 skillKey 去推断技能自带 runtime 目录 —— 于是徽标走一遍「推断不出目录」的分支、
+  // 恒判needsInstall=false，而真正 connect 时 cfg 是完整的、能推断到目录。
+  // 结果就是用户界面上从来看不到「需要安装」提示，只在用到一半时收到
+  // `Cannot find module` / `MODULE_NOT_FOUND`，只能自己去点「一键准备依赖」。
+  const dep = checkDependencies({ cwd: cfg?.cwd || '', skillKey: cfg?.skillKey || '' })
   return {
     id,
     name: cfg?.name || id,
@@ -571,30 +576,88 @@ export function cancelInstall(id: string): void {
 }
 
 /**
- * 为「一键准备依赖」准备一个**可写**的工作目录（1.0.50）。
+ * 判断 `dir` 是否位于内置技能根目录下（1.0.52）。
  *
- * 为什么要这一步：内置技能的 runtime 源码随安装包分发在 `process.resourcesPath/skills/…`，
- * 打包后位于 Program Files，普通用户**没有写权限** —— 在那里跑 `npm install` 必然失败
- * （EPERM / EACCES）。而 dev 模式下同一个路径是仓库目录、**是可写的**，
- * 所以「dev 能装上依赖」完全不能证明「安装版能装」，必须用运行时探测而非版本分支来判断。
+ * 用 `relative` 而不是 `startsWith`：后者会把 `…/skills-backup` 误判成在 `…/skills` 内。
+ * Windows 上 `path.win32.relative` 大小写不敏感，所以无需另行规范化大小写。
+ */
+function isInsideBuiltinRoot(dir: string): boolean {
+  if (!dir) return false
+  try {
+    const rel = relative(resolve(builtinRoot()), resolve(dir))
+    return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
+  } catch { return false }
+}
+
+/**
+ * 为「一键准备依赖」准备一个**能跑、且不会随应用更新被抹掉**的工作目录。
  *
- * - 可写（dev、或用户已把服务放在自己的可写目录）→ 原地安装，行为不变，也**不会覆盖已有依赖**；
- * - 不可写 → 把运行/安装所需的**最小集合**复制到 `userData/mcp/<id>/runtime`，
- *   并把登记项的 cwd 切到该副本，之后「测试连接」与后续重装都落在副本上。
+ * ── 1.0.50 的原判据（已废弃）──
+ * 用「是否可写」决定要不要迁移到 `userData` 副本：不可写（Program Files）就迁移。
  *
- * 用白名单拷贝而不是整目录递归：万一今后有人把 node_modules 塞进内置包，
- * 也不会被原样复制放大成几十 MB。
+ * ── 1.0.52 为什么必须改（用户实测「装好了、过几天又被要求重新安装」）──
+ * per-user NSIS 默认装到 `%LOCALAPPDATA%\Programs\<productName>`，**这个目录用户是有写权限的**，
+ * 于是 `accessSync(W_OK)` 判定通过 → 原地 `npm install` → `node_modules` 直接落进
+ * `<安装目录>\resources\skills\<skill>\runtime\`。而下一次应用更新时 electron-builder
+ * 会用新包覆盖 `resources/`，且 `electron-builder.yml` 里该技能的 filter 明确排除了
+ * node_modules（`**` + `node_modules` + `**`）—— 覆盖后依赖必然消失，
+ * `checkDependencies`（有 package.json、没 node_modules）于是又判定「需要安装」。
+ * 用户填的 `createdAt` 是 2026-10-06、跨了一次 1.0.50→1.0.51 更新后症状复现，时间线吻合。
+ *
+ * ── 判据为什么是「有没有 node_modules」而不是「在不在安装目录内」──
+ * 内置技能分两类，`electron-builder.yml` 对它们的处理**故意不同**：
+ *   - `tech-agent-skill`：filter 排除 node_modules → 装不了 → **必须**用副本；
+ *   - `file-office-local`：node_modules 随包分发 → 开箱即用 → **不能**迁移。
+ * 若按「在安装目录内就迁移」一刀切，后者会被复制到副本，而白名单拷贝里没有 node_modules
+ * （见下方 items），副本就没了依赖，只能重装全部 —— 这会让「随包分发省掉安装」的设计彻底失效，
+ * 并给所有 file-office-local 用户凭空加一个「升级后要重装依赖」的新问题。
+ *
+ * 所以第一条判据是**这个目录能不能直接跑**（node_modules 在不在）；只有在它跑不起来时，
+ * 才去判断「该不该落到用户目录」（是不是安装内容 / 是不是不可写）。前者是主判据，后者是兜底。
+ *
+ * 用白名单拷贝而不是整目录递归：既避免放大成几十 MB，也正是上面那条例外成立的前提。
  */
 function prepareWritableRuntime(
   cfg: McpServerConfig,
   cwd: string
 ): { dir: string; migrated: boolean; error?: string } {
+  // ① 已经有 node_modules → 直接用它：不装、不迁、不动登记的 cwd。
+  //    命中两类：随包分发的 file-office-local；dev 下仓库里已 npm install 过的副本。
+  if (existsSync(join(cwd, 'node_modules'))) return { dir: cwd, migrated: false }
+
+  const inBuiltin = isInsideBuiltinRoot(cwd)
+  let writable = false
   try {
     accessSync(cwd, constants.W_OK)
-    return { dir: cwd, migrated: false }
+    writable = true
   } catch { /* 不可写 → 走迁移 */ }
+  // ② 用户自己指定的目录 → 原地安装，行为与 1.0.50 一致
+  if (!inBuiltin && writable) return { dir: cwd, migrated: false }
 
   const dst = join(LOG_DIR(), cfg.id, 'runtime')
+
+  /**
+   * ③ 幂等短路：副本里已经有 package.json + node_modules → 直接复用。
+   *
+   * 为什么需要：迁移只该发生一次，但「一键准备依赖」是用户随时能点的按钮。没有短路时
+   * 每次点击都会重跑一遍拷贝 + 完整 `npm install`（钉钉技能带 playwright，要几十秒），
+   * 而结果其实早就有了。顺带把登记的 cwd 纠正到副本 —— 1.0.50 那批
+   * 「装完但 cwd 仍指向只读目录」的老数据靠这一步纠正回来。
+   */
+  if (existsSync(join(dst, 'package.json')) && existsSync(join(dst, 'node_modules'))) {
+    const alreadyOnCopy = !!String(cfg.cwd || '').trim() && resolve(String(cfg.cwd)) === resolve(dst)
+    if (!alreadyOnCopy) {
+      try {
+        saveServer({ id: cfg.id, cwd: dst })
+        logLine(cfg.id, `[install] 依赖已就绪，复用可写副本并纠正登记的 cwd：${dst}`)
+      } catch (e: any) {
+        return { dir: dst, migrated: true, error: `副本已就绪（${dst}），但更新登记的工作目录失败：${e?.message || e}` }
+      }
+    }
+    return { dir: dst, migrated: !alreadyOnCopy }
+  }
+
+  // ④ 安装内容内 / 不可写 → 复制最小集合到 userData 副本
   const items = ['package.json', 'package-lock.json', 'src']
   try {
     mkdirSync(dst, { recursive: true })
@@ -603,7 +666,7 @@ function prepareWritableRuntime(
       if (!existsSync(from)) continue
       cpSync(from, join(dst, name), { recursive: true, force: true })
     }
-    logLine(cfg.id, `[install] 工作目录只读，已复制到可写副本：${dst}`)
+    logLine(cfg.id, `[install] 工作目录位于安装内容内（或只读），已复制到可写副本：${dst}`)
   } catch (e: any) {
     return { dir: cwd, migrated: false, error: `复制到可写目录失败：${e?.message || e}` }
   }

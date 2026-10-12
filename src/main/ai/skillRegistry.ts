@@ -27,7 +27,15 @@ const SKILL_MD = 'SKILL.md'
 /** 注入系统提示的 SKILL.md 上限：鸿翼那份 24KB，全量注入会白烧 token */
 const PROMPT_MAX = 12000
 
-function builtinRoot(): string {
+/**
+ * 内置技能根目录（1.0.52 导出给 mcpClient）。
+ *
+ * 导出原因：MCP 依赖安装必须能判断「这个工作目录是不是位于安装目录内」——
+ * 位于其中的目录**不可作为依赖落点**（会被应用更新覆盖，详见 mcpClient.prepareWritableRuntime）。
+ * 这个判断只能由本模块回答，因为 `app.isPackaged` 决定根目录，且内建技能目录定位规则
+ * 也在本模块（skillDirOf/skillPrompt），复制一份判据出去必然随两者漂移而失配。
+ */
+export function builtinRoot(): string {
   return app.isPackaged
     ? join(process.resourcesPath, 'skills')
     : join(app.getAppPath(), 'resources', 'skills')

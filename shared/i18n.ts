@@ -300,6 +300,8 @@ export const I18N: Record<string, Record<string, string | string[]>> = {
     mcpNeedsTip: '该技能声明了 MCP 工具，需要先在这里登记并绑定 MCP 服务才能使用',
     mcpErrRequired: '名称与启动命令不能为空',
     mcpSaved: '已保存',
+    // 1.0.52：主进程写盘失败时抛错并经 IPC 回传，这里用于兜底文案（后面会跟上真实原因）
+    mcpSaveFailed: '保存失败',
     mcpInstalling: '正在安装依赖…',
     mcpInstallDone: '✔ 依赖安装完成',
     mcpInstallFailed: '✘ 依赖安装失败',
@@ -741,6 +743,9 @@ aiImgLoadFail: '图片加载失败（链接可能已过期）',
     mcpNeedsTip: 'This skill declares MCP tools; register and bind an MCP service here before it can be used',
     mcpErrRequired: 'Name and command are required',
     mcpSaved: 'Saved',
+    // 1.0.52: main-process disk write now throws and propagates over IPC; this is the fallback
+    // label (the real reason from the main process is appended after it).
+    mcpSaveFailed: 'Save failed',
     mcpInstalling: 'Installing dependencies…',
     mcpInstallDone: '✔ Dependencies installed',
     mcpInstallFailed: '✘ Dependency install failed',
