@@ -78,6 +78,13 @@ win:
   target:
     - nsis
     - portable
+  # 产物名固定用 ASCII，且**不带 -${arch}**（1.0.52 补）。
+  # 原因：electron-updater 的 `latest.yml` 里记录的是规范化后的 ASCII 名
+  # （`mc-material-query-setup-<ver>.exe`），而 NSIS 默认用 productName 拼出
+  # 「MC物料查询 Setup <ver>.exe」—— 两者不一致时，自动更新会去下载一个
+  # Release 上并不存在的文件名而失败。历史 Release 的附件名也一直是 ASCII，
+  # 在这里固化下来，就不必每次发布后手工改名对齐。
+  artifactName: mc-material-query-${version}.${ext}
   # 当前无原生模块依赖，无需解包（保持 asar 压缩）。
   # 若以后引入 .node 依赖，必须在此配置 asarUnpack——原生模块无法从 asar 内部加载。
   asarUnpack: []
@@ -89,6 +96,8 @@ mac:
   category: public.app-category.business
 
 nsis:
+  # 安装包名必须与 `latest.yml` 里记录的一致，否则自动更新下载不到文件（见 win.artifactName 注释）
+  artifactName: mc-material-query-setup-${version}.${ext}
   oneClick: false
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
