@@ -416,6 +416,28 @@ function createWindow() {
     if (minimizeToTray && closeToTray && !quitting) { e.preventDefault(); mainWindow?.hide() }
   })
 
+  /**
+   * 切回应用窗口时检测一次 OA 会话（1.0.53）。
+   *
+   * 此前唯一的「窗口事件」入口是 showMainWindow()，而它只被托盘单击 / 托盘菜单 / 第二实例
+   * 调用 —— Alt+Tab 或点任务栏图标切回**不经过**它。于是「窗口一直开着、用户切走再切回」
+   * 这个最常见的场景完全没有检测入口：会话在后台过期后界面毫无反应、看着仍是已登录，
+   * 直到用户碰巧发起一次 OA 查询才报错（用户实测反馈的正是这一条）。
+   *
+   * 焦点事件很频繁，安全性由检测函数自身的并发去重 + 60 秒节流保证，不会放大请求量；
+   * requestLoginView 的幂等则保证不会把用户正要扫的二维码反复刷掉。
+   */
+  mainWindow.on('focus', () => {
+    // 启动探测未完成前不响应：窗口创建时会先显示并聚焦一次，
+    // 若此时就检测，会与下面的首次 checkLoginAndNotify 重复跑一遍探测链。
+    if (!startupLoginChecked) return
+    // 显式记一行：会话有效时检测函数是静默的（正常探测不写日志），没有这行就无法确认
+    // focus 到底有没有触发检测（验证本修复时必看）。真实探测受 60 秒节流约束，
+    // 但日志反映的是「事件到达」，便于区分「事件没来」与「来了但被节流」。
+    debugLog('[SESSION] window focus -> check session')
+    void checkSessionAndNotify('window-focus')
+  })
+
   // 启动后自动检测 OA 登录态；未登录则弹出登录层（由渲染进程控制）
   checkLoginAndNotify()
 
@@ -1196,6 +1218,45 @@ let sessionValid = false
 let sessionExpired = false
 
 /**
+ * 「扫码登录层是否已处于展示态」（1.0.53）。
+ *
+ * 为什么需要：把界面切回扫码页的触发源从 1 处增至 3 处（窗口 focus / 心跳兜底 / 原有路径），
+ * 而渲染层每收到一次 `OA_CHECK_LOGGED {loggedIn:false}` 都会自增 `qrRefetchSeq` →
+ * LoginOverlay 重新拉码。窗口 focus 是高频事件，没有幂等的话用户正要扫码就被反复刷掉。
+ * 置 true 后重复通知直接跳过；仅在「确认会话有效」时复位（见 markSessionHealthy）。
+ */
+let loginViewShown = false
+/**
+ * 启动登录检测是否已完成（1.0.53）。
+ * 未完成前窗口 focus 不触发检测：窗口创建时会先显示并聚焦一次，
+ * 若此时就响应 focus，就会与 createWindow 末尾的首次 checkLoginAndNotify 重复跑一遍探测链。
+ */
+let startupLoginChecked = false
+
+/** 回到扫码页的原因，决定渲染层的提示文案（见 requestLoginView） */
+type LoginViewReason =
+  /** 会话已失效（静默自愈也失败）→ 「登录已过期，请重新扫码登录」 */
+  | 'expired'
+  /** 需要重新认证 / 尚未登录 → 沿用「登录未完成」 */
+  | 'reauth'
+  /** 网络异常导致登录未完成 */
+  | 'network'
+
+/** 会话检测的触发来源，仅用于日志（便于复现时按来源检索） */
+type SessionCheckSource = 'window-shown' | 'window-focus' | 'heartbeat'
+
+/** 确认会话有效时调用：复位「登录层已展示」标志，使下一次失效仍能正常通知 */
+function markSessionHealthy(): void {
+  if (loginViewShown) debugLog('[LOGIN-VIEW] session healthy -> reset shown flag')
+  loginViewShown = false
+}
+
+/** 窗口是否正处于「用户可见且聚焦」状态：决定此刻弹登录页算不算打扰 */
+function isWindowActivelyVisible(): boolean {
+  return !!mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible() && mainWindow.isFocused()
+}
+
+/**
  * 一次「探测 → 失效则静默 SSO 自愈」，返回最终会话是否有效。
  * 受并发去重与 60 秒节流双重保护；本函数只更新状态与日志，
  * 是否拉起登录由调用方按触发来源决定（后台心跳绝不打扰）。
@@ -1216,6 +1277,8 @@ async function checkAndHealSession(): Promise<boolean> {
         // 正常探测成功不写日志：10 分钟一次会刷屏，只在状态变化时记录
         sessionValid = true
         sessionExpired = false
+        // 会话确认有效 → 复位「登录层已展示」标志，否则用户登录后再次过期将收不到通知
+        markSessionHealthy()
         return true
       }
       // 网络级异常：无法判定会话是否失效，保持原状态，绝不误判为失效
@@ -1227,6 +1290,11 @@ async function checkAndHealSession(): Promise<boolean> {
       if (probed.reason === 'nocookie') {
         debugLog('[SESSION] no OA cookie, treat as not logged in (skip heal)')
         sessionValid = false
+        // 1.0.53：补标记失效。此前这一支只把 sessionValid 置 false 而不置 sessionExpired，
+        // 而当时调用方的判据是「!ok && sessionExpired」→ cookie 被清（而非服务端过期）时
+        // 永远回不到扫码页。sessionExpired 现在不再参与「要不要通知」的决策（判据已简化为只看 ok），
+        // 但仍要如实标记，供日志与诊断使用。
+        sessionExpired = true
         return false
       }
       // reauth / invalid：会话确实失效，先尝试静默 SSO 自愈
@@ -1236,6 +1304,8 @@ async function checkAndHealSession(): Promise<boolean> {
         debugLog('[SESSION] silent SSO heal succeeded, no QR needed')
         sessionValid = true
         sessionExpired = false
+        // 自愈成功同样是「会话有效」，复位标志（用户全程无感，不该停在登录层）
+        markSessionHealthy()
         return true
       }
       debugLog('[SESSION] silent SSO heal failed, session expired')
@@ -1253,12 +1323,40 @@ async function checkAndHealSession(): Promise<boolean> {
   return sessionCheckInFlight
 }
 
-/** 后台心跳：每 10 分钟探测一次；失败仅标记状态，绝不主动弹窗打扰用户 */
+/**
+ * 一次「检测 + 静默自愈」，未通过则通知渲染层回到扫码页（1.0.53）。
+ *
+ * 判据从原来的 `!ok && sessionExpired` **简化为只看 `ok`**：原判据要求两个条件同时成立，
+ * 而 `nocookie` 分支（cookie 被清而非服务端过期）返回 false 却不设 `sessionExpired`，
+ * 于是这一支永远回不到扫码页 —— 这正是判据复合化引入的漏洞。`sessionExpired` 仍如实标记，
+ * 但不再参与「要不要通知」的决策。
+ *
+ * @param source 触发来源，仅用于日志（便于复现时按来源检索）
+ * @returns 检测后的会话是否有效
+ */
+async function checkSessionAndNotify(source: SessionCheckSource): Promise<boolean> {
+  const ok = await checkAndHealSession()
+  if (!ok) {
+    debugLog(`[SESSION] check failed (source=${source}) -> request login view`)
+    requestLoginView('expired')
+  }
+  return ok
+}
+
+/** 后台心跳：每 10 分钟探测一次；窗口不可见时仅标记状态，绝不主动弹窗打扰用户 */
 function startSessionHeartbeat(): void {
   stopSessionHeartbeat()
   sessionCheckTimer = setInterval(() => {
     if (sessionCheckInFlight) return
-    void checkAndHealSession()
+    // 1.0.53：窗口**正处于聚焦态**（用户正在看）时，检测失败要通知渲染层回到扫码页 ——
+    // 否则「应用一直开着、会话在后台悄悄过期」时界面毫无反应，用户只能等某次操作报错才发现。
+    // 窗口不可见 / 最小化 / 收进托盘时保持原有「不打扰」取向，等 focus 或托盘唤回时再处理。
+    void checkAndHealSession().then(ok => {
+      if (!ok && isWindowActivelyVisible()) {
+        debugLog('[SESSION] heartbeat: session invalid while window focused -> request login view')
+        requestLoginView('expired')
+      }
+    })
     // IAM 会话独立于 OA，必须单独保活（见 keepIamSessionAlive）：
     // 否则 OA 靠 LtpaToken 一直免登录，IAM 却在后台悄悄 idle 过期，
     // 表现就是「应用整体正常，但工作台里点入口跳 IAM 要重新扫码」。
@@ -1275,11 +1373,7 @@ function stopSessionHeartbeat(): void {
 
 /** 窗口被调出（托盘单击 / 菜单 / 任务栏图标）时：强制检测一次，自愈仍失败才拉起登录 */
 async function onWindowShownCheck(): Promise<void> {
-  const ok = await checkAndHealSession()
-  if (!ok && sessionExpired) {
-    debugLog('[SESSION] window shown but session expired -> request login view')
-    requestLoginView()
-  }
+  await checkSessionAndNotify('window-shown')
 }
 
 async function isOALoggedin(): Promise<boolean> {
@@ -1358,6 +1452,9 @@ function checkLoginAndNotify(): Promise<void> {
   }
   loginCheckInFlight = doCheckLoginAndNotify().finally(() => {
     loginCheckInFlight = null
+    // 1.0.53：启动检测到此结束（正常返回、forceQr 提前 return 或抛异常都算）→ 之后
+    // 窗口 focus 才能触发检测。放在这里而不是函数内部，是为了一次覆盖它的全部分支。
+    startupLoginChecked = true
   })
   return loginCheckInFlight
 }
@@ -1415,24 +1512,49 @@ async function doCheckLoginAndNotify() {
     mainWindow.webContents.send(IPC.OA_CHECK_LOGGED, { loggedIn: true })
     // 已登录：启动会话心跳，后台驻留期间定期探测并在失效时静默自愈
     sessionValid = true
+    markSessionHealthy()
     startSessionHeartbeat()
   } else {
     // 无可用 cookie：通知渲染进程在主窗口内显示登录视图（webview），不弹独立窗口
     sessionValid = false
     stopSessionHeartbeat()
-    mainWindow.webContents.send(IPC.OA_LOGIN_STATE, { state: 'logging' })
+    // 1.0.53：改用统一入口，必须**成对**下发 OA_CHECK_LOGGED(loggedIn=false) 与
+    // OA_LOGIN_STATE(logging)。此前这里只发后者，而渲染层只在 loggedIn===false 时才渲染
+    // 登录层 —— 该分支要靠调用方（reLogin）自己先置 false 才碰巧可用，与 1.0.34 修过的
+    // 是同一个坑，本分支当时漏了。这里是「已确认未登录」，用 force 保证登录层必定显示。
+    requestLoginView('reauth', { force: true })
   }
 }
 
-// 触发渲染进程在主窗口内显示 OA 登录视图（用于“重新登录”/首次无 cookie）
-function requestLoginView() {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    // 关键（1.0.34 修复）：必须先把渲染层的 loggedIn 置为 false，否则登录层不会显示。
-    // 此前这里只发 OA_LOGIN_STATE，渲染层仍是「已登录」状态，导致主进程即便检测到
-    // 会话失效，界面也毫无反应——用户只能重启 App。
-    mainWindow.webContents.send(IPC.OA_CHECK_LOGGED, { loggedIn: false, reason: 'reauth' })
-    mainWindow.webContents.send(IPC.OA_LOGIN_STATE, { state: 'logging' })
+/**
+ * 让渲染层回到扫码登录页 —— 全应用**唯一**的入口（1.0.53 起）。
+ *
+ * 必须**成对下发**两条消息（1.0.34 踩过的坑，这里固化为唯一入口以防再漏）：
+ *   - `OA_CHECK_LOGGED {loggedIn:false}`：渲染层据此把 `loggedIn` 置 false —— 这是
+ *     登录层能否渲染的**唯一**条件（见 App.tsx 的 `!loggedIn && !landing`）；
+ *   - `OA_LOGIN_STATE {state:'logging'}`：把登录状态置为 logging，触发 LoginOverlay 拉码。
+ * 只发后者是无效的（历史缺陷：主进程检测到失效，界面却毫无反应，用户只能重启 App）。
+ *
+ * 幂等（1.0.53）：`loginViewShown` 为 true 时直接跳过。回扫码页的触发源已增至三处
+ * （窗口 focus / 心跳兜底 / 原有路径），其中 focus 是高频事件，而渲染层每收到一次就会
+ * 自增 `qrRefetchSeq` 重新拉码 —— 不幂等的话用户正要扫码就被反复刷掉。
+ * `force` 供**用户主动**请求的场景（点「重新登录」）绕过幂等，避免主动操作被忽略。
+ *
+ * @param reason 失效原因，随消息带给渲染层用于选择提示文案
+ * @param opts.force 跳过幂等（仅用于用户主动请求）
+ */
+function requestLoginView(reason: LoginViewReason = 'reauth', opts?: { force?: boolean }): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  if (loginViewShown && !opts?.force) {
+    debugLog(`[LOGIN-VIEW] skip (already shown), reason=${reason}`)
+    return
   }
+  loginViewShown = true
+  debugLog(
+    `[LOGIN-VIEW] -> renderer: loggedIn=false, state=logging, reason=${reason}${opts?.force ? ', forced' : ''}`
+  )
+  mainWindow.webContents.send(IPC.OA_CHECK_LOGGED, { loggedIn: false, reason })
+  mainWindow.webContents.send(IPC.OA_LOGIN_STATE, { state: 'logging' })
 }
 
 // ── 单实例锁（1.0.35）：同一时间只允许运行一个实例 ────────────
@@ -1497,7 +1619,8 @@ app.on('window-all-closed', () => {
 
 // ── IPC ────────────────────────────────────────────────────
 ipcMain.handle(IPC.OA_NAVIGATE, () => {
-  requestLoginView()
+  // 用户主动请求登录视图 → 绕过幂等（force），避免主动操作被「已展示」判断忽略
+  requestLoginView('reauth', { force: true })
 })
 // 渲染进程请求当前 OA 登录页地址（用于主窗口内嵌 webview 登录）
 ipcMain.handle(IPC.OA_GET_LOGIN_URL, () => OA_LOGIN_URL)
@@ -2329,6 +2452,9 @@ ipcMain.handle(IPC.OA_QR_LOGIN_START, () => {
         debugLog(`[QR-START] lck empty but landed on OA host, probe ok=${probe.ok} reason=${probe.reason}`)
         if (probe.ok) {
           debugLog('[QR-START] OA already logged in (no lck needed), short-circuit to tool')
+          // 渲染层收到 alreadyLoggedIn 会自行置为已登录（不走 OA_CHECK_LOGGED），
+          // 这里同步复位标志，否则下一次会话失效时会被幂等判断吞掉通知。
+          markSessionHealthy()
           return { success: true, alreadyLoggedIn: true, entityId: 'oa' }
         }
         // probe=reauth：OA 不认可（会话失效），落到下方原错误逻辑，由前端重扫/重登录
@@ -2543,6 +2669,7 @@ ipcMain.handle(IPC.OA_QR_LOGIN_POLL, async (_e, payload: {
             mainWindow.webContents.send(IPC.OA_CHECK_LOGGED, { loggedIn: true })
             // 扫码登录成功落地：启动会话心跳
             sessionValid = true
+            markSessionHealthy()
             startSessionHeartbeat()
           } else if (mainWindow && !mainWindow.isDestroyed()) {
             // SSO 未真正落地：如实通知前端回到扫码界面重试（关闭"正在进入工具"loading）
@@ -2602,7 +2729,7 @@ ipcMain.handle(IPC.OA_REFRESH_SESSION, async () => {
       // 自动刷新仍失败：会话确已失效，通知渲染进程拉起扫码登录
       if (!retried) {
         queryLog('[OA_REFRESH_SESSION] auto refresh failed -> request QR login')
-        requestLoginView()
+        requestLoginView('expired')
       }
       return { ok: retried, needRelogin: !retried }
     }

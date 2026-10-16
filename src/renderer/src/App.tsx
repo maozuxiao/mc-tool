@@ -90,6 +90,10 @@ export function App() {
     // （登录态与更新进度都会重复触发），顺带让启动阶段多出一批无用工作。
     const offs: Array<() => void> = []
     offs.push(window.mcApi.onLoginChecked((s: { loggedIn: boolean; reason?: string }) => {
+      // 先取「更新前」的状态：下面 setLoggedIn 一执行，zustand 里就已是新值，
+      // 而「是否刚刚从已登录掉下来」必须用旧值判断（1.0.53）。
+      const wasLoggedIn = useStore.getState().loggedIn
+      const wasLoginState = useStore.getState().loginState
       setLanding(false)
       setLoggedIn(s.loggedIn)
       setChecking(false)
@@ -101,9 +105,20 @@ export function App() {
       } else {
         const reason = s.reason
         setLoginError(
-          reason === 'network' ? t('errLoginNetwork') : t('errLoginIncomplete')
+          reason === 'network'
+            ? t('errLoginNetwork')
+            : reason === 'expired'
+              ? t('errLoginExpired')
+              : t('errLoginIncomplete')
         )
-        setQrRefetchSeq(useStore.getState().qrRefetchSeq + 1)
+        // 1.0.53：只在「刚刚从已登录掉下来」或「当前不在扫码态」时才请求重取二维码。
+        // 主进程侧的触发源已增至三处（窗口 focus / 心跳兜底 / 原有路径），其中窗口 focus
+        // 是高频事件 —— 若每次都自增，用户正要扫码就被反复刷掉。主进程已有幂等（
+        // requestLoginView 的 loginViewShown），这里再加一道：即便消息仍重复到达
+        // （例如登录层已经显示着时又来一条），也不会把正在展示的二维码重置。
+        if (wasLoggedIn || wasLoginState !== 'logging') {
+          setQrRefetchSeq(useStore.getState().qrRefetchSeq + 1)
+        }
       }
     }))
     offs.push(window.mcApi.onLoginReady((s: { loggedIn: boolean }) => {

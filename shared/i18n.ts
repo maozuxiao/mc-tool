@@ -443,6 +443,10 @@ aiImgLoadFail: '图片加载失败（链接可能已过期）',
     errQrIncomplete: '二维码数据不完整',
     errLoginNetwork: '网络异常，正在重新获取二维码…',
     errLoginIncomplete: '登录未完成，正在重新获取二维码…',
+    // 1.0.53：会话过期（静默自愈失败）后回到扫码页时的文案。
+    // 与上面的「登录未完成」区分开 —— 后者描述的是「用户扫了但没走完」，
+    // 用于会话过期会误导（用户明明早就登录过）。
+    errLoginExpired: '登录已过期，正在重新获取二维码…',
     errLoginSvc: '登录服务未就绪，正在重新获取二维码…',
     ssoEntering: '正在进入工具…',
 
@@ -883,6 +887,10 @@ aiImgLoadFail: 'Image failed to load (the link may have expired)',
     errQrIncomplete: 'Incomplete QR code data',
     errLoginNetwork: 'Network error, fetching a new QR code…',
     errLoginIncomplete: 'Sign-in incomplete, fetching a new QR code…',
+    // 1.0.53: shown when the session expired (silent self-heal failed) and we return to the QR page.
+    // Kept distinct from "Sign-in incomplete" — that one describes an unfinished scan, which is
+    // misleading for a session that had been signed in for a while.
+    errLoginExpired: 'Session expired, fetching a new QR code…',
     errLoginSvc: 'Sign-in service not ready, fetching a new QR code…',
     ssoEntering: 'Entering the tool…',
 
