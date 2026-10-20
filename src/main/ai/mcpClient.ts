@@ -62,7 +62,7 @@ export function expandVars(value: string): string {
 
 /** 展开后的真实工作目录（空 = 未设置） */
 /**
- * 解析一个 MCP 服务的工作目录（1.0.50）。
+ * 解析一个 MCP 服务的工作目录（1.0.50，1.0.55 修正回退条件）。
  *
  * 先用登记里填的 `cwd`（展开 `%APPDATA%` 等占位符）；**没填**时回退到「该服务所绑定技能
  * 自带的 runtime 目录」—— 在 `<技能目录>/runtime` 下递归找第一个含 `package.json` 的目录
@@ -75,16 +75,25 @@ export function expandVars(value: string): string {
  * 填的是导入技能的位置 `%APPDATA%/mc-material-query/skills/…`，而导入副本早已删除）。
  * 绑定技能本来就是必填项，由它推断 cwd 既准确又免去一项用户负担。
  *
+ * 1.0.55：**填了但目录不存在时也先试推断**。此前的回退条件写的是「没填才推断」，
+ * 而分发实测的故障恰是「填了」—— 内置示例 JSON 曾预填 `%APPDATA%\...\skills\<id>\runtime\...`
+ * （用户导入技能的位置，新机器上不存在），用户照示例导入后点「准备依赖」必报
+ * 「工作目录不存在」且无从下手。回退只作用于本次运行、**不静默改写存储**（日志留痕，
+ * 用户可自行纠正登记值；安装流程本身会把 cwd 持久化成可写副本路径）；推断不到才返回原值，
+ * 让报错如实指向登记的那一项。
+ *
  * 注意「dev 下推断出仓库路径」是**预期行为**而非异常：那正是 `skillDirOf` 在未打包时
  * 按 `app.getAppPath()/resources/skills` 定位的结果，打包后会自然指向安装目录。
  */
 function resolvedCwd(cfg: McpServerConfig): string {
   const filled = expandVars(String(cfg.cwd || ''))
   if (filled && existsSync(filled)) return filled
-  if (!filled) {
-    // 没填才推断：避免把「填错了」静默改写成别处、让用户找不到问题出在哪
-    const inferred = inferRuntimeDir(cfg.skillKey)
-    if (inferred) return inferred
+  const inferred = inferRuntimeDir(cfg.skillKey)
+  if (inferred) {
+    if (filled) {
+      logLine(cfg.id, `[cwd] 登记的 cwd 不存在，本次回退到技能自带 runtime：${inferred}（原值 ${filled}）`)
+    }
+    return inferred
   }
   return filled
 }

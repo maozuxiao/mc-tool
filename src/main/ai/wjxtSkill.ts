@@ -209,20 +209,23 @@ function landedBackOnSite(u: string): boolean {
  * 取不到（隐藏窗口不可用 / 网络抖动）时退回 SSO 入口：点开同样会跳到该页面，只是多一跳。
  */
 export async function wjxtQrLoginUrl(): Promise<{ url: string; fresh: boolean }> {
-  if (!hiddenNav) return { url: WJXT_SSO_LOGIN_URL, fresh: false }
-  try {
-    // 预算给到 15s（hiddenNav 内部再加 3s 余量≈ 18s）：IAM 冷启动实测要 20~35s 才把
-    // 跳转链跑完（见 index.ts 的 QR-START 自适应预热，上限 70s）。此前这里只给 3.5s
-    // （总 6.5s），IAM 一冷就必然抓不到 lck → fresh=false → 只能退回「SSO 入口」，
-    // 而 IAM 会话不健康时那个入口必白屏（用户反馈）。多等几秒换一个真能用的扫码页划算。
-    const finalUrl = await hiddenNav(WJXT_SSO_LOGIN_URL, 15000)
-    if (finalUrl && isAcLoginUrl(finalUrl)) {
-      wjxtLog(`[qr] fresh lck url ok (${finalUrl.split('?')[0]}…)`)
-      return { url: finalUrl, fresh: true }
+  // 注意：hiddenNav 缺失时**不能**直接退回 SSO 入口 —— 纯 HTTP 那条路（下面 mintAcLoginUrl）
+  // 不依赖隐藏窗口，仍可能签发出带 lck 的 AC 页。只有两条都拿不到才退回入口。
+  if (hiddenNav) {
+    try {
+      // 预算给到 15s（hiddenNav 内部再加 3s 余量≈ 18s）：IAM 冷启动实测要 20~35s 才把
+      // 跳转链跑完（见 index.ts 的 QR-START 自适应预热，上限 70s）。此前这里只给 3.5s
+      // （总 6.5s），IAM 一冷就必然抓不到 lck → fresh=false → 只能退回「SSO 入口」，
+      // 而 IAM 会话不健康时那个入口必白屏（用户反馈）。多等几秒换一个真能用的扫码页划算。
+      const finalUrl = await hiddenNav(WJXT_SSO_LOGIN_URL, 15000)
+      if (finalUrl && isAcLoginUrl(finalUrl)) {
+        wjxtLog(`[qr] fresh lck url ok (${finalUrl.split('?')[0]}…)`)
+        return { url: finalUrl, fresh: true }
+      }
+      wjxtLog(`[qr] hidden nav final=${String(finalUrl).slice(0, 120)} -> try http mint`)
+    } catch (e: any) {
+      wjxtLog('[qr] hidden nav failed: ' + String(e?.message || e))
     }
-    wjxtLog(`[qr] hidden nav final=${String(finalUrl).slice(0, 120)} -> fallback to SSO entry`)
-  } catch (e: any) {
-    wjxtLog('[qr] hidden nav failed: ' + String(e?.message || e))
   }
   //隐藏窗口没拿到 lck（常年停在 authenticate）→ 改用**纯 HTTP** 走一遍同一条链：
   // OA 扫码登录已证明这条路可靠，能直接签发出 entityId=edoc2 的 AC 扫码页。
@@ -1860,7 +1863,16 @@ export const WJXT_SEARCH_TOOL_DEFINITION = {
       '修改时间 / 版本号 / 目录路径 / fileGuid / 原始字节数）。' +
       '检索范围是文件名与文件正文内容。默认返回前 10 条，可用 size 调整（上限 50）；' +
       '高级用法可传 query 直接给 ES 查询串（字段 filename / filecontent，支持 * 通配）。' +
-      '判断「哪份/哪个版本最新」要用返回里的 modifyTime 与 lastVerNumStr，不要只看文件名推断。' +
+      '判断「哪个版本最新」按技能里的「版本查询方法论」SOP 走，要点：' +
+      '① **必须另跑一轮独立的版本号维度检索**（query：filename:(V2.5.1 AND 产品词)，或搜 V2.5 / V2.6 / ReleaseNote）' +
+      '并翻到 hasMore=false —— 不能只在产品名检索的结果里挑版本号，那只是相关度采样（total/hasMore 只代表本次召回集，' +
+      'sort:\'time\' 也只在本召回集内排序，都推不出「库里最高」）；' +
+      '② 对候选最高版本**向上试一档**（V2.5.1 → 搜 V2.5.2 / V2.6），跳号版本就是这样漏掉的；' +
+      '③ 版本新旧只认**版本号**（lastVerNumStr / 文件名 / 目录名），不要拿 modifyTime 当版本序；' +
+      '④ 用 folderPath 核产品线归属，排除客户定制目录与其他产品线同名版本；' +
+      '⑤ 结论必须带范围限定（「本次检索范围内最高为 X」）；**任一项没做到，答复第一句先写「待核实」**，' +
+      '不许先断言「最新/最高」再补免责；用户报出更高版本号时立刻以用户事实为准。' +
+      '注意：**filepath / masterfilepath 不能用来检索目录**（实测 filepath:(版本火车V2.5.1) 恒为 0 条），只能筛已召回结果或点 folderUrl 浏览。' +
       '本工具**一次调用内部会自动换写法**（原模式 → 子串 → 拆词 → 范围前缀）直到命中：' +
       '返回里的 strategy 是命中的那条、note 会说明「原查询没命中、已自动改用 X 命中 N 条」——' +
       '看到 note 就直接用结果，**不要自己再换关键词重试**；' +
@@ -1896,7 +1908,8 @@ export const WJXT_SEARCH_TOOL_DEFINITION = {
         sort: {
           type: 'string',
           enum: ['score', 'time', 'size', 'name'],
-          description: '排序（默认 score 相关度）。要「最新的在前」用 time（按修改时间倒序），' +
+          description: '排序（默认 score 相关度）。要「最新的在前」用 time（按修改时间倒序，' +
+            '**注意它只用于结果排序展示，版本新旧要按版本号判定**），' +
             '另有 size 从大到小、name 按文件名升序。该部署的服务端排序**已做自动兜底**：' +
             '服务端不支持时会自动改用「相关度查询 + 本地排序」，返回里的 note 会说明 —— 直接看结果即可，不要自己再排'
         },
@@ -1904,9 +1917,11 @@ export const WJXT_SEARCH_TOOL_DEFINITION = {
         query: {
           type: 'string',
           description: '可选：完整 ES 查询串（给了 keyword 时以 query 为准）。可用字段 ' +
-            'filename / filecontent / extName / creatorName / modifyTime / filepath；' +
+            'filename / filecontent / extName / creatorName / modifyTime；' +
             '支持通配 *（大小写敏感）与区间，例如 filename:(HY_ADPLUS2.0) AND filename:(Train OR 火车)、' +
-            'modifyTime:[2026-01-01 TO 2026-12-31]'
+            'modifyTime:[2026-01-01 TO 2026-12-31]。' +
+            '**filepath / masterfilepath 不是检索字段**：实测 filepath:(版本火车V2.5.1)、filepath:(ADPlus2.0) 都是 0 条，' +
+            '它只能用来筛已召回结果；要按目录找文件请用返回里的 folderUrl 浏览目录树'
         }
       },
       required: ['keyword']

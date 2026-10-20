@@ -215,6 +215,11 @@ export function setEnabled(id: string, enabled: boolean): McpServerConfig | unde
  * 3) `[{ name?, command, args, env }, ...]`
  * 4) 单个 `{ name?, command, args, env }`
  * 全部归一化成 McpServerConfig 并入库存（skillKey 为空 = 未绑定，需在 UI 里补选）。
+ *
+ * skillKey 取值优先级（1.0.55）：**JSON 里显式写的 > 调用方传入的**（McpModal 表单选择）。
+ * 内置技能示例（「填入示例」）自带 `skillKey: 'builtin:tech-agent-skill'` —— 没有它，
+ * 用户照示例导入的服务就是「未绑定」状态，连「按绑定技能推断 runtime 目录」这条自动定位
+ * 都用不上，只能得到一条在别人机器上有效的 cwd（1.0.55 分发实测）。
  */
 export function importServersJson(text: string, skillKey = ''): McpImportResult {
   let parsed: any
@@ -252,7 +257,9 @@ export function importServersJson(text: string, skillKey = ''): McpImportResult 
       args: cfg.args,
       env: cfg.env,
       cwd: cfg.cwd,
-      skillKey,
+      // JSON 里显式写了 skillKey 就用它（示例 JSON 自带绑定，用户不必再补选）；
+      // 没写才用调用方传入的（McpModal 表单里选的那个）
+      skillKey: String(cfg?.skillKey ?? skillKey ?? ''),
       enabled: true
     }, `mcp-${store.servers.length + 1}`)
     // 同名（展示名）覆盖＝更新，避免反复导入堆出一堆重复项

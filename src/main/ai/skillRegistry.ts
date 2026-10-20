@@ -24,8 +24,16 @@ import { listServers as listMcpServers } from './mcpStore'
  */
 
 const SKILL_MD = 'SKILL.md'
-/** 注入系统提示的 SKILL.md 上限：鸿翼那份 24KB，全量注入会白烧 token */
-const PROMPT_MAX = 12000
+/**
+ * 注入系统提示的 SKILL.md 上限：鸿翼那份 24KB，全量注入会白烧 token。
+ *
+ * 1.0.55 由 12000 提到 16000：鸿翼技能全文 14.5k 字符（新增「版本查询方法论」SOP 后），
+ * 12000 会**正好切在「常见错误与处置」表格中间**，留下半张表和丢掉的排障/禁止事项。
+ * 该技能默认不勾选，只有用户主动启用才注入，多这 2.5k 字符可接受；
+ * 其余内置技能文档都远小于 12000，不受影响。改动时请同步跑一次
+ * 「技能文档首尾都在注入窗口内」的自检（见 PUBLISH 冒烟清单）。
+ */
+const PROMPT_MAX = 16000
 
 /**
  * 内置技能根目录（1.0.52 导出给 mcpClient）。

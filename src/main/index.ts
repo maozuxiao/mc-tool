@@ -1212,8 +1212,22 @@ async function tryAutoSsoRefresh(sess: Electron.Session): Promise<boolean> {
 const SESSION_CHECK_INTERVAL_MS = 10 * 60 * 1000  // 心跳间隔
 const SESSION_CHECK_THROTTLE_MS = 60 * 1000       // 恢复窗口探测的节流窗口
 let sessionCheckTimer: NodeJS.Timeout | null = null
-let sessionCheckInFlight: Promise<boolean> | null = null
+/**
+ * 会话检测的结论（1.0.55 由布尔改三态）。
+ *
+ * 为什么必须三态：`probeOaSession` 的 `network`（超时 / 不可达）是「无法判定」，
+ * 既不是有效也不是失效。此前这里只有布尔 `sessionValid`，网络分支返回**上一次的布尔值**，
+ * 而调用方 `checkSessionAndNotify` 把 false 一律当「已失效」→ 弹登录页。实测后果：
+ * 窗口 focus 检测赶上网络抖动（探测 6 秒超时）就把登录页糊上来，一秒后探测成功又缩回去，
+ * 用户看到的就是「莫名跳到二维码、又跳回来」（1.0.55 用户实测 + 日志实证）。
+ * 三态后：只有 **invalid**（探测明确失败且自愈无果）才允许拉起登录；
+ * unknown 一律静默保留现状。
+ */
+type SessionVerdict = 'valid' | 'invalid' | 'unknown'
+let sessionCheckInFlight: Promise<SessionVerdict> | null = null
 let lastSessionCheckAt = 0
+/** 最近一次**确定性**结论；'unknown' 表示从未探到过或最近一次探不到（不改写旧结论） */
+let sessionVerdict: SessionVerdict = 'unknown'
 let sessionValid = false
 let sessionExpired = false
 
@@ -1257,17 +1271,23 @@ function isWindowActivelyVisible(): boolean {
 }
 
 /**
- * 一次「探测 → 失效则静默 SSO 自愈」，返回最终会话是否有效。
+ * 一次「探测 → 失效则静默 SSO 自愈」，返回三态结论（1.0.55）。
  * 受并发去重与 60 秒节流双重保护；本函数只更新状态与日志，
- * 是否拉起登录由调用方按触发来源决定（后台心跳绝不打扰）。
+ * 是否拉起登录由调用方按触发来源决定（后台心跳绝不打扰，unknown 一律不打扰）。
+ *
+ * 返回值语义：
+ * - 'valid'   ：探测成功或自愈成功 —— 会话确实可用；
+ * - 'invalid' ：探测明确失败（reauth / nocookie）且静默自愈也无果 —— 会话确实死了；
+ * - 'unknown' ：网络级异常，无法判定 —— **沿用上次确定性结论**（sessionVerdict 不改写），
+ *               调用方不得据此拉起登录页。
  */
-async function checkAndHealSession(): Promise<boolean> {
+async function checkAndHealSession(): Promise<SessionVerdict> {
   // 并发去重：避免心跳与恢复窗口探测并发、或连点托盘放大请求
   if (sessionCheckInFlight) return sessionCheckInFlight
   // 节流：距上次探测不足 60 秒则沿用上次结论；从未探测过（lastSessionCheckAt=0）时必定探测。
   // 连点托盘恢复窗口不会反复发请求，而隔夜后回来（远超 60 秒）必定真实探测。
   if (lastSessionCheckAt > 0 && Date.now() - lastSessionCheckAt < SESSION_CHECK_THROTTLE_MS) {
-    return sessionValid
+    return sessionVerdict
   }
   sessionCheckInFlight = (async () => {
     try {
@@ -1277,14 +1297,15 @@ async function checkAndHealSession(): Promise<boolean> {
         // 正常探测成功不写日志：10 分钟一次会刷屏，只在状态变化时记录
         sessionValid = true
         sessionExpired = false
+        sessionVerdict = 'valid'
         // 会话确认有效 → 复位「登录层已展示」标志，否则用户登录后再次过期将收不到通知
         markSessionHealthy()
-        return true
+        return 'valid' as const
       }
       // 网络级异常：无法判定会话是否失效，保持原状态，绝不误判为失效
       if (probed.reason === 'network') {
-        debugLog(`[SESSION] probe network error, keep current state (valid=${sessionValid})`)
-        return sessionValid
+        debugLog(`[SESSION] probe network error, keep current state (verdict=${sessionVerdict})`)
+        return sessionVerdict
       }
       // 未登录 / 扫码中：既不自愈也不拉起登录，避免与隐藏登录窗口争抢（1.0.16 教训）
       if (probed.reason === 'nocookie') {
@@ -1295,7 +1316,8 @@ async function checkAndHealSession(): Promise<boolean> {
         // 永远回不到扫码页。sessionExpired 现在不再参与「要不要通知」的决策（判据已简化为只看 ok），
         // 但仍要如实标记，供日志与诊断使用。
         sessionExpired = true
-        return false
+        sessionVerdict = 'invalid'
+        return 'invalid' as const
       }
       // reauth / invalid：会话确实失效，先尝试静默 SSO 自愈
       debugLog(`[SESSION] session invalid (${probed.reason}), try silent SSO heal`)
@@ -1304,17 +1326,19 @@ async function checkAndHealSession(): Promise<boolean> {
         debugLog('[SESSION] silent SSO heal succeeded, no QR needed')
         sessionValid = true
         sessionExpired = false
+        sessionVerdict = 'valid'
         // 自愈成功同样是「会话有效」，复位标志（用户全程无感，不该停在登录层）
         markSessionHealthy()
-        return true
+        return 'valid' as const
       }
       debugLog('[SESSION] silent SSO heal failed, session expired')
       sessionValid = false
       sessionExpired = true
-      return false
+      sessionVerdict = 'invalid'
+      return 'invalid' as const
     } catch (e: any) {
       debugLog(`[SESSION] check error: ${e?.message || e}`)
-      return sessionValid
+      return sessionVerdict
     } finally {
       lastSessionCheckAt = Date.now()
       sessionCheckInFlight = null
@@ -1324,23 +1348,30 @@ async function checkAndHealSession(): Promise<boolean> {
 }
 
 /**
- * 一次「检测 + 静默自愈」，未通过则通知渲染层回到扫码页（1.0.53）。
+ * 一次「检测 + 静默自愈」，未通过则通知渲染层回到扫码页（1.0.53；1.0.55 改三态判据）。
  *
  * 判据从原来的 `!ok && sessionExpired` **简化为只看 `ok`**：原判据要求两个条件同时成立，
  * 而 `nocookie` 分支（cookie 被清而非服务端过期）返回 false 却不设 `sessionExpired`，
  * 于是这一支永远回不到扫码页 —— 这正是判据复合化引入的漏洞。`sessionExpired` 仍如实标记，
  * 但不再参与「要不要通知」的决策。
  *
+ * 1.0.55 再收紧：**只有 invalid 才拉起登录页**。network（探测超时 / 不可达）是「无法判定」，
+ * 不是「已失效」的证据 —— 把 unknown 当失效弹登录页，就是用户实测的「莫名跳到二维码界面、
+ * 一秒后又跳回来」（focus 检测赶上网络抖动时必现）。unknown 时静默保留现状：
+ * 登录层若已因真实失效而显示，就留着；但绝不因为「探不到」把它糊上来。
+ *
  * @param source 触发来源，仅用于日志（便于复现时按来源检索）
- * @returns 检测后的会话是否有效
+ * @returns 检测后的会话是否有效（unknown 时返回上次确定性结论）
  */
 async function checkSessionAndNotify(source: SessionCheckSource): Promise<boolean> {
-  const ok = await checkAndHealSession()
-  if (!ok) {
+  const verdict = await checkAndHealSession()
+  if (verdict === 'invalid') {
     debugLog(`[SESSION] check failed (source=${source}) -> request login view`)
     requestLoginView('expired')
+  } else if (verdict === 'unknown') {
+    debugLog(`[SESSION] check inconclusive (source=${source}, network), keep current state`)
   }
-  return ok
+  return verdict === 'valid'
 }
 
 /** 后台心跳：每 10 分钟探测一次；窗口不可见时仅标记状态，绝不主动弹窗打扰用户 */
@@ -1351,8 +1382,9 @@ function startSessionHeartbeat(): void {
     // 1.0.53：窗口**正处于聚焦态**（用户正在看）时，检测失败要通知渲染层回到扫码页 ——
     // 否则「应用一直开着、会话在后台悄悄过期」时界面毫无反应，用户只能等某次操作报错才发现。
     // 窗口不可见 / 最小化 / 收进托盘时保持原有「不打扰」取向，等 focus 或托盘唤回时再处理。
-    void checkAndHealSession().then(ok => {
-      if (!ok && isWindowActivelyVisible()) {
+    void checkAndHealSession().then(verdict => {
+      // 只有「明确失效」且窗口正被用户看着时才打扰；unknown（网络抖动）不弹
+      if (verdict === 'invalid' && isWindowActivelyVisible()) {
         debugLog('[SESSION] heartbeat: session invalid while window focused -> request login view')
         requestLoginView('expired')
       }
@@ -1499,7 +1531,16 @@ async function doCheckLoginAndNotify() {
     else if (probed.reason === 'network') ok = await isOALoggedin() // 网络级失败才兜底 cookie
     else debugLog(`[startup] restored cookies present but OA probe=reauth -> require re-SSO`)
   } else {
-    ok = await isOALoggedin()
+    // 1.0.55：restoreOaSession 返回 false 有**两种**含义——「没有可恢复的备份」与
+    // 「探测发现会话已有效、无需恢复」（其 skip 分支返回的也是 false）。此前这里一律
+    // 退化成 cookie 名启发式 isOALoggedin()，而 OA 真实会话的关键 cookie（LtpaToken）
+    // 在 .streamax.com 域、oa.host 下 0 个 → 启发式恒 false → **每次启动都闪一下登录页**，
+    // 靠 QR-START 一秒后的短路救回（日志实证：probe ok=true 但 isOALoggedin=false）。
+    // 现改为先真实探测，只有探测无法判定（network）时才退到 cookie 启发式兜底。
+    const probed = await probeOaSession(session.fromPartition(PARTITION))
+    if (probed.ok) ok = true
+    else if (probed.reason === 'network') ok = await isOALoggedin() // 网络级失败才兜底 cookie
+    else debugLog(`[startup] nothing to restore and probe=${probed.reason} -> require login`)
   }
   debugLog(`[startup] restoredOk=${restoredOk}, isOALoggedin = ${ok}`)
   if (ok) {
@@ -1512,11 +1553,13 @@ async function doCheckLoginAndNotify() {
     mainWindow.webContents.send(IPC.OA_CHECK_LOGGED, { loggedIn: true })
     // 已登录：启动会话心跳，后台驻留期间定期探测并在失效时静默自愈
     sessionValid = true
+    sessionVerdict = 'valid'
     markSessionHealthy()
     startSessionHeartbeat()
   } else {
     // 无可用 cookie：通知渲染进程在主窗口内显示登录视图（webview），不弹独立窗口
     sessionValid = false
+    sessionVerdict = 'invalid'
     stopSessionHeartbeat()
     // 1.0.53：改用统一入口，必须**成对**下发 OA_CHECK_LOGGED(loggedIn=false) 与
     // OA_LOGIN_STATE(logging)。此前这里只发后者，而渲染层只在 loggedIn===false 时才渲染
@@ -2452,12 +2495,31 @@ ipcMain.handle(IPC.OA_QR_LOGIN_START, () => {
         debugLog(`[QR-START] lck empty but landed on OA host, probe ok=${probe.ok} reason=${probe.reason}`)
         if (probe.ok) {
           debugLog('[QR-START] OA already logged in (no lck needed), short-circuit to tool')
+          // 探测证明会话有效：必须把会话判定同步置为 valid。此前这里只 markSessionHealthy()，
+          // 而 startup 的 else 分支（或一次真实的失效）可能已把 sessionValid 置 false ——
+          // 于是之后任何一次 focus 检测（哪怕只是网络超时）都会拿着这个陈旧的 false
+          // 把登录页糊上来（1.0.55 用户实测「莫名跳二维码又跳回」的直接根因之一）。
+          sessionValid = true
+          sessionExpired = false
+          sessionVerdict = 'valid'
           // 渲染层收到 alreadyLoggedIn 会自行置为已登录（不走 OA_CHECK_LOGGED），
           // 这里同步复位标志，否则下一次会话失效时会被幂等判断吞掉通知。
           markSessionHealthy()
           return { success: true, alreadyLoggedIn: true, entityId: 'oa' }
         }
-        // probe=reauth：OA 不认可（会话失效），落到下方原错误逻辑，由前端重扫/重登录
+        // probe=network：探不到 ≠ 失效。网络抖动时清 IAM cookie 是破坏性动作 ——
+        // 会把本来有效的会话打烂，且下次重探仍可能超时，形成
+        // 「超时 → 清 cookie → 重试 → 超时 → 再清」的恶性循环（1.0.55 日志实证：
+        // 连续 4 轮 clearIam，会话越清越难恢复）。按网络错误交给前端退避重试，绝不动会话。
+        if (probe.reason === 'network') {
+          debugLog('[QR-START] probe network error, skip clearIam (destructive on a live session)')
+          const netErr: any = new Error('登录页探测超时（网络异常），请稍后重试')
+          netErr.reason = 'network'
+          netErr.friendly = '网络异常，请检查网络或稍后重试'
+          throw netErr
+        }
+        // probe=reauth / invalid / nocookie：OA 明确不认可（会话失效），落到下方
+        // 半登录态清理逻辑，由前端重扫/重登录
       }
       // 卡在 IAM 宿主（onOaHost=false）：诊断日志显示此时 oa.host cookies=0、
       // 而 iam 域仍残留 8 个陈旧 cookie（idle 数小时），属「IAM 半登录态」——
@@ -2669,11 +2731,15 @@ ipcMain.handle(IPC.OA_QR_LOGIN_POLL, async (_e, payload: {
             mainWindow.webContents.send(IPC.OA_CHECK_LOGGED, { loggedIn: true })
             // 扫码登录成功落地：启动会话心跳
             sessionValid = true
+            sessionVerdict = 'valid'
             markSessionHealthy()
             startSessionHeartbeat()
           } else if (mainWindow && !mainWindow.isDestroyed()) {
             // SSO 未真正落地：如实通知前端回到扫码界面重试（关闭"正在进入工具"loading）
-                  sessionValid = false
+            sessionValid = false
+            // 1.0.55：按原因写结论 —— reauth 是确定性失效；network 只是「无法判定」，
+            // 不能记成 invalid（用户此刻就在扫码页里，记错了会让后续 focus 检测拿它当失效证据）。
+            sessionVerdict = landReason === 'network' ? 'unknown' : 'invalid'
             stopSessionHeartbeat()
             // 不再把假登录骗进工具后首次查询才被 901 踢出。带原因：network→网络异常提示。
             debugLog(`[QR-POLL] SSO did not truly land (reason=${landReason}), notify renderer to retry QR login`)
