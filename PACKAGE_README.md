@@ -91,8 +91,8 @@ Windows 任务栏右键菜单第一项（窗口名称）由主窗口 `title` 与
 ### 当前基线版本
 
 ```text
-package.json version:          1.0.50
-electron-builder buildVersion: 1.0.50.0
+package.json version:          1.0.54
+electron-builder buildVersion: 1.0.54.0
 ```
 
 打包命令：

@@ -274,6 +274,12 @@ export const AI_IPC = {
   SKILL_REMOVE: 'ai:skill-remove',
   // 增强提示词：用当前供应商把草稿改写成更明确的提示词（一次性请求，不落历史）
   OPTIMIZE_PROMPT: 'ai:optimize-prompt',
+  // 物料描述批量翻译（1.0.54，「翻译物料描述」按钮）：用当前供应商把一批中文描述译成英文，
+  // 一次性请求、不落历史（与 OPTIMIZE_PROMPT 同构）
+  TRANSLATE_DESCS: 'ai:translate-descs',
+  // 中断一次进行中的翻译（按 taskId）：让在途的 HTTP 请求立刻失败，
+  // 而不是等当前批次跑完才停（用户点了「取消」要马上见效）
+  TRANSLATE_CANCEL: 'ai:translate-cancel',
   // MCP 服务（1.0.46）：登记 stdio 服务 → 自动拉起 → 工具下发给模型 → tools/call 转发
   MCP_LIST: 'ai:mcp-list',
   MCP_SAVE: 'ai:mcp-save',

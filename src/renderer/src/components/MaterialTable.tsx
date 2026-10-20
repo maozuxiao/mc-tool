@@ -49,6 +49,11 @@ export const MaterialTable = memo(function MaterialTable() {
   const searchBom = useStore(s => s.searchBom)
   const searchFile = useStore(s => s.searchFile)
   const exportCSV = useStore(s => s.exportMatCSV)
+  // 1.0.54：物料描述 AI 译文（键是中文原文，值英文译文）与翻译进度。
+  // 「有待翻译的描述」时才可点翻译；已有译文时才显示「原文/译文」切换。
+  const descState = useStore(s => s.descTrans.mat)
+  const translateDescs = useStore(s => s.translateDescs)
+  const toggleDescVisible = useStore(s => s.toggleDescVisible)
   // 行展开状态持久化到 store：切换 tab 后仍能保留展开行与按钮点击事件
   const expandedKeys = useStore(s => s.matExpandedKeys)
   const toggleExpand = useStore(s => s.toggleMatExpanded)
@@ -96,6 +101,15 @@ export const MaterialTable = memo(function MaterialTable() {
     return Number.isNaN(n) ? escapeHtml(String(v)) : n.toLocaleString(lang === 'zh' ? 'zh-CN' : 'en-US')
   }
 
+  // 翻译按钮三态：① 有待翻译描述 → 可点，开始翻译；② 翻译中 → **仍可点**（再次点击弹取消确认），
+  //    所以不能置 disabled——禁用按钮不派发 click，上一版「翻译中无法取消」正是这么来的；
+  //    库 loading 的 pointer-events:none 由 .mq-translate-btn 的 !important 覆盖解除；
+  //    ③ 全部译过 → 禁用。
+  const hasPendingDesc = matFiltered.some((r: any) => {
+    const d = String(r.ITEM_DESC ?? '').trim()
+    return !!d && !descState.map[d]
+  })
+
   return (
     <div>
       {/* 统计行：只保留 CSV 导出按钮 */}
@@ -104,6 +118,29 @@ export const MaterialTable = memo(function MaterialTable() {
           {t('countMat', { f: matFiltered.length, s: matData.length, h: useStore.getState().dedup ? t('countMatDedup') : '' })}
         </span>
         <div className="count-actions">
+          {/* 翻译物料描述（1.0.54）：调用 AI 助手里配置的供应商把中文描述译成英文。
+              loading 用库 Button 的甜甜圈动画，文案显示「翻译中 {i}/{n}」。
+              loading 期间按钮仍可点击（.mq-translate-btn 覆盖了库的 pointer-events:none，
+              且不置 disabled）：再次点击 = 弹确认取消剩余批次。
+              仅当还有未翻译的描述时可点（全部译过则禁用）。 */}
+          <Button
+            type="default"
+            size="small"
+            className="mq-translate-btn"
+            loading={descState.translating}
+            disabled={!descState.translating && !hasPendingDesc}
+            onClick={() => void translateDescs('mat')}
+          >
+            {descState.translating
+              ? t('translatingN', { i: descState.progress?.done ?? 0, n: descState.progress?.total ?? 0 })
+              : t('translateDesc')}
+          </Button>
+          {/* 已有译文时才出现「显示原文 / 显示译文」切换；导出 CSV 跟随当前显隐 */}
+          {matFiltered.some((r: any) => descState.map[String(r.ITEM_DESC ?? '')]) && (
+            <Button type="default" size="small" onClick={() => toggleDescVisible('mat')}>
+              {descState.visible ? t('descShowOriginal') : t('descShowTranslated')}
+            </Button>
+          )}
           <Button type="default" size="small" onClick={exportCSV}>{t('exportCsv')}</Button>
         </div>
       </div>
@@ -139,7 +176,17 @@ export const MaterialTable = memo(function MaterialTable() {
                     {cols.map(c => {
                       if (c.k === '#') return <td key="#" className="td-num">{i + 1}</td>
                       if (c.k === 'ITEM_NUMBER') return <td key={c.k} className="td-item">{escapeHtml(itemNo)}</td>
-                      if (c.k === 'ITEM_DESC') return <td key={c.k} className="td-desc" title={escapeHtml(String(r.ITEM_DESC ?? ''))}>{escapeHtml(String(r.ITEM_DESC ?? ''))}</td>
+                      // 描述列：显译文态且有 AI 译文时显示英文，中文原文收进悬停提示；
+                      // 显原文态一律显示中文（不破坏列格式）
+                      if (c.k === 'ITEM_DESC') {
+                        const zh = String(r.ITEM_DESC ?? '')
+                        const en = descState.visible ? descState.map[zh] : undefined
+                        return (
+                          <td key={c.k} className="td-desc" title={en ? `${escapeHtml(en)}\n${escapeHtml(zh)}` : escapeHtml(zh)}>
+                            {escapeHtml(en || zh)}
+                          </td>
+                        )
+                      }
                       // 类型 / 生命周期是接口返回的中文枚举，显示时按语言取值翻译；
                       // Tag 的配色仍按**原始值**查表，所以换语言不会改变标签颜色。
                       if (c.k === 'ITEM_TYPE') return <td key={c.k} className="td-type">{escapeHtml(translateItemType(lang, String(r.ITEM_TYPE ?? '')))}</td>
@@ -172,7 +219,12 @@ export const MaterialTable = memo(function MaterialTable() {
                             内容分组保持原样，仍是「完整描述」和「料号等字段」两行。 */}
                         <div className="mq-expand-inner">
                           <div className="mq-expand-line">
-                            <strong>{t('fullDesc')}</strong>{escapeHtml(String(r.ITEM_DESC ?? ''))}
+                            <strong>{t('fullDesc')}</strong>
+                            {escapeHtml(descState.visible ? (descState.map[String(r.ITEM_DESC ?? '')] || String(r.ITEM_DESC ?? '')) : String(r.ITEM_DESC ?? ''))}
+                            {/* 译文后面附中文原文（淡色小字），便于核对；未翻译 / 显原文态不渲染 */}
+                            {descState.visible && descState.map[String(r.ITEM_DESC ?? '')] && (
+                              <span className="mq-desc-origin">（{escapeHtml(String(r.ITEM_DESC ?? ''))}）</span>
+                            )}
                           </div>
                           <div className="mq-expand-line">
                             <strong>{t('itemNo')}</strong>{escapeHtml(itemNo)}&emsp;

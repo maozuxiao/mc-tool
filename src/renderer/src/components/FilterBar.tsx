@@ -60,24 +60,38 @@ function LifecycleDropdown({
           )}
           {options.map((st) => {
             const on = selected.includes(st)
+            const label = translateLifecycle(lang, st)
             return (
               <button
                 key={st}
                 type="button"
                 className={`lifecycle-option${on ? ' on' : ''}`}
                 aria-pressed={on}
+                // 悬停显示完整文案：英文标签（如 Purchase Blocked）较长，
+                // 面板按内容增长后绝大多数能完整显示，title 作为兜底保障
+                title={label}
+                // 拦掉 mousedown 默认行为：按钮不抢焦点。否则点击选项会把焦点从关键词输入框
+                // 夺走，Chromium 还会把「带焦点框的按钮」滚入视野——表现为光标失焦、页面跳动
+                //（与 HistoryInput / McSelect 选项同一套处理）。
+                onMouseDown={e => e.preventDefault()}
                 onClick={() => toggle(st)}
               >
                 <span className={`lifecycle-option__check${on ? '' : ' off'}`}>
                   <Icon name="Check" size={14} />
                 </span>
                 {/* 选项文案按语言翻译；勾选态、过滤、导出仍用原始值 st */}
-                <span>{translateLifecycle(lang, st)}</span>
+                <span>{label}</span>
               </button>
             )
           })}
           {selected.length > 0 && (
-            <button type="button" className="lifecycle-clear" onClick={clear}>
+            <button
+              type="button"
+              className="lifecycle-clear"
+              // 同选项：不抢焦点，避免焦点跳动 / 页面滚动
+              onMouseDown={e => e.preventDefault()}
+              onClick={clear}
+            >
               {t('msClear')}
             </button>
           )}

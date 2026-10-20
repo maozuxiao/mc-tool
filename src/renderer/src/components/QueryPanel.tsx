@@ -183,6 +183,9 @@ export function QueryPanel({ disabled }: { disabled: boolean }) {
   const batchMsg = useStore(s => s.batchMsg)
   const notFound = useStore(s => s.notFound)
   const loading = useStore(s => s.loading)
+  // 当前正在执行的查询动作：loading 动画只显示在**被点击的那个按钮**上，
+  // 而不是任一查询进行时全部转圈（1.0.54 用户反馈）。禁用仍沿用全局 loading 防并发。
+  const busyAction = useStore(s => s.busyAction)
   const searchMaterial = useStore(s => s.searchMaterial)
   const searchByItemNo = useStore(s => s.searchByItemNo)
   const searchBom = useStore(s => s.searchBom)
@@ -592,14 +595,16 @@ export function QueryPanel({ disabled }: { disabled: boolean }) {
             <Button
               type="primary"
               id="mq-itemno-search-btn"
+              loading={busyAction === 'itemno'}
               icon={<Icon name="Search" size={16} />}
               onClick={submitItem}
               disabled={disabled || loading || !itemNo.trim()}
             >
-              {t('btnItemno')}
+              {busyAction === 'itemno' ? t('searching') : t('btnItemno')}
             </Button>
             <Button
               id="mq-bom-search-btn"
+              loading={busyAction === 'bom'}
               icon={<Icon name="Tree" size={16} />}
               onClick={() => { pushHist('item', itemNo); searchBom(itemNo.trim()) }}
               disabled={disabled || loading || !itemNo.trim()}
@@ -609,6 +614,7 @@ export function QueryPanel({ disabled }: { disabled: boolean }) {
             <Button
               className="mq-file-btn"
               id="mq-file-search-btn"
+              loading={busyAction === 'file'}
               icon={<Icon name="File" size={16} />}
               onClick={() => { pushHist('item', itemNo); searchFile(itemNo.trim()) }}
               disabled={disabled || loading || !itemNo.trim()}
@@ -650,15 +656,19 @@ export function QueryPanel({ disabled }: { disabled: boolean }) {
                   <span className="mq-batch-count" id="mq-batch-count">
                     {batchCountText}
                   </span>
+                  {/* loading 走库 Button 的甜甜圈动画（文档 #/button 的 Loading 样式）：
+                      批量查询逐个料号进行，文案实时显示「查询中 {i}/{n}」（batchMsg 由 store 按轮更新）。
+                      loading 只挂在批量查询按钮上（busyAction==='batch'），其他查询按钮不转圈。
+                      loading 时库会用旋转图标替换传入的 icon，故此处不再传 Search 图标。 */}
                   <Button
                     type="primary"
                     className="mq-batch-search-btn"
                     id="mq-batch-search-btn"
-                    icon={<Icon name="Search" size={16} />}
+                    loading={busyAction === 'batch'}
                     onClick={() => batchSearch()}
                     disabled={disabled || loading || !batchText.trim()}
                   >
-                    {loading ? (batchMsg ? batchMsg : t('searching')) : t('btnBatch')}
+                    {busyAction === 'batch' ? (batchMsg ? batchMsg : t('searching')) : t('btnBatch')}
                   </Button>
                 </div>
                 <div className="mq-batch-hint">{t('batchHint')}</div>
@@ -738,9 +748,10 @@ export function QueryPanel({ disabled }: { disabled: boolean }) {
           </div>
           <div className="fields-actions">
             {/* 主查询按钮直接使用库 type="primary"：主色由 --mc-accent 驱动，
-                原先 .mq-act-green + 4 条 !important 写死 #138a7e 的覆盖已删除。 */}
-            <Button type="primary" icon={<Icon name="Search" size={16} />} onClick={runSearch} disabled={disabled || loading}>
-              {loading ? t('searching') : t('search')}
+                原先 .mq-act-green + 4 条 !important 写死 #138a7e 的覆盖已删除。
+                loading 只在本按钮发起的查询进行时显示（busyAction==='search'）。 */}
+            <Button type="primary" loading={busyAction === 'search'} icon={<Icon name="Search" size={16} />} onClick={runSearch} disabled={disabled || loading}>
+              {busyAction === 'search' ? t('searching') : t('search')}
             </Button>
             <Button onClick={resetAll} disabled={disabled || loading}>{t('reset')}</Button>
           </div>

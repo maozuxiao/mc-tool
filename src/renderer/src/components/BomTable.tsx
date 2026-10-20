@@ -18,6 +18,10 @@ export const BomTable = memo(function BomTable() {
   const searchBom = useStore(s => s.searchBom)
   const searchFile = useStore(s => s.searchFile)
   const exportCSV = useStore(s => s.exportBomCSV)
+  // 1.0.54：BOM 组件描述 AI 译文（与物料结果页同一套能力：翻译 / 取消 / 原文切换）
+  const descState = useStore(s => s.descTrans.bom)
+  const translateDescs = useStore(s => s.translateDescs)
+  const toggleDescVisible = useStore(s => s.toggleDescVisible)
   // 行展开状态持久化到 store：切换 tab 后仍能保留展开行与按钮点击事件
   const expandedKeys = useStore(s => s.bomExpandedKeys)
   const toggle = useStore(s => s.toggleBomExpanded)
@@ -25,11 +29,39 @@ export const BomTable = memo(function BomTable() {
   if (!bomData.length) return <div className="empty-box" dangerouslySetInnerHTML={{ __html: t('emptyBom') }} />
   if (!bomFiltered.length) return <div className="empty-box">{t('emptyFiltered')}</div>
 
+  // 翻译按钮三态（与 MaterialTable 一致）：有待译 → 可点开始；翻译中 → 仍可点（再次点击弹取消确认，
+  // 不能置 disabled，否则 click 不派发）；全部译过 → 禁用。
+  const hasPendingDesc = bomFiltered.some((r: any) => {
+    const d = String(r.COMPONENT_ITEM_DESC ?? '').trim()
+    return !!d && !descState.map[d]
+  })
+
   return (
     <div>
       <div className="count-line">
         <span>{t('countBom', { f: bomFiltered.length, s: bomData.length })}</span>
         <div className="count-actions">
+          {/* 翻译物料描述（1.0.54）：与物料结果页同一套能力。loading 期间按钮仍可点击
+              （.mq-translate-btn 覆盖库 pointer-events:none 且不置 disabled），
+              再次点击 = 取消剩余批次。仅当还有未翻译的描述时可点。 */}
+          <Button
+            type="default"
+            size="small"
+            className="mq-translate-btn"
+            loading={descState.translating}
+            disabled={!descState.translating && !hasPendingDesc}
+            onClick={() => void translateDescs('bom')}
+          >
+            {descState.translating
+              ? t('translatingN', { i: descState.progress?.done ?? 0, n: descState.progress?.total ?? 0 })
+              : t('translateDesc')}
+          </Button>
+          {/* 已有译文时才出现「显示原文 / 显示译文」切换；导出 CSV 跟随当前显隐 */}
+          {bomFiltered.some((r: any) => descState.map[String(r.COMPONENT_ITEM_DESC ?? '')]) && (
+            <Button type="default" size="small" onClick={() => toggleDescVisible('bom')}>
+              {descState.visible ? t('descShowOriginal') : t('descShowTranslated')}
+            </Button>
+          )}
           {/* 与 MaterialTable 的导出按钮同源：统一改用库 <Button>，不再自建 .mq-mini-btn */}
           <Button type="default" size="small" onClick={exportCSV}>{t('exportCsv')}</Button>
         </div>
@@ -60,7 +92,16 @@ export const BomTable = memo(function BomTable() {
                   <tr className="data-row" data-cursor="pointer" onClick={() => toggle(key)}>
                     <td>{v(r.BOM_LEVEL)}</td>
                     <td className="td-item">{v(r.COMPONENT_ITEM)}</td>
-                    <td className="td-desc" title={String(r.COMPONENT_ITEM_DESC ?? '')}>{v(r.COMPONENT_ITEM_DESC)}</td>
+                    {/* 组件描述列：显译文态且有 AI 译文时显示英文，中文原文收进悬停提示 */}
+                    {(() => {
+                      const zh = String(r.COMPONENT_ITEM_DESC ?? '')
+                      const en = descState.visible ? descState.map[zh] : undefined
+                      return (
+                        <td className="td-desc" title={en ? `${en}\n${zh}` : zh}>
+                          {en ? escapeHtml(en) : v(r.COMPONENT_ITEM_DESC)}
+                        </td>
+                      )
+                    })()}
                     <td>{v(r.K3_ITEM_NUMBER)}</td>
                     <td>{v(r.PRIMARY_UOM_CODE)}</td>
                     <td className="td-qty">{v(r.LOSS_RATE)}</td>

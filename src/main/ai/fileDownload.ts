@@ -3,7 +3,7 @@ import http from 'http'
 import https from 'https'
 import { Readable } from 'stream'
 import { closeSync, createWriteStream, existsSync, mkdirSync, openSync, readSync, renameSync, unlinkSync } from 'fs'
-import { basename, isAbsolute, join, resolve, sep } from 'path'
+import { basename, dirname, isAbsolute, join, resolve, sep } from 'path'
 import { OA_ORIGIN } from '@shared/constants'
 import { dirBlockReason } from './rootGuard'
 import type { AIExtraRoot } from '@shared/ai-types'
@@ -84,6 +84,11 @@ export interface DownloadToPathResult {
   ok: true
   size: number
   finalUrl: string
+  /**
+   * 实际落盘路径。正常情况下等于入参 filePath；目标同名文件被其他程序占用
+   * （Windows rename 报 EPERM/EACCES）而自动改名时，这里是「名称(1).ext」。
+   */
+  savedPath: string
 }
 
 /** 已建立、正文尚未读取的响应（交给 pipeToFile 流式消费） */
@@ -299,13 +304,24 @@ export async function downloadToPath(input: DownloadToPathInput): Promise<Downlo
     try { if (existsSync(part)) unlinkSync(part) } catch { /* ignore */ }
     throw e
   }
+  // 改名收尾。直接 rename 失败时不再把这次下载判死：Windows 上典型场景是
+  // 「目标同名文件正被其他程序打开」（EPERM / EACCES / EEXIST，如桌面已有同名 PDF
+  // 且开着阅读器）—— 用户已经选好目录、内容也下完了，只差最后一步落盘。
+  // 这里按浏览器的行为兜底：同目录自动改用「名称(1).ext」再落一次；
+  // 注意重试必须换**新文件名**，重试同名对「文件被占用」必然再次失败。
+  let finalPath = filePath
   try {
-    renameSync(part, filePath)
+    renameSync(part, finalPath)
   } catch (e: any) {
-    try { if (existsSync(part)) unlinkSync(part) } catch { /* ignore */ }
-    throw new Error('WRITE_FAILED: ' + (e?.message || e))
+    try {
+      finalPath = uniquePath(dirname(filePath), basename(filePath))
+      renameSync(part, finalPath)
+    } catch (e2: any) {
+      try { if (existsSync(part)) unlinkSync(part) } catch { /* ignore */ }
+      throw new Error('WRITE_FAILED: ' + (e2?.message || e2))
+    }
   }
-  return { ok: true, size: written, finalUrl: opened.finalUrl }
+  return { ok: true, size: written, finalUrl: opened.finalUrl, savedPath: finalPath }
 }
 
 /** 从 URL 推断文件名：优先 fileName= 参数，其次路径末段，兜底 download */
@@ -333,7 +349,7 @@ export function safeFileName(name: string): string {
 }
 
 /** 同名文件自动重命名：名称(1).ext / 名称(2).ext …，不覆盖已有文件 */
-function uniquePath(dir: string, name: string): string {
+export function uniquePath(dir: string, name: string): string {
   let candidate = join(dir, name)
   if (!existsSync(candidate)) return candidate
   const dot = name.lastIndexOf('.')

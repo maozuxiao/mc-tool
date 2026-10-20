@@ -222,7 +222,11 @@ function skillToolDefinitions(enabledSkills?: string[]): any[] {
 /** 该模式下允许调用的工具名，用于兜底拦截模型臆造的工具调用 */
 export function toolNamesForMode(mode: AIAgentMode, hasWorkspace: boolean, enabledSkills?: string[]): string[] {
   if (mode === 'ask') return []
-  if (mode === 'mc') return ['mc_query']
+  // mc：mc_query + file_download。物料模式下用户常直接说「把 DS100 的规格书下到桌面」——
+  // 只给 mc_query 时模型只能列清单、让用户自己点链接（1.0.54 起放开下载）。
+  // file_download 只往磁盘写文件、不把内容读进上下文，边界由 downloadToDir 的
+  // 「受保护目录」闸门把守；本地读写工具仍不下发。
+  if (mode === 'mc') return ['mc_query', 'file_download']
   // build：文件工具 + 打开目录 + mc_query 全量下发；未授权目录时文件工具会引导用 open_folder
   void hasWorkspace
   return [...FILE_TOOL_DEFINITIONS.map(t => t.function.name), 'mc_query', ...skillToolNames(enabledSkills)]
@@ -234,7 +238,7 @@ export function toolNamesForMode(mode: AIAgentMode, hasWorkspace: boolean, enabl
  */
 export function toolsForMode(mode: AIAgentMode, hasWorkspace: boolean, enabledSkills?: string[]): any[] {
   if (mode === 'ask') return []
-  if (mode === 'mc') return [MC_QUERY_TOOL_DEFINITION]
+  if (mode === 'mc') return [MC_QUERY_TOOL_DEFINITION, FILE_DOWNLOAD_TOOL_DEFINITION]
   // build：文件工具 + 打开目录 + mc_query 全量下发（不再强制先选工作区）+ 已启用技能带来的工具
   void hasWorkspace
   return [...FILE_TOOL_DEFINITIONS, MC_QUERY_TOOL_DEFINITION, ...skillToolDefinitions(enabledSkills)]

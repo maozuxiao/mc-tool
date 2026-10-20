@@ -190,6 +190,13 @@ const mcApi = {
     // 增强提示词：用当前供应商把草稿改写成更明确的提示词
     optimizePrompt: (input: { providerId: string; modelId?: string; text: string; lang?: string }): Promise<any> =>
       ipcRenderer.invoke(AI_IPC.OPTIMIZE_PROMPT, input),
+    // 物料描述批量翻译（「翻译物料描述」按钮）：用当前供应商把一批中文描述译成英文，
+    // 一次性请求不落历史；返回 items 与 texts 等长同序
+    translateDescs: (input: { providerId: string; modelId?: string; texts: string[]; taskId?: string }): Promise<any> =>
+      ipcRenderer.invoke(AI_IPC.TRANSLATE_DESCS, input),
+    // 中断进行中的翻译（按 taskId）：在途请求立刻失败，不用等当前批次跑完
+    cancelTranslate: (taskId: string): Promise<any> =>
+      ipcRenderer.invoke(AI_IPC.TRANSLATE_CANCEL, taskId),
     // ── MCP 服务（1.0.46）：登记 / 启停 / 测试连接 / 一键准备依赖 / 日志 ──
     mcpList: (): Promise<any> => ipcRenderer.invoke(AI_IPC.MCP_LIST),
     mcpSave: (input: any): Promise<any> => ipcRenderer.invoke(AI_IPC.MCP_SAVE, input),

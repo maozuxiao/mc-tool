@@ -2938,9 +2938,11 @@ ipcMain.handle(IPC.OA_FILE_DOWNLOAD, async (_e, payload: { url: string; filename
 
   try {
     const r = await downloadToPath({ url, filePath, onProgress: makeDownloadProgress(id) })
-    queryLog(`[OA_FILE_DOWNLOAD] saved ${r.size} bytes -> ${filePath}`)
+    // savedPath 可能与用户所选路径不同：目标同名文件被其他程序占用时，下载链路
+    // 已自动改用「名称(1).ext」落盘（见 fileDownload.downloadToPath），这里按实际路径记日志
+    queryLog(`[OA_FILE_DOWNLOAD] saved ${r.size} bytes -> ${r.savedPath}`)
     sendDownloadEvent(id, { done: true, size: r.size })
-    return { ok: true, savedPath: filePath, size: r.size }
+    return { ok: true, savedPath: r.savedPath, size: r.size, renamed: r.savedPath !== filePath }
   } catch (e: any) {
     const msg = e?.message || String(e)
     queryLog(`[OA_FILE_DOWNLOAD] error: ${msg}`)
@@ -2980,9 +2982,9 @@ ipcMain.handle('mc-wjxt-download', async (_e, payload: { fileGuid?: string; name
       referer: `${WJXT_ORIGIN}/preview.html`,
       onProgress: makeDownloadProgress(id)
     })
-    debugLog(`[wjxt-download] saved ${r.size} bytes -> ${filePath}`)
+    debugLog(`[wjxt-download] saved ${r.size} bytes -> ${r.savedPath}`)
     sendDownloadEvent(id, { done: true, size: r.size })
-    return { ok: true, savedPath: filePath, size: r.size }
+    return { ok: true, savedPath: r.savedPath, size: r.size, renamed: r.savedPath !== filePath }
   } catch (e: any) {
     const msg = e?.message || String(e)
     debugLog('[wjxt-download] error: ' + msg)
@@ -3248,7 +3250,12 @@ ipcMain.handle('dialog:confirm', async (_e, opts: { message?: string; title?: st
     message: String(opts?.message ?? ''),
     buttons: [L.cancel, L.ok],
     defaultId: 1,
-    cancelId: 0
+    cancelId: 0,
+    // Windows 上 Electron 只会把英文常见按钮名（Cancel / Yes / No…）识别为「普通按钮」，
+    // 其余一律渲染成命令链接（竖排 + 箭头）。中文「取消/确定」两个都中招，于是中文界面
+    // 按钮竖排、英文界面横排（用户反馈「中文参考英文的设计」）。noLink 关掉这个行为，
+    // 两种语言的按钮都回到同一排。
+    noLink: true
   })
   return res.response === 1
 })

@@ -1,4 +1,4 @@
-import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeSanitize from 'rehype-sanitize'
@@ -72,6 +72,46 @@ const MODE_META: Record<AIAgentMode, { icon: string; labelKey: string; descKey: 
   ask: { icon: 'Chat', labelKey: 'aiModeAsk', descKey: 'aiModeAskDesc' },
   mc: { icon: 'Search', labelKey: 'aiModeMc', descKey: 'aiModeMcDesc' },
   build: { icon: 'Code', labelKey: 'aiModeBuild', descKey: 'aiModeBuildDesc' }
+}
+
+/**
+ * 下拉面板的视口自适应定位（1.0.54，模式 / 模型下拉共用）。
+ *
+ * 为什么需要：这两个面板原先都是 `position:absolute; left:0; width:定值`。窗口只有一半宽时
+ * （或缩放后），面板会超出窗口右缘被裁掉（「显示不完全」），宽出来的部分还会盖住右侧的
+ * 「设置」按钮。这里在展开时量一次触发器包裹层的位置：
+ * - 默认左缘与触发器左缘对齐（left:0，相对包裹层）；
+ * - 右侧放不下（包裹层右缘 + width + 边距 > 视口宽）时改为**右缘对齐触发器**，把面板往左收，
+   远离右缘的设置按钮；
+ * - 极端窄窗口下宽度收缩到视口内，且面板左缘不伸出视口左缘。
+ *
+ * 注意：面板是 `position:absolute`，包含块是触发器包裹层（不是视口），所以算出的 left 必须是
+ * **相对包裹层**的坐标 —— 曾经误用视口坐标（left = 包裹层的 viewport left），面板被推到
+ * 屏幕外，表现为「点击展开但看不到下拉」。
+ * 返回的 style 为 undefined 时调用方应先隐藏一帧，避免面板闪在错误位置。
+ */
+function useViewportPanel(open: boolean, panelWidth: number) {
+  const ref = useRef<HTMLDivElement | null>(null)
+  const [style, setStyle] = useState<React.CSSProperties | undefined>(undefined)
+  useLayoutEffect(() => {
+    if (!open) { setStyle(undefined); return }
+    const place = () => {
+      const el = ref.current
+      if (!el) return
+      const r = el.getBoundingClientRect()
+      const PAD = 8
+      const vw = window.innerWidth
+      const w = Math.min(panelWidth, vw - PAD * 2)
+      // left 相对包裹层：0 = 左缘对齐触发器；右缘对齐 = 包裹层宽 - 面板宽；
+      // 再夹一层视口左缘保护（PAD - r.left），窄窗口也不会伸出左边
+      const left = r.left + w + PAD <= vw ? 0 : Math.max(PAD - r.left, r.width - w)
+      setStyle({ left, width: w })
+    }
+    place()
+    window.addEventListener('resize', place)
+    return () => window.removeEventListener('resize', place)
+  }, [open, panelWidth])
+  return { ref, style }
 }
 
 // ── 附件处理（1.0.43）──────────────────────────────────────────────
@@ -242,7 +282,8 @@ export function ChatPanel({ disabled }: Props) {
 
   // ── 模式下拉（1.0.43，参考 CodeBuddy：触发器显示当前模式，菜单里带图标/说明/勾选）──
   const [modePanelOpen, setModePanelOpen] = useState(false)
-  const modePanelRef = useRef<HTMLDivElement | null>(null)
+  // 面板视口自适应（半窗口 / 缩放下不被右缘裁切、不遮设置按钮）；ref 兼作「点击外部关闭」的容器
+  const modePanel = useViewportPanel(modePanelOpen, 320)
   // ── 技能面板（仅 build 模式出现）──
   const [skills, setSkills] = useState<AISkillInfo[]>([])
   const [skillPanelOpen, setSkillPanelOpen] = useState(false)
@@ -336,12 +377,12 @@ export function ChatPanel({ disabled }: Props) {
     if (!modePanelOpen && !skillPanelOpen) return
     const onDocClick = (e: MouseEvent) => {
       const t2 = e.target as Node
-      if (modePanelRef.current && !modePanelRef.current.contains(t2)) setModePanelOpen(false)
+      if (modePanel.ref.current && !modePanel.ref.current.contains(t2)) setModePanelOpen(false)
       if (skillPanelRef.current && !skillPanelRef.current.contains(t2)) setSkillPanelOpen(false)
     }
     document.addEventListener('mousedown', onDocClick)
     return () => document.removeEventListener('mousedown', onDocClick)
-  }, [modePanelOpen, skillPanelOpen])
+  }, [modePanelOpen, skillPanelOpen, modePanel.ref])
   useEffect(() => {
     if (!promptPanelOpen) return
     const onDocClick = (e: MouseEvent) => {
@@ -1186,6 +1227,8 @@ export function ChatPanel({ disabled }: Props) {
     const kw = modelId.trim().toLowerCase()
     return kw ? modelOptions.filter(m => m.toLowerCase().includes(kw)) : modelOptions
   }, [modelOptions, modelId])
+  // 模型下拉面板视口自适应（半窗口 / 缩放下不被右缘裁切）：260px 与 .ai-model-panel 的宽度一致
+  const modelPanel = useViewportPanel(modelOpen && modelSuggestions.length > 0, 260)
 
   // 库 <Select> 不支持 <optgroup>：保持「内置在前、自定义在后」的顺序，
   // 末尾固定追加「添加自定义供应商」入口，语义与原生下拉一致。
@@ -1344,7 +1387,7 @@ export function ChatPanel({ disabled }: Props) {
               setProviderId(key)
             }}
           />
-          <div className="ai-model-combo">
+          <div className="ai-model-combo" ref={modelPanel.ref}>
             <input
               className="ai-model-input"
               value={modelId}
@@ -1355,7 +1398,7 @@ export function ChatPanel({ disabled }: Props) {
               onBlur={() => window.setTimeout(() => setModelOpen(false), 150)}
             />
             {modelOpen && modelSuggestions.length > 0 && (
-              <div className="ai-model-panel">
+              <div className="ai-model-panel" style={modelPanel.style ?? { visibility: 'hidden' }}>
                 {modelSuggestions.map(m => (
                   <div
                     key={m}
@@ -1371,7 +1414,7 @@ export function ChatPanel({ disabled }: Props) {
           <Button onClick={loadModels}>{t('aiFetchModels')}</Button>
           {/* 模式选择（1.0.43 参考 CodeBuddy）：触发器展示当前模式，菜单项带图标 / 名称 / 说明 / 勾选。
               名称与行为完全不变——仍是 对话 / 物料 / Build 三种模式，setMode 语义不变。 */}
-          <div className="ai-mode-picker" ref={modePanelRef}>
+          <div className="ai-mode-picker" ref={modePanel.ref}>
             <button
               type="button"
               className={`ai-mode-trigger${modePanelOpen ? ' open' : ''}`}
@@ -1386,7 +1429,14 @@ export function ChatPanel({ disabled }: Props) {
               <span className="ai-mode-caret"><Icon name="Play" size={10} /></span>
             </button>
             {modePanelOpen && (
-              <div className="ai-mode-panel" role="listbox" aria-label={t('aiMode')}>
+              <div
+                className="ai-mode-panel"
+                role="listbox"
+                aria-label={t('aiMode')}
+                // 视口自适应定位（半窗口 / 缩放）：默认左缘对齐触发器，右侧空间不足时右缘对齐；
+                // 未量到坐标前一帧先隐藏，避免闪在错误位置
+                style={modePanel.style ?? { visibility: 'hidden' }}
+              >
                 {(['ask', 'mc', 'build'] as AIAgentMode[]).map(m => (
                   <button
                     key={m}
@@ -1394,6 +1444,8 @@ export function ChatPanel({ disabled }: Props) {
                     role="option"
                     aria-selected={mode === m}
                     className={`ai-mode-option${mode === m ? ' on' : ''}`}
+                    // 不抢焦点：否则点击模式项会把焦点从输入框夺走（与 lifecycle 选项同一套处理）
+                    onMouseDown={e => e.preventDefault()}
                     onClick={() => { setMode(m); setModePanelOpen(false) }}
                   >
                     <span className="ai-mode-option__icon"><Icon name={MODE_META[m].icon as any} size={16} /></span>
@@ -2103,6 +2155,9 @@ function MarkdownLink({ href, children }: { href?: string; children?: React.Reac
                 ? t('aiFileNoUrl')
                 : t('aiFileDownloadFail', { m: res?.error || 'unknown' })
           })
+        } else if (res?.renamed) {
+          // 自动改名落盘（目录已有同名文件且可能被占用）：告知实际文件名
+          void window.mcApi.showMessage({ type: 'info', message: t('downloadRenamed', { p: String(res?.savedPath || '') }) })
         }
       } catch (err: any) {
         void window.mcApi.showMessage({ type: 'error', message: t('fileDownloadFail', { m: err?.message || String(err) }) })
@@ -2135,6 +2190,9 @@ function MarkdownLink({ href, children }: { href?: string; children?: React.Reac
               ? t('fileNeedLogin')
               : t('fileDownloadFail', { m: res?.error || 'unknown' })
           })
+        } else if (res?.renamed) {
+          // 自动改名落盘（目录已有同名文件且可能被占用）：告知实际文件名
+          void window.mcApi.showMessage({ type: 'info', message: t('downloadRenamed', { p: String(res?.savedPath || '') }) })
         }
       } catch (err: any) {
         void window.mcApi.showMessage({ type: 'error', message: t('fileDownloadFail', { m: err?.message || String(err) }) })

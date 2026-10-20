@@ -3,7 +3,7 @@ import { existsSync } from 'fs'
 import { homedir } from 'os'
 import { resolve } from 'path'
 import { AI_IPC } from '@shared/ai-types'
-import { listModels, testProvider, optimizePrompt } from './providerApi'
+import { listModels, testProvider, optimizePrompt, translateDescriptions, cancelTranslate } from './providerApi'
 import { listSkills, importSkillZip, importSkillDir, removeSkill } from './skillRegistry'
 import { listProviders, saveProvider, getSuggestedModels, getPreferences, savePreferences, addCustomProvider, deleteCustomProvider, resetProvider } from './providerStore'
 import { dirBlockReason, makeAlias } from './rootGuard'
@@ -220,6 +220,18 @@ export function registerAIIPC(): void {
   // 增强提示词：一次性请求当前供应商改写草稿，不落历史
   ipcMain.handle(AI_IPC.OPTIMIZE_PROMPT, (_e, input: { providerId: string; modelId?: string; text: string; lang?: string }) =>
     optimizePrompt(input))
+
+  // 物料描述批量翻译（「翻译物料描述」按钮）：一次性请求当前供应商把一批中文描述译成英文，
+  // 不落历史；返回 items 与入参 texts 严格等长同序（缺译回退原文）。taskId 用于取消登记。
+  ipcMain.handle(AI_IPC.TRANSLATE_DESCS, (_e, input: { providerId: string; modelId?: string; texts: string[]; taskId?: string }) =>
+    translateDescriptions(input))
+
+  // 中断一次进行中的翻译（按 taskId）：让在途的 HTTP 请求立刻失败，
+  // 渲染层随后会收到 { canceled: true } 并安静收尾
+  ipcMain.handle(AI_IPC.TRANSLATE_CANCEL, (_e, taskId: string) => {
+    cancelTranslate(String(taskId || ''))
+    return { ok: true }
+  })
 
   // ── MCP 服务（1.0.46）────────────────────────────────────────────
   // 登记 stdio MCP 服务 → 对话前自动拉起 → 工具下发给模型（仅当绑定的技能被勾选）。

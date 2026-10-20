@@ -41,6 +41,10 @@ export function FileTable() {
         } else if (!res?.canceled) {
           void window.mcApi.showMessage({ type: 'error', message: t('fileDownloadFail', { m: res?.error || 'unknown' }) })
         }
+      } else if (res?.renamed) {
+        // 目标目录已有同名文件（且可能正被其他程序打开）时主进程已自动改名落盘：
+        // 成功依旧不弹「已保存」，但改名必须让用户知道实际文件名，否则回去找不到文件
+        void window.mcApi.showMessage({ type: 'info', message: t('downloadRenamed', { p: String(res?.savedPath || '') }) })
       }
     } catch (e: any) {
       void window.mcApi.showMessage({ type: 'error', message: t('fileDownloadFail', { m: e?.message || String(e) }) })

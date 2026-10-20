@@ -14,6 +14,30 @@ export type Tab = 'mat' | 'bom' | 'file'
 
 interface Field { id: string; val: string }
 
+/** 查询动作标识：loading 动画只挂在当前正在执行的那个按钮上（1.0.54） */
+export type BusyAction = '' | 'itemno' | 'bom' | 'file' | 'batch' | 'search'
+
+/** 翻译功能覆盖的页面：物料结果（ITEM_DESC）/ BOM 结果（COMPONENT_ITEM_DESC） */
+export type DescTransKind = 'mat' | 'bom'
+
+/** 单页描述翻译状态（1.0.54） */
+export interface DescTransState {
+  /** 中文原文 → 英文译文 */
+  map: Record<string, string>
+  /** true 显示译文 / false 显示原文（导出 CSV 跟随此开关） */
+  visible: boolean
+  translating: boolean
+  progress: { done: number; total: number } | null
+  /** 用户已确认「取消剩余翻译」：当前批次结束后即停 */
+  cancelRequested: boolean
+  /** 本次翻译任务 id：取消时凭它让主进程中断在途的那一批 HTTP 请求 */
+  taskId: string
+}
+
+function emptyDescTrans(): DescTransState {
+  return { map: {}, visible: true, translating: false, progress: null, cancelRequested: false, taskId: '' }
+}
+
 interface State {
   lang: Lang
   loggedIn: boolean
@@ -55,9 +79,19 @@ interface State {
   bomKwNot: string
   bomSortKey: string
   bomSortAsc: boolean
+  // 1.0.54：物料描述 AI 译文（「翻译物料描述」）。按页面分两套（物料结果 / BOM 结果），
+  // 键是**中文原文**、值是英文译文 —— 按原文键存储而不是行下标，重新查询 / 排序 / 筛选后
+  // 同一条描述仍能命中译文；分批翻译时已译过的自动跳过（增量翻译）。
+  // - visible：当前显示译文还是原文（「显示原文 / 显示译文」切换，导出 CSV 跟随显隐）
+  // - translating / progress：翻译中与 n/m 进度（按钮 loading 文案）
+  // - cancelRequested：用户点了「取消剩余翻译」，当前批次跑完后不再发起新批次
+  descTrans: Record<DescTransKind, DescTransState>
   // UI
   activeTab: Tab
   loading: boolean
+  // 当前正在执行的查询动作（''=无）。查询按钮的 loading 动画只显示在**被点击的那个按钮**上，
+  // 而不是任一查询进行时全部转圈（1.0.54 用户反馈）。
+  busyAction: BusyAction
   error: string
   batchMsg: string
   hiddenCols: string[]
@@ -136,6 +170,13 @@ interface State {
 
   exportMatCSV: () => void
   exportBomCSV: () => void
+  /**
+   * 「翻译物料描述」：用 AI 助手里配置的供应商把当前结果集的中文描述译成英文
+   * （分批、带进度；翻译中再次调用 = 弹确认取消剩余批次）。
+   */
+  translateDescs: (kind: DescTransKind) => Promise<void>
+  /** 「显示原文 / 显示译文」切换（导出 CSV 跟随显隐） */
+  toggleDescVisible: (kind: DescTransKind) => void
 
   clearLogin: () => void
   checkUpdate: () => Promise<void>
@@ -144,9 +185,35 @@ interface State {
 
   // 内部辅助
   applyFilterInternal: () => void
+  /** 按当前 bomKw / bomKwNot / bomSortKey 从 bomData 重算 bomFiltered（各入口共用） */
+  recomputeBomFiltered: () => void
 }
 
 const STATUS_CLS_MAP = STATUS_CLS
+
+/** 每个翻译页面要替换的描述字段：物料结果 → ITEM_DESC；BOM 结果 → 组件描述 */
+const DESC_FIELD: Record<DescTransKind, string> = {
+  mat: 'ITEM_DESC',
+  bom: 'COMPONENT_ITEM_DESC'
+}
+
+/** 按译文缓存替换指定描述列（仅当该页处于「显示译文」时）；未翻译的行保持中文原值。
+ *  只换字段值，列序 / 表头 / 其他字段原样不动；译文按「中文原文」为键，错行不会错位。 */
+function applyDescTrans(rows: any[], st: DescTransState, field: string): any[] {
+  if (!st.visible || !Object.keys(st.map).length) return rows
+  return rows.map((r: any) => {
+    const zh = String(r[field] ?? '')
+    const en = st.map[zh]
+    return en ? { ...r, [field]: en } : r
+  })
+}
+
+/** 当前结果集里尚未翻译的描述（去重、保序）—— 已译过的按原文键跳过，支持增量续翻 */
+function pendingDescs(rows: any[], st: DescTransState, field: string): string[] {
+  return Array.from(new Set(
+    (rows || []).map((r: any) => String(r[field] ?? '').trim()).filter(Boolean)
+  )).filter(d => !st.map[d])
+}
 
 // 通过主进程代理 HTTP 请求（自动带上 partition Cookie）
 async function fetchJSON(url: string, _retry = true): Promise<any> {
@@ -227,7 +294,8 @@ export const useStore = create<State>((set, get) => ({
   allData: [], filtered: [], bomData: [], bomFiltered: [], fileData: [], notFound: [],
   kw: '', kwNot: '', typeFilter: '', selectedStatuses: [], dedup: false,
   sortKey: '', sortAsc: true, bomKw: '', bomKwNot: '', bomSortKey: '', bomSortAsc: true,
-  activeTab: 'mat', loading: false, error: '', batchMsg: '',
+  descTrans: { mat: emptyDescTrans(), bom: emptyDescTrans() },
+  activeTab: 'mat', loading: false, busyAction: '', error: '', batchMsg: '',
   hiddenCols: (() => { try { return JSON.parse(localStorage.getItem('mc-hidden-cols') || '[]') } catch { return [] } })(),
   updateInfo: { hasUpdate: false, checking: false },
   matExpandedKeys: new Set(),
@@ -286,12 +354,27 @@ export const useStore = create<State>((set, get) => ({
     set({ filtered })
   },
 
+  // BOM 筛选重算：bomKw / bomKwNot → applyBomFilter → bomSortKey 排序。
+  // searchBom / setBomKw / setBomKwNot / bomSortBy 全部走这一个函数，
+  // 保证「换料号重新查 BOM 后，已输入的关键词/排除词/排序立即作用于新结果集」
+  // （此前 searchBom 直接 bomFiltered: rows 透传，旧关键词对新结果不生效，
+  // 用户必须删掉再输一遍才触发过滤）。
+  recomputeBomFiltered: () => {
+    const s = get()
+    let ff = applyBomFilter(s.bomData, s.bomKw, s.bomKwNot)
+    if (s.bomSortKey) {
+      const numeric = s.bomSortKey === 'ON_HAND_QTY' || s.bomSortKey === 'BOM_LEVEL'
+      ff = sortRows(ff, s.bomSortKey, s.bomSortAsc, numeric) as MaterialRow[]
+    }
+    set({ bomFiltered: ff })
+  },
+
   // V1.0.6：搜索条件（描述关键词）不再拼接料号 ITEM_NUMBER，仅按描述查询
   searchMaterial: async () => {
     const s = get()
     const descQ = s.fields.map(f => f.val.trim()).filter(Boolean).join(' && ')
     if (!descQ) { set({ error: s.t('errNoInput') }); return }
-    set({ loading: true, error: '' })
+    set({ loading: true, busyAction: 'search', error: '' })
     try {
       const url = buildSearchUrl(descQ)
       const json = await fetchJSON(url)
@@ -301,7 +384,7 @@ export const useStore = create<State>((set, get) => ({
       set({ activeTab: 'mat' })
     } catch (e: any) {
       set({ error: s.t('errSearch', { m: e.message }) })
-    } finally { set({ loading: false }) }
+    } finally { set({ loading: false, busyAction: '' }) }
   },
 
   // V1.0.6：查料号改为独立查询，仅按料号 ITEM_NUMBER 查询，不与描述条件拼接
@@ -309,7 +392,7 @@ export const useStore = create<State>((set, get) => ({
     const s = get()
     const no = s.itemNo.trim()
     if (!no) { set({ error: s.t('errNoInput') }); return }
-    set({ loading: true, error: '' })
+    set({ loading: true, busyAction: 'itemno', error: '' })
     try {
       const url = buildItemNoUrl(no)
       const json = await fetchJSON(url)
@@ -319,14 +402,14 @@ export const useStore = create<State>((set, get) => ({
       set({ activeTab: 'mat' })
     } catch (e: any) {
       set({ error: s.t('errSearch', { m: e.message }) })
-    } finally { set({ loading: false }) }
+    } finally { set({ loading: false, busyAction: '' }) }
   },
 
   batchSearch: async () => {
     const s = get()
     const list = parseBatchItemNos(s.batchText)
     if (!list.length) { set({ error: s.t('errNoBatch') }); return }
-    set({ loading: true, error: '', batchMsg: '' })
+    set({ loading: true, busyAction: 'batch', error: '', batchMsg: '' })
     const results: MaterialRow[] = []
     const notFound: string[] = []
     const failed: string[] = []
@@ -343,7 +426,7 @@ export const useStore = create<State>((set, get) => ({
     }
     set({ allData: results, selectedStatuses: [], batchMsg: '', notFound, matExpandedKeys: new Set() })
     get().applyFilterInternal()
-    set({ activeTab: 'mat', loading: false })
+    set({ activeTab: 'mat', loading: false, busyAction: '' })
     const msgs: string[] = []
     if (notFound.length) msgs.push(s.t('errNotFound', { n: notFound.length, list: notFound.join('、') }))
     if (failed.length) msgs.push(s.t('errFailed', { n: failed.length, list: failed.join('、') }))
@@ -355,13 +438,16 @@ export const useStore = create<State>((set, get) => ({
     const no = preset || s.itemNo
     if (!no) { set({ error: s.t('errNoItemBom') }); return }
     if (preset) set({ itemNo: preset })
-    set({ loading: true, error: '' })
+    set({ loading: true, busyAction: 'bom', error: '' })
     try {
       const json = await fetchJSON(buildBomUrl(no))
       const rows = normalizeRows(json)
-      set({ bomData: rows, bomFiltered: rows, bomExpandedKeys: new Set(), ...(switchTab ? { activeTab: 'bom' } : {}) })
+      // 先落 bomData，再按当前 bomKw/bomKwNot/排序重算 bomFiltered：
+      // 换料号重查后筛选条件继续生效，不需要用户删掉关键词再输一遍
+      set({ bomData: rows, bomExpandedKeys: new Set(), ...(switchTab ? { activeTab: 'bom' } : {}) })
+      get().recomputeBomFiltered()
     } catch (e: any) { set({ error: s.t('errBomFail', { m: e.message }) }) }
-    finally { set({ loading: false }) }
+    finally { set({ loading: false, busyAction: '' }) }
   },
 
   searchFile: async (preset, switchTab = true) => {
@@ -369,13 +455,13 @@ export const useStore = create<State>((set, get) => ({
     const no = preset || s.itemNo
     if (!no) { set({ error: s.t('errNoItemFile') }); return }
     if (preset) set({ itemNo: preset })
-    set({ loading: true, error: '' })
+    set({ loading: true, busyAction: 'file', error: '' })
     try {
       const json = await fetchJSON(buildFileUrl(no))
       const rows = normalizeRows(json)
       set({ fileData: rows, ...(switchTab ? { activeTab: 'file' } : {}) })
     } catch (e: any) { set({ error: s.t('errFileFail', { m: e.message }) }) }
-    finally { set({ loading: false }) }
+    finally { set({ loading: false, busyAction: '' }) }
   },
 
   // 三个筛选输入走防抖（见 scheduleFilter）：值即时更新，重算 filtered 延后到停止输入。
@@ -411,26 +497,14 @@ export const useStore = create<State>((set, get) => ({
     get().applyFilterInternal()
   },
 
-  setBomKw: (v) => {
-    const s = get()
-    const f = applyBomFilter(s.bomData, v, s.bomKwNot)
-    let ff = f
-    if (s.bomSortKey) ff = sortRows(ff, s.bomSortKey, s.bomSortAsc, s.bomSortKey === 'ON_HAND_QTY' || s.bomSortKey === 'BOM_LEVEL') as MaterialRow[]
-    set({ bomKw: v, bomFiltered: ff })
-  },
-  setBomKwNot: (v) => {
-    const s = get()
-    const f = applyBomFilter(s.bomData, s.bomKw, v)
-    let ff = f
-    if (s.bomSortKey) ff = sortRows(ff, s.bomSortKey, s.bomSortAsc, s.bomSortKey === 'ON_HAND_QTY' || s.bomSortKey === 'BOM_LEVEL') as MaterialRow[]
-    set({ bomKwNot: v, bomFiltered: ff })
-  },
+  setBomKw: (v) => { set({ bomKw: v }); get().recomputeBomFiltered() },
+  setBomKwNot: (v) => { set({ bomKwNot: v }); get().recomputeBomFiltered() },
   bomSortBy: (k) => {
     const s = get()
     const asc = s.bomSortKey === k ? !s.bomSortAsc : true
-    let ff = applyBomFilter(s.bomData, s.bomKw)
-    ff = sortRows(ff, k, asc, k === 'ON_HAND_QTY' || k === 'BOM_LEVEL') as MaterialRow[]
-    set({ bomSortKey: k, bomSortAsc: asc, bomFiltered: ff })
+    set({ bomSortKey: k, bomSortAsc: asc })
+    // 排序同样要走重算（此前这里漏传 bomKwNot，排序后排除词会悄悄失效）
+    get().recomputeBomFiltered()
   },
 
   setActiveTab: (t) => set({ activeTab: t }),
@@ -477,6 +551,7 @@ export const useStore = create<State>((set, get) => ({
     itemNo: '', batchText: '', allData: [], filtered: [], bomData: [], bomFiltered: [],
     fileData: [], notFound: [], kw: '', kwNot: '', typeFilter: '', selectedStatuses: [], dedup: false,
     sortKey: '', sortAsc: true, bomKw: '', bomKwNot: '', bomSortKey: '', bomSortAsc: true,
+    descTrans: { mat: emptyDescTrans(), bom: emptyDescTrans() },
     activeTab: 'mat', error: '', batchMsg: '', matExpandedKeys: new Set(), bomExpandedKeys: new Set(),
     fields: [{ id: 'f1', val: '' }, { id: 'f2', val: '' }, { id: 'f3', val: '' }]
   }),
@@ -488,13 +563,112 @@ export const useStore = create<State>((set, get) => ({
     try {
       const headers = s.t('csvMatHeaders') as unknown as string[]
       const keys = ['ITEM_NUMBER', 'ITEM_DESC', 'ITEM_TYPE', 'INV_STATUS_NAME', 'K3_ITEM_NUMBER', 'ON_HAND_QTY', 'DEVELOPMENT_SUB', 'TRACK_SUB', 'PRODUCT_ORDER_SUB', 'UPDATE_ORDER_SUB']
-      const csv = toCSV(headers, keys, s.filtered, new Set(['ITEM_NUMBER', 'K3_ITEM_NUMBER']))
+      // 描述列用 AI 译文（若有且当前显示译文）：只替换 ITEM_DESC 的值，列序 / 表头 /
+      // 其他字段原样不动，未翻译的行保持中文原值 —— 译文按「中文原文」为键，错行不会错位
+      const rows = applyDescTrans(s.filtered, s.descTrans.mat, DESC_FIELD.mat)
+      const csv = toCSV(headers, keys, rows, new Set(['ITEM_NUMBER', 'K3_ITEM_NUMBER']))
       const filePath = await window.mcApi.saveCsv(csv, `${s.t('csvMat')}_${new Date().toISOString().slice(0, 10)}.csv`)
       if (!filePath) { set({ error: '' }) }
     } catch (e: any) {
       set({ error: s.t('errCsvExport', { m: e?.message || String(e) }) })
     }
   },
+
+  // 「翻译物料描述」（1.0.54，物料 / BOM 两页通用）：用 AI 助手里配置的供应商，把当前
+  // 结果集里**尚未翻译**的中文描述分批译成英文（每批 15 条，进度驱动按钮 loading 文案）。
+  // 已译过的描述按原文键跳过，重复点击只翻新增部分；某批失败保留已译结果并提示，可续翻。
+  // 翻译中再次点击 = 取消：弹确认，确认则置取消标志（在途批次跑完后不再发起新批次），
+  // 取消则继续翻译。供应商选择与 ChatPanel 初始化一致：
+  // 上次使用（preferences.lastProviderId）→ 第一个有 Key 的 → 第一个。
+  translateDescs: async (kind) => {
+    const s = get()
+    const st = s.descTrans[kind]
+    const field = DESC_FIELD[kind]
+    const rows = kind === 'mat' ? s.filtered : s.bomFiltered
+    const patchKind = (patch: Partial<DescTransState>) =>
+      set(s2 => ({ descTrans: { ...s2.descTrans, [kind]: { ...s2.descTrans[kind], ...patch } } }))
+
+    // 翻译中再次点击 = 取消：弹确认，确认则置取消标志，并**立刻让主进程中断在途的那一批请求**
+    // （只靠批次间的标志不够——最后一批在途时要等它整个跑完，用户观感就是「点了取消没反应」）
+    if (st.translating) {
+      const ok = await window.mcApi.showConfirm({
+        message: s.t('translateCancelConfirm', { done: st.progress?.done ?? 0, total: st.progress?.total ?? 0 }),
+        lang: s.lang
+      })
+      if (ok) {
+        patchKind({ cancelRequested: true })
+        if (st.taskId) void window.mcApi.ai.cancelTranslate(st.taskId)
+      }
+      return
+    }
+
+    const todo = pendingDescs(rows, st, field)
+    if (!todo.length) return
+    let providerId = ''
+    let modelId: string | undefined
+    try {
+      const bundle: any = await window.mcApi.ai.getProviders()
+      const prefs = bundle?.preferences || {}
+      const providers: any[] = bundle?.providers || []
+      const restored = prefs.lastProviderId ? providers.find(p => p.id === prefs.lastProviderId) : undefined
+      const target = restored || providers.find(p => p.hasApiKey) || providers[0]
+      providerId = target?.id || ''
+      modelId = prefs.lastModelId || target?.defaultModel || undefined
+      // 没配 Key（且不是本地 Ollama）时不发请求：直接引导去 AI 助手配置
+      if (providerId && !target?.hasApiKey && providerId !== 'ollama') {
+        void window.mcApi.showMessage({ type: 'warning', message: s.t('translateNeedAi'), lang: s.lang })
+        return
+      }
+    } catch { /* 拿不到供应商列表：providerId 为空，主进程会给出明确报错 */ }
+    const taskId = `tr-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+    patchKind({ translating: true, taskId, progress: { done: 0, total: todo.length }, cancelRequested: false })
+    set({ error: '' })
+    const BATCH = 15
+    const merged = { ...st.map }
+    let doneCount = 0
+    let canceled = false
+    try {
+      for (let i = 0; i < todo.length; i += BATCH) {
+        // 批次之间检查取消标志（在途批次已被 cancelTranslate 中断，双保险）
+        if (get().descTrans[kind].cancelRequested) { canceled = true; break }
+        const chunk = todo.slice(i, i + BATCH)
+        const res: any = await window.mcApi.ai.translateDescs({ providerId, modelId, texts: chunk, taskId })
+        if (!res?.ok) {
+          // 被取消：安静收尾，不当失败弹错
+          if (res?.canceled) { canceled = true; break }
+          throw new Error(res?.message || 'translate failed')
+        }
+        ;(res.items || []).forEach((txt: string, idx: number) => {
+          const key = chunk[idx]
+          const val = String(txt ?? '').trim()
+          // 与原文相同（模型没译）时不写入缓存：按钮保持可点，下次还能重试
+          if (key && val && val !== key) merged[key] = val
+        })
+        doneCount = Math.min(i + BATCH, todo.length)
+        patchKind({ map: { ...merged }, progress: { done: doneCount, total: todo.length } })
+      }
+    } catch (e: any) {
+      void window.mcApi.showMessage({ type: 'error', message: s.t('translateFail', { m: e?.message || String(e) }), lang: s.lang })
+    } finally {
+      // 收尾：清 translating / progress / cancelRequested / taskId；正常完成则切回「显示译文」，
+      // 让用户直接看到成果；取消时维持当前显隐，不强行切换
+      patchKind({
+        translating: false,
+        progress: null,
+        cancelRequested: false,
+        taskId: '',
+        visible: canceled ? get().descTrans[kind].visible : true
+      })
+      if (canceled) {
+        void window.mcApi.showMessage({ type: 'info', message: s.t('translateCanceled', { n: doneCount }), lang: s.lang })
+      }
+    }
+  },
+
+  /** 「显示原文 / 显示译文」切换：只改显隐，不动译文缓存；导出 CSV 跟随显隐 */
+  toggleDescVisible: (kind) => set(s => ({
+    descTrans: { ...s.descTrans, [kind]: { ...s.descTrans[kind], visible: !s.descTrans[kind].visible } }
+  })),
   exportBomCSV: async () => {
     flushPendingFilter() // 同 exportMatCSV：导出前先把防抖中的过滤跑完
     const s = get()
@@ -502,7 +676,9 @@ export const useStore = create<State>((set, get) => ({
     try {
       const headers = s.t('csvBomHeaders') as unknown as string[]
       const keys = ['BOM_LEVEL', 'COMPONENT_ITEM', 'COMPONENT_ITEM_DESC', 'K3_ITEM_NUMBER', 'PRIMARY_UOM_CODE', 'LOSS_RATE', 'INVERSE_QUANTITY', 'COMPONENT_REFERENCE_DESIGNATOR', 'COMPONENT_REMARKS', 'ON_HAND_QTY', 'DEVELOPMENT_SUB', 'TRACK_SUB', 'PRODUCT_ORDER_SUB', 'UPDATE_ORDER_SUB', 'SHIP_LOT_QTY']
-      const csv = toCSV(headers, keys, s.bomFiltered, new Set(['COMPONENT_ITEM', 'K3_ITEM_NUMBER']))
+      // 组件描述列用 AI 译文（若有且当前显示译文），其余字段与列序原样不动
+      const rows = applyDescTrans(s.bomFiltered, s.descTrans.bom, DESC_FIELD.bom)
+      const csv = toCSV(headers, keys, rows, new Set(['COMPONENT_ITEM', 'K3_ITEM_NUMBER']))
       const filePath = await window.mcApi.saveCsv(csv, `${s.t('csvBom')}_${new Date().toISOString().slice(0, 10)}.csv`)
       if (!filePath) { set({ error: '' }) }
     } catch (e: any) {

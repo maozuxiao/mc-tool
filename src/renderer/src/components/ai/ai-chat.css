@@ -288,7 +288,8 @@
   top: calc(100% + 6px);
   left: 0;
   z-index: 40;
-  width: 300px;
+  /* 320px：说明文案改为自动换行后留足一行宽度，减少折行；英文长描述折行也放得下 */
+  width: 320px;
   padding: 6px;
   background: var(--mc-surface);
   border: 1px solid var(--mc-line);
@@ -325,13 +326,16 @@
 }
 .ai-mode-option__body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .ai-mode-option__name { font-size: var(--mc-font-base); font-weight: 700; }
+/* 模式说明改为自动换行：原先 nowrap + ellipsis 会把长描述（如「查询 OA 物料、
+   库存、BOM 与规格文件」）截断，缩放模式下更明显（用户反馈显示不完全）。
+   允许折行 + 行高兜底，面板高度自适应；中英文描述都不再被切。 */
 .ai-mode-option__desc {
   font-size: 11.5px;
   color: var(--mc-ink-soft);
   font-weight: 500;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.45;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .ai-mode-option__check { flex: none; color: var(--mc-accent); display: inline-flex; }
 /* 已删除：.ai-workspace / .ai-workspace .mq-btn* —— 工作区按钮改由设置面板的
