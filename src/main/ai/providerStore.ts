@@ -49,6 +49,67 @@ export function savePreferences(patch: AIPreferences): AIPreferences {
   return next
 }
 
+// ── 模型清单缓存（1.0.56）────────────────────────────────────────────
+// 点过「获取模型」之后把结果落盘：重启应用、切回该供应商时下拉里直接可选，
+// 不用为了「看一眼有哪些模型」再打一次 /models。此前只存在渲染进程的
+// `modelOptions` state 里，关面板 / 关应用即丢，只剩代码里写死的预设候选。
+//
+// 键 = providerId + baseUrl：改 Base URL 就是换了一套网关，旧清单必须作废；
+// 改 API Key 会显式清空该供应商的缓存（不同 key 能看到的清单可能不同）。
+const MODELS_CACHE_PATH = () => join(app.getPath('userData'), 'ai-models-cache.json')
+const MODELS_CACHE_TTL = 7 * 24 * 60 * 60 * 1000
+
+interface ModelsCacheEntry { models: string[]; fetchedAt: number }
+type ModelsCache = Record<string, ModelsCacheEntry>
+
+function modelsCacheKey(providerId: string, baseUrl: string): string {
+  return `${providerId}::${(baseUrl || '').replace(/\/+$/, '')}`
+}
+
+function readModelsCache(): ModelsCache {
+  try {
+    if (!existsSync(MODELS_CACHE_PATH())) return {}
+    const parsed = JSON.parse(readFileSync(MODELS_CACHE_PATH(), 'utf8'))
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch { return {} }
+}
+
+function writeModelsCache(cache: ModelsCache): void {
+  try { writeFileSync(MODELS_CACHE_PATH(), JSON.stringify(cache, null, 2), 'utf8') } catch { /* 忽略写入失败 */ }
+}
+
+/** 读缓存：过期视为「没有」，但不在读取时删文件（避免每次打开面板都写盘） */
+export function getCachedModels(providerId: string, baseUrl: string): string[] {
+  const entry = readModelsCache()[modelsCacheKey(providerId, baseUrl)]
+  if (!entry || !Array.isArray(entry.models) || !entry.models.length) return []
+  if (Date.now() - (entry.fetchedAt || 0) > MODELS_CACHE_TTL) return []
+  return entry.models.filter(m => typeof m === 'string' && m)
+}
+
+/** 「获取模型」成功后调用；顺手清掉同一供应商下其他 baseUrl 的旧键 */
+export function saveCachedModels(providerId: string, baseUrl: string, models: string[]): void {
+  const cache = readModelsCache()
+  const key = modelsCacheKey(providerId, baseUrl)
+  for (const k of Object.keys(cache)) {
+    if (k !== key && k.startsWith(`${providerId}::`)) delete cache[k]
+  }
+  cache[key] = {
+    models: Array.from(new Set(models.filter(m => typeof m === 'string' && m))),
+    fetchedAt: Date.now()
+  }
+  writeModelsCache(cache)
+}
+
+/** 清空某供应商的缓存：换 API Key / 重置配置时调用 */
+export function clearCachedModels(providerId: string): void {
+  const cache = readModelsCache()
+  let changed = false
+  for (const k of Object.keys(cache)) {
+    if (k.startsWith(`${providerId}::`)) { delete cache[k]; changed = true }
+  }
+  if (changed) writeModelsCache(cache)
+}
+
 export const PROVIDER_PRESETS: AIProviderPreset[] = [
   {
     id: 'openai',
@@ -63,8 +124,19 @@ export const PROVIDER_PRESETS: AIProviderPreset[] = [
     name: 'OpenCode Go',
     protocol: 'openai-compatible',
     baseUrl: 'https://opencode.ai/zen/go/v1',
-    defaultModel: 'deepseek-v4-flash',
-    suggestedModels: ['deepseek-v4-flash', 'deepseek-v4-pro', 'glm-5.3', 'glm-5.3-flash', 'qwen3.8-max', 'kimi-k3', 'grok-4.6']
+    // 1.0.56：原默认 `deepseek-v4-flash` 已在 Go / Zen 两份实时清单里都不存在
+    // （现役是 `deepseek-v4.1-flash`），用默认值发第一条消息必 503
+    // `Endpoint is unavailable`。预设候选按 GET /zen/go/v1/models 实测清单重写。
+    defaultModel: 'deepseek-v4.1-flash',
+    suggestedModels: [
+      'deepseek-v4.1-flash', 'deepseek-v4-pro',
+      'glm-5.3', 'glm-5.3-flash',
+      'qwen3.8-max', 'qwen3.8-flash',
+      'kimi-k3', 'kimi-k2.7-code',
+      'grok-4.7', 'grok-4.6',
+      'minimax-m3', 'mimo-v2.6-pro',
+      'longcat-2.0', 'hy4-preview', 'step-5-preview'
+    ]
   },
 
   {
@@ -81,17 +153,20 @@ export const PROVIDER_PRESETS: AIProviderPreset[] = [
     name: 'OpenCode Zen（含免费模型）',
     protocol: 'openai-compatible',
     baseUrl: 'https://opencode.ai/zen/v1',
-    defaultModel: 'deepseek-v4-flash',
+    defaultModel: 'deepseek-v4.1-flash',
     suggestedModels: [
-      // ── 付费（常用，默认推荐）──
-      'deepseek-v4-flash', 'deepseek-v4-pro',
-      'glm-5.2', 'glm-5.1',
+      // ── 付费（常用，默认推荐）；按 GET /zen/v1/models 实测清单重写（1.0.56）──
+      'deepseek-v4.1-flash', 'deepseek-v4-pro',
+      'glm-5.3', 'glm-5.3-flash',
       'kimi-k3', 'kimi-k2.7-code',
-      'minimax-m3', 'grok-4.6',
-      // ── 限时免费（不稳定，可能报 unavailable）──
-      'big-pickle', 'mimo-v2.5-free', 'ox-alpha-free', 'hy3-free',
-      'nemotron-3-ultra-free', 'nemotron-3.5-lightning-free',
-      'x-preview-f-free'
+      'minimax-m3', 'grok-4.6', 'grok-4.7',
+      'claude-sonnet-5-5', 'claude-opus-5-5',
+      'gpt-5.5', 'gpt-6-sol',
+      'gemini-3.1-pro', 'qwen3.8-max',
+      // ── 限时免费（不稳定，可能报 unavailable；且可能收集数据改进模型）──
+      'deepseek-v4.1-flash-free', 'glm-5.3-flash-free',
+      'minimax-m3.1-flash-free', 'mimo-v2.6-flash-free',
+      'big-pickle', 'beam-free', 'longcat-2.5-preview-free'
     ]
   },
   {
@@ -287,6 +362,8 @@ export function saveProvider(input: {
     else custom.push(updated)
     settings['__custom'] = custom
     writeSettings(settings)
+    // 换了 API Key / Base URL：能看到的模型清单可能不同，缓存作废
+    if (input.apiKey !== undefined) clearCachedModels(input.id)
     return publicProvider(updated)
   }
   const preset = PROVIDER_PRESETS.find(p => p.id === input.id)
@@ -308,6 +385,8 @@ export function saveProvider(input: {
   }
   settings[preset.id] = saved
   writeSettings(settings)
+  // 换了 API Key / Base URL：能看到的模型清单可能不同，缓存作废
+  if (input.apiKey !== undefined) clearCachedModels(preset.id)
   return publicProvider(saved)
 }
 
@@ -369,6 +448,8 @@ export function resetProvider(id: string): AIProviderConfig {
     }
     settings[preset.id] = saved
     writeSettings(settings)
+    // 重置 = 换了 key / 回了默认地址：缓存的模型清单不再可信
+    clearCachedModels(preset.id)
     return publicProvider(saved)
   }
   const custom = Array.isArray(settings['__custom']) ? (settings['__custom'] as StoredProvider[]) : []
@@ -378,12 +459,19 @@ export function resetProvider(id: string): AIProviderConfig {
   custom[idx] = updated
   settings['__custom'] = custom
   writeSettings(settings)
+  clearCachedModels(id)
   return publicProvider(updated)
 }
 
 export function getSuggestedModels(providerId: string): string[] {
   const preset = PROVIDER_PRESETS.find(p => p.id === providerId)
-  if (preset) return preset.suggestedModels
-  const stored = readAll().custom.find(c => c.id === providerId)
-  return stored?.suggestedModels || []
+  const { settings, custom } = readAll()
+  const stored = preset ? settings[preset.id] : custom.find(c => c.id === providerId)
+  const baseUrl = (stored?.baseUrl || preset?.baseUrl || '').replace(/\/+$/, '')
+  // 缓存（上次「获取模型」拿到的真实目录）排在前面，预设排在后面兜底：
+  // 预设写死在代码里，网关一换型号就过期（1.0.56 就是栽在 `deepseek-v4-flash` 上），
+  // 但缓存也可能过期/为空，两个都留着比只留一个稳。
+  const cached = getCachedModels(providerId, baseUrl)
+  const declared = preset ? preset.suggestedModels : (stored?.suggestedModels || [])
+  return Array.from(new Set([...cached, ...declared]))
 }

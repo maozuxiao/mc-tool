@@ -4,7 +4,7 @@
 
 - 仓库：https://github.com/maozuxiao/mc-tool
 - 技术栈：Electron 33 + electron-vite + React 18 + TypeScript + Zustand，UI 组件库 [`animal-island-ui`](https://www.npmjs.com/package/animal-island-ui)；AI 面板里的操作类小图标用 [`naive-icons`](https://www.npmjs.com/package/naive-icons)（同为手绘 naive 风，按需引 `svg/*.svg?raw` 并改色跟随主题，见 `src/renderer/src/components/NaiveIcon.tsx`）
-- 当前版本：`1.0.55`（`package.json` 的 `version` 为准）
+- 当前版本：`1.0.56`（`package.json` 的 `version` 为准）
 
 ---
 
@@ -136,6 +136,10 @@
 > API Key 用 Electron `safeStorage` 加密后存到 `userData/ai-providers.json`；若系统不可用加密则明文落盘（带 `plain:` 前缀）。**密钥只保存在本机，不上传任何服务器。**
 >
 > **配置是全局的**：服务商与模型的选择不随会话切换而改变。上次使用的组合写入 `userData/ai-prefs.json`，下次打开应用自动恢复，不会被预设默认值覆盖。
+>
+> **模型候选**：预设候选写死在代码里，网关一换型号就会过期，所以点过「获取模型」之后会把那次结果缓存到 `userData/ai-models-cache.json`（按服务商 + Base URL 分键，7 天有效），重启后下拉里仍是真实清单；换 API Key 或「重置配置」会清空该服务商缓存。
+>
+> **thinking 模型**（如 DeepSeek V4.1 Flash）：思维链 `reasoning_content` 会随 assistant 轮一并回传并落库，多轮工具调用不会因「缺思维链」报 400；旧版本建的会话若历史已被污染，会提示新建会话。请求 URL 与错误原文见 `userData/debug-ai.log`。
 
 **② 开始对话**
 
@@ -404,9 +408,9 @@ npm run pack:all   # 全平台
 ```
 dist/
 ├─ latest.yml                            # 自动更新元数据
-├─ mc-material-query-setup-1.0.55.exe            # NSIS 安装包
-├─ mc-material-query-setup-1.0.55.exe.blockmap  # 增量更新块映射
-└─ mc-material-query-1.0.55.exe   # 便携版
+├─ mc-material-query-setup-1.0.56.exe            # NSIS 安装包
+├─ mc-material-query-setup-1.0.56.exe.blockmap  # 增量更新块映射
+└─ mc-material-query-1.0.56.exe   # 便携版
 ```
 
 > macOS 交叉编译在 Windows 上不可靠，DMG 请在 macOS 上打包。

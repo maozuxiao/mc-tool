@@ -5,7 +5,9 @@ export const I18N: Record<string, Record<string, string | string[]>> = {
     help: '帮助',
     about: '关于',
     // 品牌图标悬停提示（库 <Tooltip variant="default">）
-    brandOpenOa: '打开 OA 工作台（应用内免登录打开；按住 Ctrl / ⌘ 点击改用系统浏览器）',
+    // 1.0.56：去掉「按住 Ctrl / ⌘ 点击改用系统浏览器」—— 该分支 1.0.40 就删了，
+    // 文案却一直留着：既点了没反应，又把提示条撑成两行（用户实测截图）。
+    brandOpenOa: '打开 OA 工作台（应用内免登录打开）',
     // 顶栏下班倒计时（库 <Countdown variant="default">，见 WorkCountdown.tsx）
     offWorkPrefix: '距离下班还有',
     restDayWish: '今天不上班，好好休息吧~',
@@ -470,7 +472,7 @@ aiImgLoadFail: '图片加载失败（链接可能已过期）',
     help: 'Help',
     about: 'About',
     // Hover hint on the brand icon (library <Tooltip variant="default">)
-    brandOpenOa: 'Open the OA workspace (in-app, already signed in; hold Ctrl / ⌘ and click to use the system browser)',
+    brandOpenOa: 'Open the OA workspace (in-app, already signed in)',
     // Header countdown to the end of the workday (library <Countdown variant="default">)
     offWorkPrefix: 'Off work in',
     restDayWish: 'No work today — enjoy your day off~',

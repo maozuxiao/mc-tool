@@ -1,6 +1,6 @@
 import { net } from 'electron'
 import type { AIModelInfo } from '@shared/ai-types'
-import { getProvider } from './providerStore'
+import { getProvider, saveCachedModels } from './providerStore'
 
 /**
  * 增强提示词（1.0.43）：用当前供应商把用户的草稿改写成更明确、可执行的提示词。
@@ -156,12 +156,16 @@ export async function listModels(providerId: string): Promise<AIModelInfo[]> {
   if (!apiKey && providerId !== 'ollama') throw new Error('请先配置 API Key')
   const data = await requestJSON<any>(`${config.baseUrl}/models`, apiKey)
   const models = Array.isArray(data?.data) ? data.data : []
-  return models.map((m: any) => ({
+  const out = models.map((m: any) => ({
     id: String(m.id || m.name || ''),
     name: String(m.name || m.id || ''),
     contextLength: m.context_length || m.contextLength || undefined,
     maxOutputTokens: m.max_output_tokens || m.maxOutputTokens || undefined
   })).filter((m: AIModelInfo) => m.id)
+  // 落盘（1.0.56）：只成功时写，失败保留旧缓存 —— 免得一次网络抖动把可用清单清空。
+  // 下次启动 / 切回该供应商时，下拉里直接就是这份真实清单，不必再点「获取模型」。
+  try { saveCachedModels(providerId, config.baseUrl, out.map((m: AIModelInfo) => m.id)) } catch { /* 缓存失败不影响本次返回 */ }
+  return out
 }
 
 export async function testProvider(providerId: string, modelId?: string): Promise<{ ok: boolean; models: number; message: string }> {

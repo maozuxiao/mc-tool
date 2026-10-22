@@ -291,10 +291,24 @@ async function streamOpenAICompatible(input: {
         },
         ...conversation.map(m => {
           if (m.role === 'tool') return { role: 'tool', tool_call_id: m.tool_call_id, content: m.content }
-          if (m.tool_calls) return { role: 'assistant', content: m.content || '', tool_calls: m.tool_calls }
+          // thinking 模式的思维链回传（1.0.56）：同供应商历史里存过 reasoning 就原样带回，
+          // 换供应商则不带（别家的 OpenAI 兼容端点多半不认这个字段，会被判非法参数）。
+          const keepReasoning = m.reasoning !== undefined
+            && (!m.providerId || m.providerId === payload.providerId)
+          if (m.tool_calls) {
+            return {
+              role: 'assistant',
+              content: m.content || '',
+              tool_calls: m.tool_calls,
+              ...(keepReasoning ? { reasoning_content: m.reasoning } : {})
+            }
+          }
           // 历史里的用户消息若带附件，同样还原成 content 数组：图片继续可见、文本继续内联
           if (m.role === 'user' && m.attachments?.length) {
             return { role: 'user', content: buildUserContent({ content: m.content, attachments: m.attachments }) }
+          }
+          if (m.role === 'assistant' && keepReasoning) {
+            return { role: 'assistant', content: m.content, reasoning_content: m.reasoning }
           }
           return { role: m.role, content: m.content }
         })
@@ -304,6 +318,11 @@ async function streamOpenAICompatible(input: {
     // 最后一轮强制不带 tools，让模型基于已收集的信息直接总结，而非再发起第 N+1 次工具调用。
     const tools = isLastRound ? [] : toolsForMode(mode, hasWorkspace, payload.enabledSkills)
     if (tools.length) body.tools = tools
+
+    // 诊断日志（1.0.56）：thinking 模型报 400 时，第一件要能确认的事就是「历史里到底带没带
+    // 思维链」。只记条数，不记内容、不记正文。
+    const replayed = (body.messages as any[]).filter(m => m.reasoning_content !== undefined).length
+    if (replayed) aiLog(`[AI] round ${round + 1}: history carries reasoning_content x${replayed}`)
 
     // 本次请求独立取消器：用户 stop + 60s 超时都能中断
     const fetchController = new AbortController()
@@ -351,6 +370,14 @@ async function streamOpenAICompatible(input: {
     const decoder = new TextDecoder()
     let buffer = ''
     let content = ''
+    // thinking 模型的思维链（1.0.56）。DeepSeek 系（含 OpenCode Go 转发的那条上游）要求：
+    // **发起过 tool_call 的 assistant 轮，其 reasoning_content 必须在后续请求里原样回传**，
+    // 否则直接 400 `The reasoning_content in the thinking mode must be passed back to the API`。
+    // 此前我们只解析 delta.content、而且只把 {role,content,tool_calls} 放回 conversation，
+    // 于是「thinking 模型 + 调工具」从第二轮起必失败（用户实测 deepseek-v4.1-flash）。
+    // 这里逐轮收集（reasoning_content 与 reasoning 两种字段名都见过），下面按轮随消息回传。
+    let reasoning = ''
+    let sawReasoning = false
     let usage: any = null
     let toolCalls: any[] = []
 
@@ -375,6 +402,14 @@ async function streamOpenAICompatible(input: {
           throw new Error(json.error.message || JSON.stringify(json.error))
         }
         const delta = json.choices?.[0]?.delta || {}
+        // 思维链只在内部累积，不推给界面（没有「展开思考过程」的需求，多推一份就多一份噪音）。
+        // 注意要判断 **是否出现过该字段**（含空串）而不是「非空」：上游对「没带回来」和
+        // 「带回来但是空的」是两种判定，前者 400、后者放行 —— 这也是 opencode 那两个 PR 的修法。
+        const rDelta = delta.reasoning_content ?? delta.reasoning
+        if (typeof rDelta === 'string') {
+          sawReasoning = true
+          reasoning += rDelta
+        }
         if (delta.content) {
           content += delta.content
           send({ type: 'delta', conversationId, messageId: assistantMessageId, content: delta.content })
@@ -392,9 +427,17 @@ async function streamOpenAICompatible(input: {
       }
     }
 
+    // 每轮都记一行思维链状态：下一轮是否回传、回传了多少字符，全靠这两行定位
+    // （`passback=yes` 表示这轮的 reasoning_content 已随 assistant(tool_calls) 带回历史）。
+    aiLog(sawReasoning
+      ? `[AI] round ${round + 1}: reasoning=${reasoning.length} chars, passback=${toolCalls.length ? 'yes' : 'n/a(no tool_call)'}`
+      : `[AI] round ${round + 1}: no reasoning_content in stream`)
+
     if (!toolCalls.length) {
       updateMessage(assistantMessageId, {
         content,
+        // 思维链落库：同模型继续追问时（甚至切会话继续）仍能原样回传，不必再猜。
+        ...(sawReasoning ? { reasoning } : {}),
         inputTokens: usage?.prompt_tokens,
         outputTokens: usage?.completion_tokens
       })
@@ -405,13 +448,19 @@ async function streamOpenAICompatible(input: {
     if (isLastRound) {
       updateMessage(assistantMessageId, {
         content: content || '（已达到工具调用轮次上限，模型未能在限定步数内完成。请尝试将任务拆分、或先用 file_search / file_list 缩小范围后再读取。）',
+        ...(sawReasoning ? { reasoning } : {}),
         inputTokens: usage?.prompt_tokens,
         outputTokens: usage?.completion_tokens
       })
       return
     }
 
-    const assistantToolMessage = { role: 'assistant', content, tool_calls: toolCalls }
+    // 关键：把本轮思维链随 assistant(tool_calls) 轮一起放回历史。缺了它，下一轮请求必 400。
+    // 只在「确实出现过该字段」时才带 —— 非 thinking 模型（OpenAI/多数 GLM 端点）不认这个字段，
+    // 无脑加上反而可能被判成非法参数。存成 reasoning，由下面的 messages 映射统一转成
+    // reasoning_content，避免同一件事两套字段名、后续又漏改一处。
+    const assistantToolMessage: any = { role: 'assistant', content, tool_calls: toolCalls }
+    if (sawReasoning) assistantToolMessage.reasoning = reasoning
     conversation.push(assistantToolMessage)
     const toolController = new AbortController()
     toolControllers.set(conversationId, toolController)
@@ -526,7 +575,22 @@ export async function sendMessage(payload: AISendPayload): Promise<void> {
       send({ type: 'done', conversationId, messageId: assistant.id, reason })
       return
     }
-    send({ type: 'error', conversationId, messageId: assistant.id, message: e.message })
+    // thinking 模型的思维链要求（1.0.56）：本版已改为「逐轮回传 + 落库」，新会话不会再触发；
+    // 但旧版本建的老会话里确实可能留下「缺 reasoning 的轮次」，那种历史重发只会一直 400。
+    // 这时给一句能操作的指引，而不是把上游英文原文丢给用户。
+    const errMsg = String(e?.message || e)
+    if (/reasoning_content/i.test(errMsg)) {
+      aiLog('[AI] thinking-mode reasoning missing: ' + errMsg)
+      send({
+        type: 'error',
+        conversationId,
+        messageId: assistant.id,
+        message: '当前模型是 thinking 模式（如 DeepSeek V4.1 Flash），这条会话的历史里缺少思维链，继续追问会一直失败。'
+          + '请点「新对话」重开一个会话再问一次（本版已修复该问题，新会话不会再出现）。'
+      })
+      return
+    }
+    send({ type: 'error', conversationId, messageId: assistant.id, message: errMsg })
   } finally {
     // 记录 AI 回复的完成时间（含停止/出错），让会话时间戳反映「回复完成」而非「请求发起」。
     try { updateMessage(assistant.id, { createdAt: Date.now() }) } catch { /* 落库失败不影响本次回复 */ }
