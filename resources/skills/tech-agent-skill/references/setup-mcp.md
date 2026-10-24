@@ -21,14 +21,20 @@
 
 ## 2. 生成配置文件
 
-复制本包 `templates/config.base.json` 与 `templates/config.tech-agent.json` 到**可写**位置
-（建议放应用的用户数据目录，例如 `%APPDATA%/mc-material-query/mcp/`），两份都**不含 Cookie**；
-`cache.cookie_path` / `cache.session_path` 留空，由运行时按本机实际位置解析。
+**1.0.57+ 默认全自动，不用手工做**：点「准备依赖」或「测试连接」时，应用会读本包的 `mcp.json`
+声明（`config.env` = `DINGDING_CONFIG_PATH`，`config.template` = `templates/config.tech-agent.json`），
+把 `config.base.json`（`_merge_auth_from` 基座）与 `config.tech-agent.json` 合并、剔除他人凭证后，
+写到登记的 `DINGDING_CONFIG_PATH` 指向的位置；日志里会出现
+`[config] 已自动生成本机配置 → C:\Users\<用户>\AppData\Roaming\mc-material-query\mcp\tech-agent-config.json`。
 
-- 只想用团队默认机器人：把 `DINGDING_CONFIG_PATH` 指向 `config.tech-agent.json` 即可（它会
-  `_merge_auth_from` 继承 base 的 `corp_id` 与登录态）。
-- 要接别的机器人：新增 `config.<bot>.json`，改 `agent.uuid` / `mcp.tool_id` / `agent.name`，
-  再新增一个对应 `target_mcp` 的 MCP 服务登记。
+手工流程只在两种情况下需要：
+
+- 用的是 **1.0.56 及更早**版本（没有自动生成）；
+- 要接**自己的机器人实例**：复制两份模板到可写位置（如 `%APPDATA%/mc-material-query/mcp/`），
+  改 `agent.uuid` / `mcp.tool_id` / `agent.name`，再把 `DINGDING_CONFIG_PATH` 指过去 ——
+  文件已存在时应用不会覆盖它。
+
+两份模板都**不含 Cookie**；`cache.cookie_path` / `cache.session_path` 留空，由运行时按本机实际位置解析。
 
 > `corp_id` 是企业身份，**不能**当会话 cid 用；`createDialog.cid` 由运行时按
 > `{DEAP userId}:{agentUuid}` 生成。

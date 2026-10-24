@@ -1,0 +1,7 @@
+{
+  "_comment": "MC Tool 1.0.57+ 读取的 MCP 运行时配置约定。env = 运行时用来定位配置文件的变量名；template = 随包分发的配置模板（相对本技能目录）。换一个 MCP 技能只需换这份声明，应用侧不必改代码、也不该猜默认路径。",
+  "config": {
+    "env": "DINGDING_CONFIG_PATH",
+    "template": "templates/config.tech-agent.json"
+  }
+}

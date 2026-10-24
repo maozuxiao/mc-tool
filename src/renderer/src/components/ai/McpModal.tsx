@@ -53,25 +53,26 @@ function textToEnv(text: string): Record<string, string> {
 }
 
 /**
- * 内置技能 tech-agent-skill 的 MCP 服务示例（1.0.55 修正）。
+ * 内置技能 tech-agent-skill 的 MCP 服务示例（1.0.57）。
  *
- * 曾把技能文档里的「兜底路径」原样抄进来当 cwd —— 那是**用户导入技能**的位置
- * （`%APPDATA%\mc-material-query\skills\...`），全新安装的机器上并不存在：用户照示例
- * 导入后点「准备依赖」必然报「工作目录不存在」（1.0.55 分发实测）。
- * 现在：
- * - `cwd` 留空 —— 应用按绑定的技能自动推断内置 runtime 目录（见 mcpClient.resolvedCwd），
+ * - `cwd` 留空：应用按绑定技能自动推断内置 runtime 目录（见 mcpClient.resolvedCwd），
  *   安装版 / 开发版路径不同也不怕；
- * - `skillKey` 显式绑定内置技能 —— 否则导入的服务「未绑定」，推断无从谈起
+ * - `skillKey` 显式绑定内置技能：否则导入后「未绑定」，runtime 推断与模板查找都无从谈起
  *   （导入时 JSON 里显式写的 skillKey 优先，见 mcpStore.importServersJson）；
- * - 不放 `DINGDING_CONFIG_PATH` —— 那是「生成本机运行配置」按钮的职责（基于技能模板
- *   生成并改指环境变量），示例里预填一个不存在的路径只会误导。
+ * - `env.DINGDING_CONFIG_PATH` **必须给**，值用 `%APPDATA%` 占位符（spawn 时展开）。
+ *   运行时的 ConfigLoader 缺这个变量就会去读 `%USERPROFILE%\.dingding-mcp\config.json`，
+ *   全新机器上并没有那个文件 → 启动即退出。1.0.55 为修「工作目录不存在」把它删了，
+ *   结果「生成本机运行配置」拿不到 env 名、生成的配置没人读（no-env-key），
+ *   用户走完「填入示例 → 准备依赖 → 生成配置 → 测试连接」仍然失败（1.0.56 实测）。
+ *   从 1.0.57 起：路径占位符 + 连接/装依赖前自动生成，四步即可通。
  */
 const EXAMPLE_JSON = JSON.stringify({
   mcpServers: {
     'Tech-agent-mcp': {
       command: 'node',
       args: ['src/index.js'],
-      skillKey: 'builtin:tech-agent-skill'
+      skillKey: 'builtin:tech-agent-skill',
+      env: { DINGDING_CONFIG_PATH: '%APPDATA%\\mc-material-query\\mcp\\tech-agent-config.json' }
     }
   }
 }, null, 2)

@@ -29,7 +29,7 @@ package.json + package-lock.json），但**不含 node_modules** —— 依赖�
 | command | `node`（留 `node` 即可，主进程会解析真实 node） |
 | args | `src/index.js` |
 | cwd | 用面板里的「选择工作目录」挑到本技能目录下的 `runtime/mcp-dingtalk-v1-template` |
-| env | `DINGDING_CONFIG_PATH` = 配置文件（`templates/config.tech-agent.json` 复制到可写位置后的绝对路径） |
+| env | `DINGDING_CONFIG_PATH` = 配置文件的绝对路径（**1.0.57+ 由应用自动生成并写入**，示例里是 `%APPDATA%\mc-material-query\mcp\tech-agent-config.json`） |
 
 > cwd 的实际路径：打包后在**安装目录**下（形如 `…\MC物料查询\resources\skills\tech-agent-skill\runtime\mcp-dingtalk-v1-template`）。
 > 该目录**只读**，第 2 步会自动把它复制到用户数据目录再安装依赖，并把登记里的 cwd 切到那个副本 ——
@@ -44,6 +44,11 @@ package.json + package-lock.json），但**不含 node_modules** —— 依赖�
 `config.tech-agent.json`（默认机器人实例）。**两份都不含 Cookie**，`chat_user_id` 与 Cookie 由登录
 流程写入。**不要**手动往里写 `auth.cookie_string`，也**不要**把 `cache.*_path` 写成别人机器的绝对路径
 （留空即可，由运行时按本机实际位置解析）。
+
+> **1.0.57 起不需要手工建配置文件**：应用在「准备依赖」「测试连接」前会按本包的 `mcp.json`
+> 声明（`config.env` / `config.template`）自动生成并落位，日志里能看到
+> `[config] 已自动生成本机配置 → …`。仅当你**要用自己的机器人实例**（换 `agent.uuid`）时才需要
+> 手工改：把 `DINGDING_CONFIG_PATH` 指向你自己的那份配置，文件存在就不会被覆盖。
 
 绑定后本技能条目的「需 MCP」徽标会消失，勾选它即可下发上述工具。
 

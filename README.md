@@ -4,7 +4,7 @@
 
 - 仓库：https://github.com/maozuxiao/mc-tool
 - 技术栈：Electron 33 + electron-vite + React 18 + TypeScript + Zustand，UI 组件库 [`animal-island-ui`](https://www.npmjs.com/package/animal-island-ui)；AI 面板里的操作类小图标用 [`naive-icons`](https://www.npmjs.com/package/naive-icons)（同为手绘 naive 风，按需引 `svg/*.svg?raw` 并改色跟随主题，见 `src/renderer/src/components/NaiveIcon.tsx`）
-- 当前版本：`1.0.56`（`package.json` 的 `version` 为准）
+- 当前版本：`1.0.57`（`package.json` 的 `version` 为准）
 
 ---
 
@@ -177,6 +177,7 @@
 - **面板底栏四个按钮**：`🗃️ 导入 zip` / `📂 导入文件夹` / `🩺 诊断`（一键自检，见 ⑤）/ `🔌 MCP 服务`（见下）。面板宽高跟随窗口（`min(430px, 100vw-48px)` / `min(460px, 62vh)`），**头与底栏固定、只有技能列表滚动**，技能再多也不会把按钮顶出可视区；按钮用 `size="small"`，所以英文界面下也不显小。
 - **MCP 服务（1.0.46）**：点 `🔌 MCP 服务` 登记 stdio MCP 服务并**绑定技能**——勾选该技能后，应用在对话前自动拉起服务、把它的工具下发给 AI（取消勾选即收回）。配置可从技能文档复制「MCP JSON」直接粘贴导入（弹窗内置 tech-agent-skill 示例）；缺依赖时点「准备依赖」自动 `npm install`（进度可看、可取消，不静默下载）；SKILL.md 声明了 MCP 工具但未绑定的技能会显示「需 MCP」徽标，点它直达登记。服务日志在 `userData\mcp\<服务id>.log`，敏感环境变量加密保存、界面与日志打码。
 - **「生成本机运行配置」按钮**（MCP 弹窗里每条服务都有）：不少 MCP 技能把**作者本机的绝对路径**写进了自带配置（实测 Tech-agent 写死 `C:\Users\admin\.workbuddy\...`，还带着**他人的 `cookie_string`**）——换台机器就会 `EPERM: mkdir 'C:\Users\admin\...'`（登录态写不进去，连扫码都到不了），或顶着一份别人的过期登录态。点一下这个按钮即可自救：**不改技能包**（重新导入会被覆盖），而是在 `userData\mcp\<服务id>-config.json` 生成一份本机配置 —— ① 合并来源配置（含 `_merge_auth_from` 的 base）；② **剔除他人凭证**（cookie / token / password / secret / session_id…，但保留 `*_path` 这类路径配置）；③ 把别人家目录的绝对路径**改指本机真实用户目录**并把目录建出来；④ 把登记里指向配置的 env（如 `DINGDING_CONFIG_PATH`）改指过去。生成的配置**不含任何 Cookie**，登录态由 `mcp_auth` 扫码后写入本机；生成后旧进程会断开，点「测试连接」即用新配置重连。
+  从 **1.0.57** 起这个过程是**自动的**：「准备依赖」和「测试连接」都会先做一次幂等检查 —— 运行时该读的配置文件不存在，就按技能目录里的 `mcp.json` 声明（`config.env` / `config.template`）配合 `templates/` 生成并落位；示例 JSON 里的 `DINGDING_CONFIG_PATH` 用 `%APPDATA%` 占位符（spawn 时展开），所以新机器上**不再需要手工建** `C:\Users\<用户>\.dingding-mcp\config.json`。失败时卡片直接显示主进程记录的原因（如「配置文件不存在: …」），不再只有一句「MCP 进程已退出」。
 - ⚠️ 技能带脚本时，脚本会以 `node` 在本机运行，**只导入可信来源**；MC 查询技能首次调用会自动准备 Node 22 运行时（`resources/skills/.../ensure_node.ps1`，需联网下载一次，约 1~2 分钟）。
 
 **④ 让 AI 读写 / 修改文件（Build 模式）**
@@ -408,9 +409,9 @@ npm run pack:all   # 全平台
 ```
 dist/
 ├─ latest.yml                            # 自动更新元数据
-├─ mc-material-query-setup-1.0.56.exe            # NSIS 安装包
-├─ mc-material-query-setup-1.0.56.exe.blockmap  # 增量更新块映射
-└─ mc-material-query-1.0.56.exe   # 便携版
+├─ mc-material-query-setup-1.0.57.exe            # NSIS 安装包
+├─ mc-material-query-setup-1.0.57.exe.blockmap  # 增量更新块映射
+└─ mc-material-query-1.0.57.exe   # 便携版
 ```
 
 > macOS 交叉编译在 Windows 上不可靠，DMG 请在 macOS 上打包。

@@ -7,6 +7,7 @@ import type { McpEvent, McpServerConfig, McpState, McpStatus } from '@shared/ai-
 import { ensureNodeWithNpm, killTree, resolveNodeBinary, resolveNpmCli } from './skillRuntime'
 import { getServerRaw, listServers, saveServer, serversForSkillKeys } from './mcpStore'
 import { builtinRoot, skillDirOf } from './skillRegistry'
+import { ensureRuntimeConfig } from './mcpConfigGen'
 
 /**
  * MCP 客户端（1.0.46）—— 自研最小实现：stdio + 换行分隔 JSON-RPC 2.0。
@@ -325,6 +326,23 @@ export async function connect(cfg: McpServerConfig): Promise<void> {
   emitStatus(cfg.id)
   logLine(cfg.id, `[lifecycle] connecting command=${cfg.command} args=${JSON.stringify(cfg.args)} cwd=${cfg.cwd || '(默认)'}`)
 
+  // 1.0.57：连接前先确保运行配置就位（幂等）。缺配置时运行时（如 dingtalk MCP 的
+  // ConfigLoader）会直接退出，界面却只剩一句「MCP 进程已退出」，用户无从下手。
+  try {
+    const cfgPrep = ensureRuntimeConfig(cfg)
+    if (cfgPrep.created) {
+      logLine(cfg.id, `[config] 已自动生成本机配置 → ${cfgPrep.path}`)
+      // 生成过程会回写登记（补上 / 改写配置类 env），必须重新取一份再 spawn，
+      // 否则子进程拿到的还是旧 env —— 又会去读那个不存在的默认路径。
+      cfg = getServerRaw(cfg.id) || cfg
+      conn.cfg = cfg
+    } else if (cfgPrep.skipped === 'error') {
+      logLine(cfg.id, `[config] 自动生成失败：${cfgPrep.error || ''}`)
+    }
+  } catch (e: any) {
+    logLine(cfg.id, `[config] 自动生成失败：${e?.message || e}`)
+  }
+
   conn.connecting = (async () => {
     const node = resolveNodeBinary()
     // command 填 `node`（或留空）= 由应用解析真实 node；其它命令原样使用（都做一次变量展开）
@@ -389,7 +407,9 @@ export async function connect(cfg: McpServerConfig): Promise<void> {
         conn.tools = []
         conn.exposed = []
         rebuildExposed()
-        rejectAllPending(conn, new Error('MCP 进程已退出'))
+        // 把 close 处理器已经算好的具体原因带出去（如「配置文件不存在: …」），
+        // 否则调用方只能拿到一句通用的「MCP 进程已退出」（1.0.57 修）
+        rejectAllPending(conn, new Error(conn.error || 'MCP 进程已退出'))
         emitStatus(cfg.id)
         resolve(code)
       })
@@ -420,9 +440,11 @@ export async function connect(cfg: McpServerConfig): Promise<void> {
     } catch (e: any) {
       const aborted = e?.name === 'AbortError'
       conn.state = 'failed'
-      conn.error = aborted
+      // 保序（1.0.57）：close 处理器往往先跑，写下的原因更具体（退出码 + stderr 归因）；
+      // 这里的 e 只是 pending 的拒绝原因，别用它在后面把真因覆盖成一句「进程已退出」。
+      conn.error = conn.error || (aborted
         ? '连接被中止'
-        : `${e?.message || e}${detectNeedsInstall(stderrTail) ? '；' + detectNeedsInstall(stderrTail) : ''}`
+        : `${e?.message || e}${detectNeedsInstall(stderrTail) ? '；' + detectNeedsInstall(stderrTail) : ''}`)
       logLine(cfg.id, `[lifecycle] connect failed: ${conn.error}`)
       killTree(child)
       // 让上面注册的 close 处理器收尾（state 已是 failed，exit 时不会再改写 error）
@@ -709,6 +731,21 @@ export async function installDependencies(
   try {
     if (!cwd) return { ok: false, error: '未设置工作目录：请在登记条目里填 MCP 服务所在目录（含 package.json）' }
     if (!existsSync(cwd)) return { ok: false, error: `工作目录不存在：${cwd}（环境变量未展开或路径无效）` }
+    // 1.0.57：装依赖的同时把运行配置落位（幂等；此时 cwd 还指着技能目录，能读到 templates/）。
+    // 「准备依赖」通常是新机器上的第一步，把配置一起备好，用户接着点「测试连接」就不会
+    // 因为「配置文件不存在」直接失败。
+    try {
+      const cfgPrep = ensureRuntimeConfig(cfg)
+      if (cfgPrep.created) {
+        logLine(cfg.id, `[config] 已自动生成本机配置 → ${cfgPrep.path}`)
+        onProgress(`> 已生成本机运行配置: ${cfgPrep.path}`)
+        cfg = getServerRaw(cfg.id) || cfg
+      } else if (cfgPrep.skipped === 'error') {
+        logLine(cfg.id, `[config] 自动生成失败：${cfgPrep.error || ''}`)
+      }
+    } catch (e: any) {
+      logLine(cfg.id, `[config] 自动生成失败：${e?.message || e}`)
+    }
     // 只读目录（典型：安装版的内置技能目录）→ 先复制到 userData 可写副本再装
     const prep = prepareWritableRuntime(cfg, cwd)
     if (prep.error) return { ok: false, error: prep.error }

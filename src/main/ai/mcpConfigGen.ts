@@ -1,8 +1,9 @@
 import { app } from 'electron'
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'fs'
-import { basename, dirname, join, resolve } from 'path'
+import { basename, dirname, isAbsolute, join, resolve } from 'path'
 import type { McpServerConfig } from '@shared/ai-types'
 import { getServerRaw, saveServer } from './mcpStore'
+import { skillDirOf as registrySkillDir } from './skillRegistry'
 
 /**
  * 「生成本机运行配置」（1.0.46）。
@@ -41,8 +42,14 @@ export interface GenConfigReport {
   error?: string
 }
 
-/** 看起来像「他人凭证」的键；*_path / *_dir / *_file / *_hours 只是路径或配置，不删 */
-const SECRET_KEY = /(cookie|token|password|passwd|secret|credential|api[_-]?key|chat_user_id|session)/i
+/**
+ * 看起来像「他人凭证」的键；*_path / *_dir / *_file / *_hours 只保留路径或配置，不删。
+ *
+ * 1.0.57：从名单里去掉 `chat_user_id` —— 它是**路由 id**（私聊/群的默认对象），
+ * 不是密钥。此前把它当凭证剥掉，用户自己那份配置作为来源时会被静默丢弃，
+ * 表现为「生成完配置，机器人不知道该跟谁说话」。
+ */
+const SECRET_KEY = /(cookie|token|password|passwd|secret|credential|api[_-]?key|session)/i
 /** 名字里带凭证词、但其实只是路径 / 开关 / 说明文字的键，不能删（删了会丢配置或留下噪音） */
 const KEEP_KEY = /(_path|_dir|_file|_hours|_ttl|placeholder|comment|note|description)$/i
 
@@ -128,12 +135,10 @@ function skillDirOf(cfg: McpServerConfig): string | null {
       dir = up
     }
   }
-  const bare = String(cfg.skillKey || '').split(':').pop() || ''
-  if (bare) {
-    const p = join(app.getPath('userData'), 'skills', bare)
-    if (existsSync(join(p, 'SKILL.md'))) return p
-  }
-  return null
+  // 1.0.57：cwd 为空（示例就是空，靠应用推断内置 runtime）时，光看 userData/skills 找不到
+  // **内置**技能目录 —— 内置的在 `resources/skills`（打包后 `process.resourcesPath/skills`）。
+  // 这里统一交给 skillRegistry.skillDirOf 解析（它同时认 builtin: / user: 两种来源）。
+  return registrySkillDir(String(cfg.skillKey || ''))
 }
 
 /** 在技能目录里挑配置模板：优先匹配 env 里提到的文件名，其次非 base 的 config*.json */
@@ -157,6 +162,29 @@ function templatesOf(skillDir: string, preferName?: string): string[] {
 }
 
 /**
+ * 技能可选的「运行配置声明」：`<技能目录>/mcp.json`
+ *
+ * ```json
+ * { "config": { "env": "DINGDING_CONFIG_PATH", "template": "templates/config.tech-agent.json" } }
+ * ```
+ *
+ * 为什么要这个文件（1.0.57）：运行时要读哪个环境变量、默认落到哪个路径，只有技能自己知道。
+ * 应用若靠「猜 env 名 / 猜默认路径」，换个技能就失效，或者把某家的路径写死进通用逻辑。
+ * 有声明就按声明办；没有声明才回落到「从 env 里找 .json / 从 templates/ 找 config*.json」的老办法。
+ */
+interface ConfigDecl { env?: string; template?: string }
+
+function readConfigDecl(skillDir: string): ConfigDecl | null {
+  const j = readJson(join(skillDir, 'mcp.json'))
+  const c = j && typeof j === 'object' ? (j as any).config : null
+  if (!c || typeof c !== 'object') return null
+  return {
+    env: typeof c.env === 'string' && c.env.trim() ? c.env.trim() : undefined,
+    template: typeof c.template === 'string' && c.template.trim() ? c.template.trim() : undefined
+  }
+}
+
+/**
  * 为指定 MCP 服务生成本机运行配置。
  * 只做「生成 + 改登记」，不断连接（由调用方决定断开重连时机）。
  */
@@ -166,13 +194,18 @@ export function generateLocalConfig(id: string): GenConfigReport {
 
   const cfgEnvKey = configEnvKeyOf(cfg.env)
   const envCfgPath = cfgEnvKey?.value ? resolve(expandVars(cfgEnvKey.value)) : ''
+  const skillDir = skillDirOf(cfg)
+  const decl = skillDir ? readConfigDecl(skillDir) : null
   let sources: string[] = []
 
   if (envCfgPath && existsSync(envCfgPath)) {
     sources = [envCfgPath]
-  } else {
-    const skillDir = skillDirOf(cfg)
-    if (skillDir) sources = templatesOf(skillDir, envCfgPath || undefined)
+  } else if (skillDir) {
+    // 声明里指定的模板优先（它能连同 `_merge_auth_from` 的 base 一起被合并）
+    const declared = decl?.template ? join(skillDir, decl.template) : ''
+    sources = declared && existsSync(declared)
+      ? [declared]
+      : templatesOf(skillDir, envCfgPath || undefined)
   }
   // 兼容：env 指向的文件不存在时，也允许把技能模板当来源（上面已处理）；都没有才失败
   if (!sources.length && envCfgPath) sources = [envCfgPath]
@@ -216,22 +249,32 @@ export function generateLocalConfig(id: string): GenConfigReport {
   }
   walkPaths(out)
 
-  const outDir = join(app.getPath('userData'), 'mcp')
-  try { if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true }) } catch { /* 下面写盘会报错并回报 */ }
-  const outPath = join(outDir, `${cfg.id}-config.json`)
+  // 输出位置（1.0.57）：
+  // - 登记里给了**绝对路径**就写到那儿 —— 运行时要读的就是它，示例里用的
+  //   `%APPDATA%\mc-material-query\mcp\tech-agent-config.json` 展开后就是绝对路径，
+  //   这样「示例写的路径」和「实际生成的路径」一致，不会生出没人读的孤儿文件；
+  // - 没给路径才落到 userData/mcp/<id>-config.json，再把 env 指过去。
+  const outPath = envCfgPath && isAbsolute(envCfgPath)
+    ? envCfgPath
+    : join(app.getPath('userData'), 'mcp', `${cfg.id}-config.json`)
+  try { mkdirSync(dirname(outPath), { recursive: true }) } catch { /* 下面写盘会报错并回报 */ }
   try {
-    writeFileSync(outPath, JSON.stringify({ ...out, _generated_by: 'MC Tool 1.0.46 生成本机运行配置' }, null, 2), 'utf8')
+    writeFileSync(
+      outPath,
+      JSON.stringify({ ...out, _generated_by: `MC Tool ${app.getVersion()} 生成本机运行配置` }, null, 2),
+      'utf8'
+    )
   } catch (e: any) {
     return { ok: false, reason: 'error', rerooted, stripped, createdDirs, error: e?.message || String(e) }
   }
 
-  // 改登记：把指向配置的 env 改指到新生成的文件
-  let envKey = cfgEnvKey?.key
+  // 改登记：确保运行时读的是刚生成的这份
+  // 顺序：登记里已有的配置类 env（值以 .json 结尾）→ 技能声明的 env 名 → 名字像 config 的键
+  let envKey = cfgEnvKey?.key || decl?.env
   if (!envKey) {
-    // 没有 .json 结尾的配置变量时，退而求其次找名字像配置变量的那个
     envKey = Object.keys(cfg.env || {}).find(k => /config/i.test(k))
   }
-  if (envKey) {
+  if (envKey && (cfg.env || {})[envKey] !== outPath) {
     saveServer({ ...cfg, env: { ...(cfg.env || {}), [envKey]: outPath } })
   }
 
@@ -244,5 +287,50 @@ export function generateLocalConfig(id: string): GenConfigReport {
     rerooted,
     stripped,
     createdDirs
+  }
+}
+
+export interface EnsureConfigResult {
+  /** 这次真的生成/落位了配置（连接与安装时各检查一次，已经是幂等的） */
+  created: boolean
+  path?: string
+  /** 没生成时的原因，仅用于日志 */
+  skipped?: 'config-exists' | 'no-env' | 'no-template' | 'no-skill-dir' | 'error'
+  error?: string
+}
+
+/**
+ * 「连接前 / 装依赖前」的一次幂等检查：运行时要读的配置在不在？不在就从技能模板生成一份。
+ *
+ * 1.0.57 的动机：1.0.55 把示例里的 `DINGDING_CONFIG_PATH` 去掉之后，「生成本机运行配置」
+ * 生成的文件没人读（env 为空 → 无法改指），运行时报「配置文件不存在」直接退出，
+ * 而界面上只显示「MCP 进程已退出」。现在把这一步做成自动前置：
+ *   - 有配置且文件存在 → 什么都不做（`skipped: 'config-exists'`）；
+ *   - 没有配置但有技能模板 → 生成，并在日志留痕；
+ *   - 既没配置也没模板 → 跳过，让上层报**原始**错误（不伪造成功）。
+ */
+export function ensureRuntimeConfig(cfg: McpServerConfig): EnsureConfigResult {
+  try {
+    const cfgEnvKey = configEnvKeyOf(cfg.env)
+    const envPath = cfgEnvKey?.value ? resolve(expandVars(cfgEnvKey.value)) : ''
+    if (envPath && existsSync(envPath)) return { created: false, path: envPath, skipped: 'config-exists' }
+
+    const skillDir = skillDirOf(cfg)
+    if (!skillDir) return { created: false, skipped: 'no-skill-dir' }
+
+    const decl = readConfigDecl(skillDir)
+    const declared = decl?.template ? join(skillDir, decl.template) : ''
+    const hasTemplate = (declared && existsSync(declared)) || templatesOf(skillDir, envPath || undefined).length > 0
+    if (!hasTemplate) return { created: false, skipped: 'no-template' }
+
+    // 没有配置类 env、技能也没声明该用哪个变量 → 生成了也没人读，别造孤儿文件
+    if (!cfgEnvKey && !decl?.env) return { created: false, skipped: 'no-env' }
+
+    const r = generateLocalConfig(cfg.id)
+    return r.ok
+      ? { created: true, path: r.configPath }
+      : { created: false, skipped: 'error', error: r.error }
+  } catch (e: any) {
+    return { created: false, skipped: 'error', error: e?.message || String(e) }
   }
 }
