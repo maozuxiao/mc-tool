@@ -336,7 +336,30 @@ async function restoreOaSession(sess: Electron.Session): Promise<boolean> {
       return false
     }
     const raw = readFileSync(SESSION_BACKUP_PATH, 'utf-8')
-    const cookies: any[] = JSON.parse(raw)
+    const parsed: any[] = JSON.parse(raw)
+    // 2026-10-27 修正：老备份（1.0.57 及更早）里混进了**非 OA 域**的 cookie ——
+    // 实测 8 颗全是 `.iam.streamax.com` 的 REQID/usk/SESSION/route/j_lang + 1 颗根域 LtpaToken。
+    // 它们对 OA 会话毫无帮助（恢复完照样 901），写回时还会变成 host-only 副本
+    // （实测 `[startup] total cookies: 8 → 11`）。这里只接受 OA 域与根域，并把清理后的
+    // 结果回写备份，避免每次启动都重复制造噪音。
+    const cookies = parsed.filter((c: any) => {
+      const d = String(c.domain || '').toLowerCase().replace(/^\./, '')
+      return d === 'oa.streamax.com' || d.endsWith('.oa.streamax.com') || d === 'streamax.com'
+    })
+    if (cookies.length !== parsed.length) {
+      const dropped = parsed.filter((c: any) => !cookies.includes(c)).map((c: any) => `${c.name}@${c.domain}`)
+      debugLog(`[restore] dropped ${dropped.length} non-OA cookies from backup: ${dropped.join(',')}`)
+      try {
+        writeFileSync(SESSION_BACKUP_PATH, JSON.stringify(cookies, null, 2), 'utf-8')
+        debugLog('[restore] backup rewritten with OA-only cookies')
+      } catch (e: any) {
+        debugLog('[restore] rewrite backup failed: ' + e.message)
+      }
+    }
+    if (cookies.length === 0) {
+      debugLog('[restore] backup has no OA cookie after filtering, nothing to restore')
+      return false
+    }
     // 2026-10-26 修正：写回前先看分区里是否已有「等价 cookie」（同 name + 同 path，
     // 域作用域规范化掉前导点后相同）。老的备份文件里 domain 被去过前导点，直接写回会造出
     // host-only 副本，与分区里原有的 domain cookie 同名重复（鸿翼 edoc2 换票失败的元凶）。
@@ -1065,7 +1088,22 @@ function createWindow() {
         const r3 = await httpJsonWithRedirect(shimUrl, ssoSess, 6, 15000, true)
         const ac3 = pickAc(r3.finalUrl)
         if (ac3) return ac3
-        if (/^https?:\/\/wj\.streamax\.com/i.test(r3.finalUrl)) {
+        // 2026-10-27：`/jump.html?token=…` **不是**「已落地」——它只是把 OAuth code 换成了
+        // 站点 token，最后一步要靠页面 JS 拿 token 换 cookie（实测纯 HTTP 跟到这里后
+        // probe 仍 false、cookie 仍只有 copy/cut，见 2026-10-26 23:30 日志）。
+        // 交给隐藏窗口真正执行一次（窗口跑 JS、cookie 才落地），再由上层 probe 判定。
+        if (/\/jump\.html/i.test(r3.finalUrl)) {
+          debugLog('[wjxtSsoHttp] jump.html needs JS -> hand to hidden window: ' + r3.finalUrl.slice(0, 140) +
+            ' bodyHead=' + String(r3.text || '').replace(/\s+/g, ' ').slice(0, 200))
+          try {
+            const ok = await bootstrapWjxtSession(r3.finalUrl, 2000)
+            debugLog('[wjxtSsoHttp] jump.html window done ok=' + ok)
+          } catch (e: any) {
+            debugLog('[wjxtSsoHttp] jump.html window failed: ' + String(e?.message || e))
+          }
+          return r3.finalUrl
+        }
+        if (/^https?:\/\/wj\.streamax\.com/i.test(r3.finalUrl) && !/\/sso\/auth\//i.test(r3.finalUrl)) {
           debugLog('[wjxtSsoHttp] shim hop landed back on site -> ' + r3.finalUrl.slice(0, 140))
           return r3.finalUrl
         }

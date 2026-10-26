@@ -74,6 +74,8 @@ export function LoginOverlay({ loginState }: Props) {
   // 置成失败态）会覆盖前一路已经渲染好的二维码，界面表现为「有框没码 + 正在重新获取」。
   const fetchSeqRef = useRef(0)
   const lastFetchAtRef = useRef(0)
+  /** 二维码「刚拿到就失效」的连续自动重拉计数（正常过期不计数，见 4005 分支） */
+  const autoRefreshRef = useRef(0)
 
   const fetchQr = useCallback(async (forceQr = true, retryLeft = 0) => {
     const seq = ++fetchSeqRef.current
@@ -243,6 +245,19 @@ export function LoginOverlay({ loginState }: Props) {
           setExpired(true)
           setError('')
           setStatus('qrInvalid')
+          // 2026-10-27：不再「静默挂死在过期码上」。实测用户没及时扫，60s×3 后收到 4005，
+          // 之后界面就一直是这张死码（2026-10-26 13:54 / 22:58 两次，各自挂了数小时无动作）。
+          // 这里自动重拉一张新码：正常的「3 分钟自然过期」不计数；只有新码刚拿到就立刻失效
+          // （服务端异常）才累计，封顶 5 次，避免 1.2s 一次地空转。
+          if (Date.now() - lastFetchAtRef.current > 10_000) autoRefreshRef.current = 0
+          if (autoRefreshRef.current < 5) {
+            autoRefreshRef.current++
+            console.log('[QR] expired(4005) -> auto refresh #', autoRefreshRef.current)
+            window.setTimeout(() => {
+              if (useStore.getState().loginState !== 'logging') return
+              fetchQr(true, 3)
+            }, 1200)
+          }
           return
         }
 

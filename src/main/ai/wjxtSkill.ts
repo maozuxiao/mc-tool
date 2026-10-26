@@ -1664,13 +1664,28 @@ export function wjxtSyncAfterLogin(reason = 'oa-login'): Promise<boolean | null>
         wjxtLog(`[sync] ${reason}: 已有 edoc2 会话，跳过换票`)
         return true
       }
-      if (!bootstrapHiddenWindow) {
-        wjxtLog(`[sync] ${reason}: 隐藏窗口预热能力未注入，跳过`)
-        return before
+      if (bootstrapHiddenWindow) {
+        // 与技能侧 warmUp 用的是同一个 SSO 入口：站点 SPA 自己完成换票，成功后不弹任何窗口。
+        await bootstrapHiddenWindow(WJXT_LOGIN_URL, 2500).catch(() => false)
+      } else {
+        wjxtLog(`[sync] ${reason}: 隐藏窗口预热能力未注入，直接走 HTTP 换票`)
       }
-      // 与技能侧 warmUp 用的是同一个 SSO 入口：站点 SPA 自己完成换票，成功后不弹任何窗口。
-      await bootstrapHiddenWindow(WJXT_LOGIN_URL, 2500).catch(() => false)
-      const after = await probeLoggedIn().catch(() => null)
+      let after = await probeLoggedIn().catch(() => null)
+      // 2026-10-27：隐藏窗口这条依赖 Chromium 直连 IAM，实测存在「Chromium 到 IAM 打不通、
+      // 主进程 HTTP 却通」的组合（日志 `[iamReach] Chromium -> iam.streamax.com UNREACHABLE
+      // bootstrap did-fail-load -118`，同一时刻 `[main] POST WebCore` 却 200）。
+      // 那种情况下同步必然失败 → 用户第一次用技能又被要求登录。这里补一条纯 HTTP 兜底：
+      // 走 IAM 授权 + shim 跟随（jump.html 会交给隐藏窗口执行），再探一次。
+      if (after !== true && ssoHttp) {
+        try {
+          wjxtLog(`[sync] ${reason}: hidden window did not establish session, http fallback`)
+          const finalUrl = await ssoHttp(WJXT_SSO_LOGIN_URL)
+          wjxtLog(`[sync] ${reason}: http fallback final=${String(finalUrl).slice(0, 140)}`)
+        } catch (e: any) {
+          wjxtLog(`[sync] ${reason}: http fallback failed: ${String(e?.message || e)}`)
+        }
+        after = await probeLoggedIn().catch(() => null)
+      }
       wjxtLog(`[sync] ${reason}: edoc2 before=${before} after=${after}`)
       return after
     } catch (e: any) {
