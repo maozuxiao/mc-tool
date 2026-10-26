@@ -463,6 +463,9 @@ aiImgLoadFail: '图片加载失败（链接可能已过期）',
     // 用于会话过期会误导（用户明明早就登录过）。
     errLoginExpired: '登录已过期，正在重新获取二维码…',
     errLoginSvc: '登录服务未就绪，正在重新获取二维码…',
+    // 2026-10-26：用户**主动**退出登录后不该看到「登录未完成」这种失败口吻的文案。
+    // 主进程 COOKIE_CLEAR 现在带 reason='logout'，渲染层用它区分「主动登出」与「被动失效」。
+    qrLoggedOut: '已退出登录，请重新扫码登录',
     ssoEntering: '正在进入工具…',
 
     errCsvExport: 'CSV 导出失败：{m}'
@@ -920,6 +923,8 @@ aiImgLoadFail: 'Image failed to load (the link may have expired)',
     // misleading for a session that had been signed in for a while.
     errLoginExpired: 'Session expired, fetching a new QR code…',
     errLoginSvc: 'Sign-in service not ready, fetching a new QR code…',
+    // Deliberate sign-out is not a failure — no "incomplete" wording here.
+    qrLoggedOut: 'Signed out. Please scan the QR code to sign in again.',
     ssoEntering: 'Entering the tool…',
 
     errCsvExport: 'CSV export failed: {m}'

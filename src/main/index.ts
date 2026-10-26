@@ -9,7 +9,7 @@ import { OA_LOGIN_URL, OA_ORIGIN } from '@shared/constants'
 import { IPC } from '@shared/types'
 import { initAutoUpdater, isUpdateDownloaded, startUpdateDownload } from './updater'
 import { registerAIIPC } from './ai/aiIpc'
-import { setWjxtLoginOpener, setWjxtBootstrap, setWjxtLoginCloser, setWjxtHiddenNav, setWjxtSsoHttp, setWjxtIamProbe, markChromiumIamReachability, parseChromiumNetError, wjxtResolveOriginUrl, wjxtH5Login, wjxtQrLoginUrl, startLoginWatch, wjxtDiag, wjxtProbeLoggedIn, WJXT_H5_LOGIN_URL, WJXT_ORIGIN } from './ai/wjxtSkill'
+import { setWjxtLoginOpener, setWjxtBootstrap, setWjxtLoginCloser, setWjxtHiddenNav, setWjxtSsoHttp, setWjxtIamProbe, markChromiumIamReachability, parseChromiumNetError, wjxtResolveOriginUrl, wjxtH5Login, wjxtQrLoginUrl, startLoginWatch, wjxtDiag, wjxtProbeLoggedIn, wjxtSyncAfterLogin, WJXT_H5_LOGIN_URL, WJXT_ORIGIN } from './ai/wjxtSkill'
 import { translate, type Lang } from '@shared/i18n'
 import { listSkills } from './ai/skillRegistry'
 import type { IamAlive as SharedIamAlive } from '@shared/ai-types'
@@ -259,16 +259,25 @@ async function backupOaSession(sess: Electron.Session): Promise<void> {
     const all = await sess.cookies.get({})
     // 关键：OA 真实会话 cookie 分布在 oa.streamax.com 与 .streamax.com(LtpaToken) 两个域，
     // 漏掉任意一个都会导致恢复后仍是半登录态、查询被 901 踢回。
+    //
+    // 2026-10-26 修正：**只收 OA 自己的会话**，不再按「.streamax.com 后缀」大范围收。
+    // 后缀匹配会把 `.wj.streamax.com`（鸿翼）、`.iam.streamax.com`（IAM）一起卷进来 ——
+    // 它们落盘时会被去掉前导点，restore 再按 host-only 写回，与分区里原有的 domain cookie
+    // 形成**同名重复**（实测启动日志：`checkToken@wj.streamax.com` 与
+    // `checkToken@.wj.streamax.com` 并存，wjxt 请求里 `checkToken` 出现两次）。浏览器会把
+    // 两份同名 cookie 都发给服务端，edoc2 换票回调取到旧那份 → 换不到票 → 用户表现为
+    // 「刚刚扫码登录完，用技能又让我再登录一次」（2026-10-26 用户日志 03:32 实证）。
     const oa = all.filter(c => {
-      const d = (c.domain || '').toLowerCase()
-      return d.includes('oa.streamax.com') || d.endsWith('.streamax.com') || d === 'streamax.com'
+      const d = (c.domain || '').toLowerCase().replace(/^\./, '')
+      return d === 'oa.streamax.com' || d.endsWith('.oa.streamax.com') || d === 'streamax.com'
     })
     if (oa.length === 0) return
     const exp = Date.now() / 1000 + 30 * 24 * 3600
     const data = oa.map(c => ({
       name: c.name,
       value: c.value,
-      domain: (c.domain || '').replace(/^\./, ''),
+      // 保留原始 domain（含前导点）：去掉点再写回会退化 host-only，造成上面说的同名重复
+      domain: c.domain || '',
       path: c.path || '/',
       secure: !!c.secure,
       httpOnly: !!c.httpOnly,
@@ -328,14 +337,31 @@ async function restoreOaSession(sess: Electron.Session): Promise<boolean> {
     }
     const raw = readFileSync(SESSION_BACKUP_PATH, 'utf-8')
     const cookies: any[] = JSON.parse(raw)
+    // 2026-10-26 修正：写回前先看分区里是否已有「等价 cookie」（同 name + 同 path，
+    // 域作用域规范化掉前导点后相同）。老的备份文件里 domain 被去过前导点，直接写回会造出
+    // host-only 副本，与分区里原有的 domain cookie 同名重复（鸿翼 edoc2 换票失败的元凶）。
+    const existing = await sess.cookies.get({})
+    const normDomain = (d?: string) => String(d || '').toLowerCase().replace(/^\./, '')
+    const seen = new Set(existing.map(e => `${e.name}\u0000${e.path || '/'}\u0000${normDomain(e.domain)}`))
     let restored = 0
+    let skipped = 0
     for (const c of cookies) {
       try {
+        const key = `${c.name}\u0000${c.path || '/'}\u0000${normDomain(c.domain)}`
+        if (seen.has(key)) {
+          skipped++
+          continue
+        }
+        seen.add(key)
         const protocol = c.secure ? 'https' : 'http'
-        // 还原原始 domain（含前导点），端口按域决定
-        const host = c.domain
-        const port = host.includes('oa.streamax.com') ? ':8080' : ''
-        const url = `${protocol}://${host}${port}${c.path || '/'}`
+        // domain 可以是 `.streamax.com` 这种带前导点的形式 —— **不能**直接拼进 URL
+        //（`https://.streamax.com/` 不是合法 host，cookies.set 会抛）。URL 用去掉点的裸域，
+        // 域作用域仍由 `domain` 字段（带点）表达，这样还原回来的才是 domain cookie 而不是
+        // host-only 副本（见上面「同名重复」的说明）。
+        const rawDomain = String(c.domain || '').toLowerCase()
+        const bareHost = rawDomain.replace(/^\./, '')
+        const port = bareHost.includes('oa.streamax.com') ? ':8080' : ''
+        const url = `${protocol}://${bareHost}${port}${c.path || '/'}`
         const exp = c.expirationDate || (Date.now() / 1000 + 30 * 24 * 3600)
         await sess.cookies.set({
           url,
@@ -353,7 +379,8 @@ async function restoreOaSession(sess: Electron.Session): Promise<boolean> {
         debugLog('[restore] one failed: ' + String(err))
       }
     }
-    debugLog(`[restore] restored ${restored}/${cookies.length} OA session cookies`)
+    debugLog(`[restore] restored ${restored}/${cookies.length} OA session cookies` +
+      (skipped ? `（跳过 ${skipped} 颗已存在的同名同域 cookie）` : ''))
     // 恢复后再次探测，确认真实会话可用
     const after = await probeOaSession(sess)
     debugLog(`[restore] after restore probe ok=${after.ok} reason=${after.reason}`)
@@ -1025,7 +1052,25 @@ function createWindow() {
       // 第二跳：直接打 IAM 的 authorize 端点，它会302 到 AC 登录页（带一次性 lck），
       // 或者在 IAM 会话仍有效时一路 302 回站点（= 无感换票成功）。
       const r2 = await httpJsonWithRedirect(authUrl, ssoSess, 4, 12000, true)
-      debugLog('[wjxtSsoHttp] step2 final=' + r2.finalUrl.slice(0, 160))
+      debugLog('[wjxtSsoHttp] step2 final=' + r2.finalUrl.slice(0, 160) + ` len=${r2.text.length}`)
+      const ac2 = pickAc(r2.finalUrl)
+      if (ac2) return ac2
+      // 第三跳（2026-10-26 新增）：IAM 会话有效时它不一定 302，而是回一份
+      // 「200 + `doSubmit()` 自动跳转壳页」，把 code 交给站点 callback（实测 1251~1254 字节）。
+      // 纯 HTTP 看不见脚本，必须自己把 `locationValue` 捞出来跟一跳 —— 否则这条链永远
+      // "停在 authenticate"，被上层判成换票失败，用户只能再去登一次（2026-10-26 03:32 现场即此形态）。
+      let shimUrl = extractSsoShimTarget(r2.text)
+      for (let hop = 1; hop <= 2 && shimUrl; hop++) {
+        debugLog(`[wjxtSsoHttp] shim hop${hop} -> ${shimUrl.slice(0, 140)}`)
+        const r3 = await httpJsonWithRedirect(shimUrl, ssoSess, 6, 15000, true)
+        const ac3 = pickAc(r3.finalUrl)
+        if (ac3) return ac3
+        if (/^https?:\/\/wj\.streamax\.com/i.test(r3.finalUrl)) {
+          debugLog('[wjxtSsoHttp] shim hop landed back on site -> ' + r3.finalUrl.slice(0, 140))
+          return r3.finalUrl
+        }
+        shimUrl = extractSsoShimTarget(r3.text)
+      }
       return r2.finalUrl
     } catch (e: any) {
       debugLog('[wjxtSsoHttp] failed: ' + String(e?.message || e))
@@ -1255,6 +1300,13 @@ type LoginViewReason =
   | 'reauth'
   /** 网络异常导致登录未完成 */
   | 'network'
+  /**
+   * 用户**主动**退出登录（2026-10-26 新增）。
+   * 与上面三种「被动失效」不同：这不是失败，文案是「已退出登录，请重新扫码登录」，
+   * 且渲染层不应该再额外 bump `qrRefetchSeq`（登录层自己会因为 loginState→logging 拉一次码，
+   * 两路拉码会互相覆盖，把刚渲染出来的二维码擦掉）。
+   */
+  | 'logout'
 
 /** 会话检测的触发来源，仅用于日志（便于复现时按来源检索） */
 type SessionCheckSource = 'window-shown' | 'window-focus' | 'heartbeat'
@@ -1315,6 +1367,19 @@ async function checkAndHealSession(): Promise<SessionVerdict> {
         // 而当时调用方的判据是「!ok && sessionExpired」→ cookie 被清（而非服务端过期）时
         // 永远回不到扫码页。sessionExpired 现在不再参与「要不要通知」的决策（判据已简化为只看 ok），
         // 但仍要如实标记，供日志与诊断使用。
+        sessionExpired = true
+        sessionVerdict = 'invalid'
+        return 'invalid' as const
+      }
+      // 2026-10-26 优化：登录层**已经在展示**时不再跑静默自愈。
+      // 实测（dev 日志 07:32:59~07:33:06）二维码早在 07:32:58 就画出来了，窗口 focus 又触发
+      // 一轮自愈：连打 16 次 probeOaSession（每 450ms）、白等 7 秒，最后一句
+      // `[LOGIN-VIEW] skip (already shown)` —— 纯浪费，还把日志刷满。
+      // 用户此刻正对着二维码，"自愈成功"也只会让二维码自己消失，体验更差；真有会话
+      // 也轮不到这里：扫码完成那一路会走 completeOaSso 并关闭登录层。
+      if (loginViewShown) {
+        debugLog(`[SESSION] session invalid (${probed.reason}) but login view already shown -> skip silent SSO heal`)
+        sessionValid = false
         sessionExpired = true
         sessionVerdict = 'invalid'
         return 'invalid' as const
@@ -2206,6 +2271,23 @@ function summarizeIamBody(body: string): {
   return out
 }
 
+/**
+ * 从 IAM 的「200 + 自动跳转壳页」里取出最终跳转地址（2026-10-26 新增）。
+ *
+ * IAM 会话有效时不一定会 302，也可能回一份 1.2KB 左右、正文形如
+ *   `function doSubmit(){ var locationValue = "https://…/callback?code=…"; … }`
+ * 的壳页，靠页面脚本把 code 交给目标站点。纯 HTTP 看不到脚本，只能自己把
+ * `locationValue` 捞出来跟一跳 —— OA 落地（landOaViaHttp）早就这么做了，
+ * 鸿翼换票链一直缺这一步，于是「IAM 明明活着」也被判成换票失败（日志：
+ * `[iamKeepalive] body=1229 iamSessionAlive=null by=status=200:unknown` 长期刷屏）。
+ */
+function extractSsoShimTarget(body: string): string {
+  const m = /locationValue\s*=\s*["']([^"']+)["']/i.exec(body || '')
+  if (!m) return ''
+  // 壳页里的 & 是 HTML 转义过的，还原后再当 URL 用
+  return m[1].replace(/&amp;/g, '&')
+}
+
 /** 按响应分级判定 IAM 会话状态；返回 [verdict, reason]，reason 只用于日志 */
 function judgeIamAlive(status: number, location: string, body: string, bodyTruncated: boolean): [IamAlive, string] {
   // ① 老形态：302 带 code 回 OA —— IAM 会话有效（2026-09-13 实测）
@@ -2214,6 +2296,12 @@ function judgeIamAlive(status: number, location: string, body: string, bodyTrunc
   }
   // ② 明确的鉴权失败
   if (status === 401 || status === 403) return [false, `status=${status}`]
+  // ②′ 200 + 自动跳转壳页且已带 code = IAM 当场签了票 → 会话有效（2026-10-26 补）
+  // 放在未登录特征之前：这类壳页里可能出现 authenticate / authnEngine 字样，先判活更准。
+  {
+    const shim = extractSsoShimTarget(body)
+    if (shim && /[?&]code=/.test(shim)) return [true, 'body:ssoShim+code']
+  }
   // ③ 未登录特征（优先级高于已登录特征：ErrorCode4 信封里也可能带 lck 字样）
   if (IAM_BODY_SIGN.notLoggedIn.test(body)) return [false, 'body:notLoggedIn']
   // ③′ IAM 自己的登录/授权页（200 形态的会话失效，1.0.51 补）——
@@ -2316,6 +2404,24 @@ async function clearIamHalfLoginCookies(sess: Electron.Session): Promise<void> {
   }
 }
 
+/**
+ * 登出后预热 IAM（2026-10-26 新增）。
+ *
+ * 主动登出会把 IAM 会话一并清掉（否则站点拿 IAM 静默换回 OA 会话，用户会看到「刚退出
+ * 又自己进去了」）。但清完直接拉码就是**冷启动**：step1 要 5s/4s 超时重试，最坏 30s，
+ * 期间界面停在「正在重新获取二维码…」且码区空白（用户实测现象）。
+ * 这里在登出瞬间发一次轻量 GET，把冷启动成本提前付掉；失败无所谓，QR-START 自己还会兜底。
+ */
+async function warmUpIamForQr(sess: Electron.Session): Promise<void> {
+  try {
+    const t0 = Date.now()
+    const r = await httpJsonWithRedirect(OA_LOGIN_URL, sess, 5, 8000)
+    debugLog(`[QR-WARM] after logout ok in ${Date.now() - t0}ms status=${r.status} final=${(r.finalUrl || '').split('?')[0]}`)
+  } catch (e: any) {
+    debugLog('[QR-WARM] after logout failed: ' + String(e?.message || e))
+  }
+}
+
 // 用纯 HTTP 链（与 partition 共享 cookie jar）完成 IAM->OA 的 OAuth 授权码 SSO 落地。
 // 这是 1.0.9 已验证可用的路径（日志实证：HTTP SSO chain landed OA session）。
 // 真实链路：
@@ -2382,6 +2488,14 @@ async function completeOaSso(_loginToken: string, lck?: string): Promise<{ ok: b
     await backupOaSession(sess)
     // jar 互通：登录成功后导出全量 streamax cookie，供 mc_query.js 技能脚本复用（反之亦然）。
     await exportCookiesToJar(sess)
+    // 2026-10-26 新增：**登录成功顺手把鸿翼 edoc2 会话也建起来**。
+    // 此前 edoc2 只在第一次调用 wjxt 技能时才懒换票，等用户真去用时 IAM 若已失效，
+    // 就只能要求他"再登录一次"（用户实测：刚扫码登录完，用技能又提示登录）。
+    // 这里不 await：登录 UI 要立刻返回；同步过程写 wjxt.log 的 `[sync]` / debug-login 的
+    // `[login-sync]`，失败也不影响 OA 主流程。
+    void wjxtSyncAfterLogin('oa-login')
+      .then((r) => debugLog(`[login-sync] edoc2=${r === true ? 'ok' : r === false ? 'not-logged-in' : 'unknown'}`))
+      .catch((e: any) => debugLog('[login-sync] edoc2 sync threw: ' + String(e?.message || e)))
   }
   // 注意：不在此处发送 OA_CHECK_LOGGED，统一由 QR-POLL 外层根据返回值发送，
   // 避免「内部发一次 + 外层再发一次无 reason」导致 reason 被覆盖、前端重复 re-fetch。
@@ -2396,8 +2510,8 @@ ipcMain.handle(IPC.OA_QR_LOGIN_START, () => {
   qrLoginInFlight = (async () => {
   const sess = session.fromPartition(PARTITION)
   try {
-    // 0) 不再主动清 IAM 半登录态：登出流程已保留 IAM 会话（COOKIE_CLEAR 只清 OA/streamax），
-    //    故 IAM 通常是「热」的，保留可让 step1 第 1 次就 200、秒出二维码。
+    // 0) 不再主动清 IAM 半登录态：登出流程会在 COOKIE_CLEAR 之后**预热** IAM
+    //    （warmUpIamForQr），故 step1 通常第 1 次就 200、秒出二维码；
     //    首启冷启动 IAM 本就空，不清也无副作用。之前「震荡 timeout」实为循环前重复清 IAM 所致，已修。
 
     // 1) 先访问 OA 登录页，跟随重定向，提取一次性上下文 token (lck)
@@ -2478,13 +2592,14 @@ ipcMain.handle(IPC.OA_QR_LOGIN_START, () => {
     const page = loginPage!
     const pageText = page.text || ''
     const finalUrl = page.finalUrl || ''
-    let lck = ''
-    const urlLck = /[?&#]lck=(context_oauth2_[a-f0-9]+)/i.exec(finalUrl)
-    if (urlLck) lck = urlLck[1]
-    if (!lck) {
-      const textLck = /(context_oauth2_[a-f0-9]+)/i.exec(pageText)
-      if (textLck) lck = textLck[1]
+    // 从一次「登录页响应」里取一次性 lck：URL query 优先，其次正文里的 context_oauth2_…
+    const pickLck = (p: { text?: string; finalUrl?: string }): string => {
+      const u = /[?&#]lck=(context_oauth2_[a-f0-9]+)/i.exec(p.finalUrl || '')
+      if (u) return u[1]
+      const t = /(context_oauth2_[a-f0-9]+)/i.exec(p.text || '')
+      return t ? t[1] : ''
     }
+    let lck = pickLck({ text: pageText, finalUrl })
     debugLog(`[QR-START] loginPage finalUrl=${finalUrl.split('?')[0]}... status=${page.status}, lck=${lck.slice(0, 20) || '(empty)'}`)
     if (!lck) {
       // OA 已登录态：访问登录页直接 200、不再 302 去 IAM 要 lck（SESSION cookie 仍热）。
@@ -2529,12 +2644,28 @@ ipcMain.handle(IPC.OA_QR_LOGIN_START, () => {
       // 故先清掉陈旧 IAM 会话，让 IAM 视我们为新客户端；配合 retryable，
       // 下一次重试即以干净会话取码。仅在失败点清理，不动「热 IAM」的正常快路径。
       await clearIamHalfLoginCookies(sess)
-      // friendly 是重试耗尽后的终态文案（重试中的提示由前端按 reason 自行渲染），
-      // 故此处写终态语气，不再写「正在重试」。
-      const lckErr: any = new Error('未能从登录页获取 lck 上下文参数（IAM 半登录态，已清理陈旧会话待重试）')
-      lckErr.reason = 'retryable'
-      lckErr.friendly = '登录服务未就绪，请稍后重试'
-      throw lckErr
+      // 2026-10-26 优化：清完**当场重取一次**登录页（内联重试），拿到 lck 就直接出码。
+      // 旧行为是立刻抛 retryable，让前端退避 5 秒后再来一轮 —— 那 5 秒里界面停在
+      // 「正在重新获取二维码…」且二维码区域是空的（用户实测：退出登录后第一屏没码，
+      // 过一会儿点「刷新二维码」才秒出）。清 IAM 后服务端已把本次请求当新客户端，
+      // 重取的成功率很高，没必要把这 5 秒交给用户等。
+      let retriedLck = ''
+      try {
+        const p2 = await httpJsonWithRedirect(OA_LOGIN_URL, sess, 5, 8000, true)
+        retriedLck = pickLck(p2)
+        debugLog(`[QR-START] clearIam then refetch status=${p2.status} final=${(p2.finalUrl || '').split('?')[0]} lck=${retriedLck.slice(0, 20) || '(empty)'}`)
+      } catch (e: any) {
+        debugLog('[QR-START] clearIam then refetch failed: ' + String(e?.message || e))
+      }
+      if (!retriedLck) {
+        // friendly 是重试耗尽后的终态文案（重试中的提示由前端按 reason 自行渲染），
+        // 故此处写终态语气，不再写「正在重试」。
+        const lckErr: any = new Error('未能从登录页获取 lck 上下文参数（IAM 半登录态，已清理陈旧会话待重试）')
+        lckErr.reason = 'retryable'
+        lckErr.friendly = '登录服务未就绪，请稍后重试'
+        throw lckErr
+      }
+      lck = retriedLck
     }
 
     // 登录页会种下 IAM/SSO cookie，后续接口必须带上，否则 queryAuthMethods 返回空或报错
@@ -3189,31 +3320,52 @@ ipcMain.handle('mc-wjxt-diagnose', async (_e, langRaw?: string) => {
 
 ipcMain.handle(IPC.COOKIE_CLEAR, async () => {
   const sess = session.fromPartition(PARTITION)
-  // 登出只清「OA 工具会话」：oa.streamax.com 与 streamax.com 的会话 cookie。
-  // 刻意【保留】iam.streamax.com 的 route/SESSION/usk/REQID —— 这些是 IAM SSO 会话，
-  // 不清则登出后 IAM 仍是热的，下次刷新二维码 step1 第 1 次就能 200（约 2~5s 出码），
-  // 不必重建会话（否则会连续 timeout、拉码耗时 60s+）。
+  // 2026-10-26：登出语义定为「真正的未登录」。
+  // 历史上为了「登出后秒出码」刻意保留 iam.streamax.com 的 SSO 会话，但实测有两个问题：
+  //   1) 注释与实现长期不一致（判据 `endsWith('streamax.com')` 其实把 IAM 一起清了），
+  //      日志 `kept IAM session` 下一行就是 `[startup] total cookies: 0`；
+  //   2) 一旦真的保留 IAM，站点会拿它静默换回 OA 会话 —— 用户点了「退出登录」又自己
+  //      回到工具里，看起来像退出没生效。
+  // 现在：OA + 鸿翼 + IAM 全清（限本公司域，不碰其它站点），随后在后台**预热** IAM
+  // （warmUpIamForQr），把冷启动成本提前付掉 —— 码仍能 1~2 秒出来，但不会静默登回去。
   const all = await sess.cookies.get({})
+  let removed = 0
   for (const c of all) {
-    const domain = (c.domain || '').toLowerCase()
-    // 只删 OA / streamax 主域；保留 iam.streamax.com IAM 会话
-    if (domain.endsWith('oa.streamax.com') || domain.endsWith('streamax.com')) {
+    const domain = (c.domain || '').toLowerCase().replace(/^\./, '')
+    if (domain === 'streamax.com' || domain.endsWith('.streamax.com')) {
       try {
-        const url = `${c.secure ? 'https' : 'http'}://${domain.replace(/^\./, '')}${c.path || '/'}`
+        const url = `${c.secure ? 'https' : 'http'}://${domain}${c.path || '/'}`
         await sess.cookies.remove(url, c.name)
+        removed++
       } catch { /* ignore */ }
     }
   }
-  // 清掉 OA 工具态相关的本地存储（避免旧页面态干扰），但保留 IAM 会话
+  // 清掉工具态相关的本地存储（避免旧页面态干扰）
   await sess.clearStorageData({
     storages: ['localstorage', 'indexdb', 'cachestorage', 'serviceworkers'],
   }).catch(() => {})
-  debugLog('[COOKIE_CLEAR] cleared OA/streamax session cookies, kept IAM session')
+  debugLog(`[COOKIE_CLEAR] logged out: cleared ${removed}/${all.length} OA + wjxt + IAM cookies`)
   // 同时删除 OA 会话文件备份，避免退出登录后重开又自动恢复登录态
   try { if (existsSync(SESSION_BACKUP_PATH)) unlinkSync(SESSION_BACKUP_PATH) } catch {}
   // 说明：此前这里还会清掉文件系统（H5）保存的账号密码；该机制已整体移除（见 wjxtSkill.ts 顶部注释），
   // 因此不再存在需要清理的口令文件。
-  checkLoginAndNotify()
+  // 会话判定复位 + 停心跳：否则登出后一次 focus 检测会拿旧的 valid 结论把二维码糊掉。
+  sessionValid = false
+  sessionExpired = false
+  sessionVerdict = 'invalid'
+  stopSessionHeartbeat()
+  // lastTokenTs 归零 → QR-START 里那个「闲置 > 30min 就循环探测 70s」的冷启动分支被跳过：
+  // 冷启动成本已由下面的预热提前付掉，不需要再让用户对着空白等 70 秒轮询。
+  try { setLoginPref({ ...getLoginPref(), lastTokenTs: 0 }) } catch {}
+  // 预热 IAM：最多等 1.2s（够一次 GET 落地），既不让登出明显卡顿，又能让紧接着的第一轮
+  // QR-START 直接命中 lck —— 而不是冷启动超时 5s、界面停在「正在重新获取二维码…」。
+  await Promise.race([
+    warmUpIamForQr(sess),
+    new Promise<void>((r) => setTimeout(r, 1200)),
+  ])
+  // 用专属 reason：渲染层据此显示「已退出登录，请重新扫码登录」，且不再额外 bump qrRefetchSeq
+  // （登录层自己会因 loginState→logging 拉一次码；两路拉码会互相覆盖，把刚渲染的码擦掉）。
+  requestLoginView('logout', { force: true })
 })
 ipcMain.handle(IPC.INSTALL_UPDATE, () => {
   const fs = require('fs')

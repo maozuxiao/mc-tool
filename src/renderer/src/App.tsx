@@ -105,18 +105,26 @@ export function App() {
       } else {
         const reason = s.reason
         setLoginError(
-          reason === 'network'
-            ? t('errLoginNetwork')
-            : reason === 'expired'
-              ? t('errLoginExpired')
-              : t('errLoginIncomplete')
+          // 2026-10-26：主动登出不是失败，别用「登录未完成」这种口吻。
+          reason === 'logout'
+            ? t('qrLoggedOut')
+            : reason === 'network'
+              ? t('errLoginNetwork')
+              : reason === 'expired'
+                ? t('errLoginExpired')
+                : t('errLoginIncomplete')
         )
         // 1.0.53：只在「刚刚从已登录掉下来」或「当前不在扫码态」时才请求重取二维码。
         // 主进程侧的触发源已增至三处（窗口 focus / 心跳兜底 / 原有路径），其中窗口 focus
         // 是高频事件 —— 若每次都自增，用户正要扫码就被反复刷掉。主进程已有幂等（
         // requestLoginView 的 loginViewShown），这里再加一道：即便消息仍重复到达
         // （例如登录层已经显示着时又来一条），也不会把正在展示的二维码重置。
-        if (wasLoggedIn || wasLoginState !== 'logging') {
+        //
+        // 2026-10-26：主动登出**不再额外自增**。登出时主进程同时下发
+        // OA_LOGIN_STATE('logging')，登录层自身会因为 loginState 变化拉一次码；
+        // 这里再 bump 就是两路并发拉码，后一路的 setQrSrc('') 会把前一路刚渲染的
+        // 二维码擦掉（用户实测：退出登录后一屏空白，点「刷新二维码」才有）。
+        if (reason !== 'logout' && (wasLoggedIn || wasLoginState !== 'logging')) {
           setQrRefetchSeq(useStore.getState().qrRefetchSeq + 1)
         }
       }

@@ -82,6 +82,8 @@ export function setWjxtLoginOpener(fn: ((url: string) => void) | null): void {
  * 因此这里用**不显示**的窗口把首页跑一遍 —— 成功则全程无弹窗，失败才弹可见的登录窗口。
  */
 let bootstrapHiddenWindow: ((url: string, settleMs?: number) => Promise<boolean>) | null = null
+/** 登录后同步 edoc2 的并发去重（主进程登录成功只调一次，这里再兜一层） */
+let loginSyncInFlight: Promise<boolean | null> | null = null
 export function setWjxtBootstrap(fn: ((url: string, settleMs?: number) => Promise<boolean>) | null): void {
   bootstrapHiddenWindow = fn
 }
@@ -1640,6 +1642,48 @@ export function wjxtProbeLoggedIn(): Promise<boolean | null> {
 }
 
 /**
+ * 登录成功后**主动**把 edoc2 会话建起来（2026-10-26 修复）。
+ *
+ * 为什么必须有：应用层的「登录」只建立 OA(`oa.streamax.com`) + IAM(`iam.streamax.com`) 会话，
+ * 鸿翼 edoc2(`wj.streamax.com:9443`) 是**第三套独立会话**，此前只有第一次调用本技能时才懒换票
+ * （`warmUp` 里的静默 SSO）。实测（2026-10-26 03:32，用户日志）：01:53 扫码登录、03:32 使用技能，
+ * 懒换票时 IAM 已不可用 → `WJXT_NO_SESSION` → 界面要求「点链接登录或退出重登」，
+ * 用户感知就是「刚扫码登录完还让我再登录一次」。
+ *
+ * 现在由主进程在 `completeOaSso` 成功后调用本函数：拿刚建立的 IAM 票据跑一次隐藏窗口 SSO，
+ * 把 edoc2 会话一并种好（幂等：已有会话直接跳过；并发只跑一次）。
+ *
+ * @returns true=已登录 / false=确实未登录 / null=无法判定
+ */
+export function wjxtSyncAfterLogin(reason = 'oa-login'): Promise<boolean | null> {
+  if (loginSyncInFlight) return loginSyncInFlight
+  loginSyncInFlight = (async () => {
+    try {
+      const before = await probeLoggedIn().catch(() => null)
+      if (before === true) {
+        wjxtLog(`[sync] ${reason}: 已有 edoc2 会话，跳过换票`)
+        return true
+      }
+      if (!bootstrapHiddenWindow) {
+        wjxtLog(`[sync] ${reason}: 隐藏窗口预热能力未注入，跳过`)
+        return before
+      }
+      // 与技能侧 warmUp 用的是同一个 SSO 入口：站点 SPA 自己完成换票，成功后不弹任何窗口。
+      await bootstrapHiddenWindow(WJXT_LOGIN_URL, 2500).catch(() => false)
+      const after = await probeLoggedIn().catch(() => null)
+      wjxtLog(`[sync] ${reason}: edoc2 before=${before} after=${after}`)
+      return after
+    } catch (e: any) {
+      wjxtLog(`[sync] ${reason} failed: ${String(e?.message || e)}`)
+      return null
+    } finally {
+      loginSyncInFlight = null
+    }
+  })()
+  return loginSyncInFlight
+}
+
+/**
  * 由 fileGuid 拿到「原始文件」的下载直链。
  * GetPreviewPara 返回的 fileUrl 对 DOC/DOCX 指向 GetConversionFile（转码件），
  * 按契约把 pathname 换成 GetOriginFile、x 只保留前三段、去掉 r 参数，即得原始文件。
@@ -1795,7 +1839,10 @@ async function reloginResult(code: 'NEED_RELOGIN' | 'WJXT_NO_SESSION'): Promise<
     const label = fresh ? '扫码登录' : 'SSO 登录'
     const note = fresh
       ? 'IAM 二维码页，已生成一次性登录上下文'
-      : '站点 SSO 入口，打开后自动跳转完成登录（通常不会显示二维码）'
+      // 非 fresh = 站点 SSO 入口：它全靠 IAM 会话换票，IAM 一旦判不出来/已失效，
+      // 打开后就是停在 idp/authCenter/authenticate 的空白页。把这个前提写进文案，
+      // 免得用户点完一头雾水（2026-10-26 用户实测：点了链接仍然登不上）。
+      : '站点 SSO 入口（依赖 IAM 会话；若打开是空白，请改用「账号密码登录」）'
     options.push({
       type: fresh ? 'qrcode' : 'sso',
       label,

@@ -68,14 +68,26 @@ export function LoginOverlay({ loginState }: Props) {
   // 默认 forceQr=true：直接获取二维码，跳过主进程免登录校验（免登录由启动时的
   // checkLoginAndNotify 负责；这里只需拿到可用二维码）。退出登录/重开无 cookie 时
   // 直接拿码，避免走易 timeout 的自动校验路径。
+  // 2026-10-26：请求序号。任何一次 fetchQr 只有「仍是最新一次」时才允许写 UI ——
+  // 退出登录时可能同时有「登录层自动拉码」与「qrRefetchSeq 触发的重拉」，两路并发后
+  // 主进程的互斥锁会让后一路复用前一路的结果；若无序号守卫，后一路的副作用（清空二维码、
+  // 置成失败态）会覆盖前一路已经渲染好的二维码，界面表现为「有框没码 + 正在重新获取」。
+  const fetchSeqRef = useRef(0)
+  const lastFetchAtRef = useRef(0)
+
   const fetchQr = useCallback(async (forceQr = true, retryLeft = 0) => {
-    console.log('[QR] fetchQr called, loginState=', loginState, 'forceQr=', forceQr)
+    const seq = ++fetchSeqRef.current
+    const alive = () => seq === fetchSeqRef.current
+    lastFetchAtRef.current = Date.now()
+    console.log('[QR] fetchQr called, loginState=', loginState, 'forceQr=', forceQr, 'seq=', seq)
     stopPolling()
     setLoading(true)
     setError('')
     setLoginError('')
     setScanned(false)
-    setQrSrc('')
+    // 关键：**不清 qrSrc**。旧行为一进来就 setQrSrc('')，于是「重拉码」的瞬间界面上
+    // 二维码直接消失（用户截图那种「有框没码 + 登录未完成，正在重新获取二维码…」）。
+    // 旧码先留着，新码到了再替换，视觉上不出现空窗。
     setQrToken('')
     setAuthChainCode('')
     setLck('')
@@ -85,6 +97,10 @@ export function LoginOverlay({ loginState }: Props) {
       console.log('[QR] invoking startQrLogin...')
       // forceQr=true 表示用户手动点击刷新：跳过主进程自动认证判断，直接获取二维码
       const res = await window.mcApi.startQrLogin(forceQr)
+      if (!alive()) {
+        console.log('[QR] stale response dropped (seq=', seq, ')')
+        return
+      }
       console.log('[QR] startQrLogin result=', res)
       if (!res.success) {
         // 可重试错误：自动退避重试，IAM 一恢复即出新码，无需用户手动刷新。
@@ -96,7 +112,9 @@ export function LoginOverlay({ loginState }: Props) {
           )
           setStatus('qrRetrying')
           setLoading(false)
-          window.setTimeout(() => fetchQr(forceQr, retryLeft - 1), 5000)
+          window.setTimeout(() => {
+            if (alive()) fetchQr(forceQr, retryLeft - 1)
+          }, 5000)
           return
         }
         throw new Error(res.message || useStore.getState().t('errQrFetch'))
@@ -120,11 +138,18 @@ export function LoginOverlay({ loginState }: Props) {
       setStatus('qrScanHint')
       setLoading(false)
     } catch (e: any) {
+      // 过期请求的失败不该污染界面（可能已经有新码在展示）
+      if (!alive()) {
+        console.log('[QR] stale error dropped:', e?.message)
+        return
+      }
       const msg = e.message || useStore.getState().t('errQrFetch')
       // 主进程正在并发获取二维码（互斥锁拒绝），稍候自动重试，不向用户报错
       if (/正在获取二维码/.test(msg)) {
         setStatus('qrFetching')
-        window.setTimeout(() => fetchQr(forceQr, retryLeft), 800)
+        window.setTimeout(() => {
+          if (alive()) fetchQr(forceQr, retryLeft)
+        }, 800)
         return
       }
       setError(msg)
@@ -144,6 +169,9 @@ export function LoginOverlay({ loginState }: Props) {
     if (loginState !== 'logging') return
     // 初次进入（无 token）或“重新登录”（上次不是 logging）→ 重新拉取
     if (!qrToken || prev !== 'logging') {
+      // 800ms 内已经拉过一次就不再重复拉：退出登录会同时触发「本 effect」与
+      // 「qrRefetchSeq effect」，两路并发只会让主进程重复跑 QR-START（互斥锁下白等）
+      if (Date.now() - lastFetchAtRef.current < 800) return
       setExpired(false)
       fetchQr(true, 6)
     }
@@ -156,6 +184,8 @@ export function LoginOverlay({ loginState }: Props) {
     if (qrRefetchSeq === 0) return
     if (qrRefetchSeq === lastRefetchSeqRef.current) return
     lastRefetchSeqRef.current = qrRefetchSeq
+    // 同上：主进程刚下发 logging 让登录层拉过码时，不再叠加第二次 QR-START
+    if (Date.now() - lastFetchAtRef.current < 800) return
     fetchQr(true, 6)
   }, [qrRefetchSeq, fetchQr])
 
