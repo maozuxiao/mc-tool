@@ -1,7 +1,7 @@
 import { app, BrowserWindow, session, ipcMain, shell, dialog, Menu, MenuItem, Tray } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import { join, dirname } from 'path'
-import { appendFileSync, existsSync, readFileSync, unlinkSync, writeFileSync, mkdirSync } from 'fs'
+import { appendFileSync, existsSync, readFileSync, unlinkSync, writeFileSync, mkdirSync, statSync, renameSync } from 'fs'
 import http from 'http'
 import https from 'https'
 import zlib from 'zlib'
@@ -9,7 +9,7 @@ import { OA_LOGIN_URL, OA_ORIGIN } from '@shared/constants'
 import { IPC } from '@shared/types'
 import { initAutoUpdater, isUpdateDownloaded, startUpdateDownload } from './updater'
 import { registerAIIPC } from './ai/aiIpc'
-import { setWjxtLoginOpener, setWjxtBootstrap, setWjxtLoginCloser, setWjxtHiddenNav, setWjxtSsoHttp, setWjxtIamProbe, markChromiumIamReachability, parseChromiumNetError, wjxtResolveOriginUrl, wjxtH5Login, wjxtQrLoginUrl, startLoginWatch, wjxtDiag, wjxtProbeLoggedIn, wjxtSyncAfterLogin, WJXT_H5_LOGIN_URL, WJXT_ORIGIN } from './ai/wjxtSkill'
+import { setWjxtLoginOpener, setWjxtBootstrap, setWjxtLoginCloser, setWjxtHiddenNav, setWjxtSsoHttp, setWjxtIamProbe, setWjxtLoginNotifier, markChromiumIamReachability, parseChromiumNetError, wjxtResolveOriginUrl, wjxtH5Login, wjxtQrLoginUrl, startLoginWatch, wjxtDiag, wjxtProbeLoggedIn, wjxtSyncAfterLogin, WJXT_H5_LOGIN_URL, WJXT_ORIGIN } from './ai/wjxtSkill'
 import { translate, type Lang } from '@shared/i18n'
 import { listSkills } from './ai/skillRegistry'
 import type { IamAlive as SharedIamAlive } from '@shared/ai-types'
@@ -132,12 +132,52 @@ function applyAutoLaunch(): void {
 
 // 调试日志文件
 const LOG_PATH = join(app.getPath('userData'), 'debug-login.log')
+/** 单个日志文件上限，超过则滚动为 `debug-login.log.1`（只保留一份备份） */
+const LOG_MAX_BYTES = 5 * 1024 * 1024
+/** 滚动检查按自然日做一次即可，避免每条日志都 stat 一次 */
+let logRotateDay = ''
+/**
+ * 日志滚动（2026-10-27 补）。
+ *
+ * 此前 debug-login.log 只增不减：26 天涨到 4 MB / 40403 行，其中 71% 是
+ * `probeOaSession` 与 `[COOKIE] set/replicate`，排查时基本只能 grep。
+ * 现在跨天时检查一次大小，超 5 MB 就滚动成 `.log.1`（旧 .1 直接覆盖），
+ * 保证现役日志始终可读、且不会无限膨胀。
+ */
+function rotateLogIfNeeded(): void {
+  const day = new Date().toISOString().slice(0, 10)
+  if (day === logRotateDay) return
+  logRotateDay = day
+  try {
+    if (!existsSync(LOG_PATH)) return
+    if (statSync(LOG_PATH).size < LOG_MAX_BYTES) return
+    const bak = LOG_PATH + '.1'
+    if (existsSync(bak)) unlinkSync(bak)
+    renameSync(LOG_PATH, bak)
+    appendFileSync(LOG_PATH,
+      `[${new Date().toISOString()}] [LOG] rotated to debug-login.log.1 (>= ${LOG_MAX_BYTES / 1024 / 1024} MB)\n`)
+  } catch { /* ignore */ }
+}
+
 function debugLog(msg: string) {
+  rotateLogIfNeeded()
   const line = `[${new Date().toISOString()}] ${msg}\n`
   try {
     appendFileSync(LOG_PATH, line)
   } catch { /* ignore */ }
   console.log(line.trim())
+}
+
+/**
+ * 高频噪音日志：探测成功、cookie 写入/复制。
+ *
+ * 默认**不落盘** —— 这三类占历史日志 71%。只有排查 cookie / 会话细节时才需要，
+ * 用环境变量 `MC_VERBOSE_LOG=1` 打开。失败路径仍然走 debugLog，不丢信息。
+ */
+const VERBOSE_LOG = process.env.MC_VERBOSE_LOG === '1'
+function verboseLog(msg: string) {
+  if (!VERBOSE_LOG) return
+  debugLog(msg)
 }
 
 // 登录后功能排查专用日志（查询请求 / 返回 / 登录态）
@@ -878,6 +918,17 @@ function createWindow() {
     }
 
     // 仍失败：给一句人话 + 一个可点的下一步（不再让用户对着白屏猜）
+    //
+    // 2026-10-27 修：这里此前**整段没有日志**，且把节流时刻写在弹窗**之前**，导致两个问题
+    // （实测 10-27 05:46:32~38 完全无法复盘）：
+    //   ① 弹窗是否弹出、用户点了哪个按钮，debug-login.log 里查不到任何痕迹 —— 同文件里
+    //      `promptWjxtLogin` 的每条分支都有日志，唯独这条引导是黑的；
+    //   ② 提前写 `wjxtLoginPromptAt` 会让紧接着的 AI 链路在 10 分钟内被静默跳过：
+    //      用户对预览窗选了「稍后再说」，再让 AI 查鸿翼文件时只会拿到「未登录」，
+    //      而引导弹窗被自己压掉了，用户得不到下一步动作。
+    // 现在：节流时刻改到「用户确实选择稍后再说」之后才记（选登录就不压制 AI 链路），
+    // 并在每个出口都留一条日志。
+    debugLog(`[wjxt] preview login prompt -> user (heal failed, landed=${landed.split('?')[0]})`)
     const r = await dialog.showMessageBox(win, {
       type: 'warning',
       buttons: ['登录文件系统', '稍后再说'],
@@ -889,9 +940,20 @@ function createWindow() {
       detail: '点「登录文件系统」会打开应用内登录窗口（输入账号密码）；登录成功后本页会自动重新加载。\n' +
         '若登录后仍然空白，可先重启应用 —— 它会尝试用 OA 会话自动恢复文件系统登录态。'
     }).catch(() => ({ response: 1 }))
-    if (r.response !== 0 || win.isDestroyed()) return
+    if (r.response !== 0) {
+      // 用户已明确知道这件事 → 记一笔节流，避免 AI 工具侧紧接着重复弹一次同样的引导
+      wjxtLoginPromptAt = Date.now()
+      debugLog('[wjxt] preview login prompt dismissed -> AI prompt throttled 10min')
+      return
+    }
+    if (win.isDestroyed()) {
+      debugLog('[wjxt] preview login prompt accepted but window gone -> abort')
+      return
+    }
     const ok = await wjxtH5Login().catch(() => false)
-    if (ok && !win.isDestroyed()) void win.loadURL(url).catch(() => { /* 同上 */ })
+    debugLog(`[wjxt] preview h5 login ${ok ? 'ok' : 'failed'}`)
+    if (ok) void win.loadURL(url).catch(() => { /* 同上 */ })
+    // 登录没成功时不写节流：AI 链路仍应在下次真正用到文件系统时把用户拉去登录
   }
 
   // 鸿翼文件系统技能在「分区里没有可用登录态」时会调用它弹出应用内登录窗口
@@ -962,13 +1024,20 @@ function createWindow() {
       const netErr = parseChromiumNetError(e?.message)
       if (netErr) markChromiumIamReachability(false, `bootstrap net=${netErr}`)
     }
-    const ok = await settled
+    const loaded = await settled
+    // 1.0.64：`ok` 不再只看「页面加载完成」，而是看**有没有落回站点**。
+    // 旧实现只要 did-finish-load 就返回 true，于是停在 iam 授权页也算"成功"，
+    // 日志里满屏 `hidden window done ok=true`（实测 2026-10-27），排查时极具误导性。
+    const landed = (() => { try { return win.webContents.getURL() || '' } catch { return '' } })()
+    const onSite = /^https?:\/\/wj\.streamax\.com/i.test(landed) && !/\/sso\/auth\//i.test(landed)
     try { if (!win.isDestroyed()) win.destroy() } catch { /* ignore */ }
     if (wjxtBootstrapWin === win) wjxtBootstrapWin = null
-    debugLog(`[wjxtBootstrap] hidden window done ok=${ok}`)
-    return ok
+    debugLog(`[wjxtBootstrap] hidden window done loaded=${loaded} onsite=${onSite} land=${landed.split('?')[0] || '(empty)'}`)
+    return loaded && onSite
   }
   setWjxtBootstrap((url, settleMs) => bootstrapWjxtSession(url, settleMs))
+  // 工具侧确认「必须人工登录」时回调到这里（见 promptWjxtLogin 的注释）
+  setWjxtLoginNotifier((code) => { void promptWjxtLogin(code) })
 
   // ── 鸿翼「隐藏窗口取最终 URL」（用于现取一次性 lck 拼扫码登录页）──────────
   // 为什么不是主进程 fetch：实测 `lck`（context_oauth2_…）是在**站点 SSO 跳转链的浏览器
@@ -1249,7 +1318,11 @@ async function probeOaSession(sess: Electron.Session): Promise<ProbeResult> {
     const returnsJson = text.length > 0 && !text.startsWith('<')
     const ok = result.status >= 200 && result.status < 400 && returnsJson && result.status !== 901
     const reason: ProbeReason = ok ? 'ok' : (result.status === 901 ? 'reauth' : 'invalid')
-    debugLog(`[probeOaSession] status=${result.status} returnsJson=${returnsJson} -> ${ok} (${reason})`)
+    // 成功不落盘：10 分钟一次的心跳会把它刷成日志主体（历史日志里占 43%）。
+    // 失败必须留痕 —— 那是判断「会话为何失效」的唯一依据。
+    const probeMsg = `[probeOaSession] status=${result.status} returnsJson=${returnsJson} -> ${ok} (${reason})`
+    if (ok) verboseLog(probeMsg)
+    else debugLog(probeMsg)
     return { ok, reason }
   } catch (e: any) {
     debugLog(`[probeOaSession] error: ${e?.message || e} (network)`)
@@ -1273,9 +1346,21 @@ async function tryAutoSsoRefresh(sess: Electron.Session): Promise<boolean> {
       debugLog('[autoSSO] OA login page chain error: ' + e.message)
     }
     // 等待落地（优化 A：间隔 400ms，上限 16 轮，覆盖 ~6s 最坏落地）
+    //
+    // 2026-10-27 修：**once reauth, always reauth**。
+    // 探针返回 901(reauth) 意味着 OA 已把请求 302 回 IAM，即 IAM 侧根本没有有效会话 ——
+    // 这种状态下无论再等 16 轮还是再等 10 分钟，落地都不可能成功。
+    // 历史日志实证：858 次自愈尝试里 856 次是这个终态，每次都把 16 轮探针（≈7s、
+    // 17 次 OA 请求）打满才收工，10-18 一天就空转 2592 次 probeOaSession。
+    // 现在：第一轮拿到 reauth 立即收工，只保留 network（无法判定，可能真会恢复）的整轮等待。
     for (let i = 0; i < 16; i++) {
       await new Promise(r => setTimeout(r, 400))
-      if ((await probeOaSession(sess)).ok) break
+      const probed = await probeOaSession(sess)
+      if (probed.ok) break
+      if (probed.reason === 'reauth') {
+        debugLog(`[autoSSO] IAM session gone (reauth) after ${i + 1} probe(s) -> give up early`)
+        break
+      }
     }
   } catch (e: any) {
     debugLog('[autoSSO] trigger error: ' + e.message)
@@ -1294,6 +1379,17 @@ async function tryAutoSsoRefresh(sess: Electron.Session): Promise<boolean> {
 // 判定铁律沿用项目历史：只信 probeOaSession().ok；network 视为无法判定，绝不误踢真登录。
 const SESSION_CHECK_INTERVAL_MS = 10 * 60 * 1000  // 心跳间隔
 const SESSION_CHECK_THROTTLE_MS = 60 * 1000       // 恢复窗口探测的节流窗口
+/**
+ * 连续自愈失败后的心跳退避阶梯（2026-10-27 补）。
+ *
+ * 背景：托盘常驻时「会话已死但用户不在」是常态。旧实现每 10 分钟无条件重试一次，
+ * 日志实证 820/858 次间隔精确等于 10 分钟 —— 一晚 6 小时空转 36 轮、
+ * 每轮 17 次 OA 请求，全部注定失败（reason=reauth 是终态）。
+ * 现在：连续失败按 10 → 20 → 40 分钟退避（40 分钟封顶），用户唤回窗口时立即复位。
+ */
+const SESSION_HEAL_BACKOFF_MS = [20 * 60 * 1000, 40 * 60 * 1000]
+/** 连续「探测确认失效且自愈失败」的次数；任何一次探测成功或用户交互都清零 */
+let healFailureStreak = 0
 let sessionCheckTimer: NodeJS.Timeout | null = null
 /**
  * 会话检测的结论（1.0.55 由布尔改三态）。
@@ -1388,6 +1484,8 @@ async function checkAndHealSession(): Promise<SessionVerdict> {
         sessionValid = true
         sessionExpired = false
         sessionVerdict = 'valid'
+        // 会话恢复 → 退避阶梯清零，心跳回到基础频率
+        healFailureStreak = 0
         // 会话确认有效 → 复位「登录层已展示」标志，否则用户登录后再次过期将收不到通知
         markSessionHealthy()
         return 'valid' as const
@@ -1430,11 +1528,14 @@ async function checkAndHealSession(): Promise<SessionVerdict> {
         sessionValid = true
         sessionExpired = false
         sessionVerdict = 'valid'
+        healFailureStreak = 0
         // 自愈成功同样是「会话有效」，复位标志（用户全程无感，不该停在登录层）
         markSessionHealthy()
         return 'valid' as const
       }
-      debugLog('[SESSION] silent SSO heal failed, session expired')
+      // 连续失败计数：心跳据此退避（见 SESSION_HEAL_BACKOFF_MS）
+      healFailureStreak++
+      debugLog(`[SESSION] silent SSO heal failed, session expired (streak=${healFailureStreak})`)
       sessionValid = false
       sessionExpired = true
       sessionVerdict = 'invalid'
@@ -1477,38 +1578,83 @@ async function checkSessionAndNotify(source: SessionCheckSource): Promise<boolea
   return verdict === 'valid'
 }
 
-/** 后台心跳：每 10 分钟探测一次；窗口不可见时仅标记状态，绝不主动弹窗打扰用户 */
+/** 当前心跳应使用的间隔：连续自愈失败时按阶梯退避（10 → 20 → 40 分钟封顶） */
+function currentHeartbeatInterval(): number {
+  if (healFailureStreak <= 0) return SESSION_CHECK_INTERVAL_MS
+  const idx = Math.min(healFailureStreak - 1, SESSION_HEAL_BACKOFF_MS.length - 1)
+  return SESSION_HEAL_BACKOFF_MS[idx]
+}
+
+/**
+ * 后台心跳：默认每 10 分钟探测一次；窗口不可见时仅标记状态，绝不主动弹窗打扰用户。
+ *
+ * 2026-10-27 由 `setInterval` 改为「自调度 setTimeout」：间隔需要在每次 tick 后按
+ * `healFailureStreak` 动态计算，固定 interval 无法退避。
+ */
 function startSessionHeartbeat(): void {
+  // 走到这里说明「会话刚刚确认为有效」（启动恢复成功 / 扫码登录落地）→ 退避阶梯清零。
+  // 不然整夜失败留下的 streak 会让刚登录成功的下一次心跳排到 40 分钟后。
+  healFailureStreak = 0
   stopSessionHeartbeat()
-  sessionCheckTimer = setInterval(() => {
-    if (sessionCheckInFlight) return
-    // 1.0.53：窗口**正处于聚焦态**（用户正在看）时，检测失败要通知渲染层回到扫码页 ——
-    // 否则「应用一直开着、会话在后台悄悄过期」时界面毫无反应，用户只能等某次操作报错才发现。
-    // 窗口不可见 / 最小化 / 收进托盘时保持原有「不打扰」取向，等 focus 或托盘唤回时再处理。
-    void checkAndHealSession().then(verdict => {
+  scheduleSessionHeartbeat()
+  debugLog(`[SESSION] heartbeat started (every ${SESSION_CHECK_INTERVAL_MS / 60000} min, ` +
+    `backoff up to ${Math.max(...SESSION_HEAL_BACKOFF_MS) / 60000} min on repeated heal failure)`)
+}
+
+function scheduleSessionHeartbeat(): void {
+  stopSessionHeartbeat()
+  const delay = currentHeartbeatInterval()
+  if (healFailureStreak > 0) {
+    debugLog(`[SESSION] heartbeat backoff: next check in ${Math.round(delay / 60000)} min ` +
+      `(consecutive heal failures=${healFailureStreak})`)
+  }
+  sessionCheckTimer = setTimeout(() => {
+    sessionCheckTimer = null
+    void runHeartbeatTick()
+  }, delay)
+}
+
+async function runHeartbeatTick(): Promise<void> {
+  try {
+    if (!sessionCheckInFlight) {
+      // 1.0.53：窗口**正处于聚焦态**（用户正在看）时，检测失败要通知渲染层回到扫码页 ——
+      // 否则「应用一直开着、会话在后台悄悄过期」时界面毫无反应，用户只能等某次操作报错才发现。
+      // 窗口不可见 / 最小化 / 收进托盘时保持原有「不打扰」取向，等 focus 或托盘唤回时再处理。
+      const verdict = await checkAndHealSession()
       // 只有「明确失效」且窗口正被用户看着时才打扰；unknown（网络抖动）不弹
       if (verdict === 'invalid' && isWindowActivelyVisible()) {
         debugLog('[SESSION] heartbeat: session invalid while window focused -> request login view')
         requestLoginView('expired')
       }
-    })
-    // IAM 会话独立于 OA，必须单独保活（见 keepIamSessionAlive）：
-    // 否则 OA 靠 LtpaToken 一直免登录，IAM 却在后台悄悄 idle 过期，
-    // 表现就是「应用整体正常，但工作台里点入口跳 IAM 要重新扫码」。
-    if (sessionValid) void keepIamSessionAlive(session.fromPartition(PARTITION))
-  }, SESSION_CHECK_INTERVAL_MS)
-  debugLog(`[SESSION] heartbeat started (every ${SESSION_CHECK_INTERVAL_MS / 60000} min)`)
+      // IAM 会话独立于 OA，必须单独保活（见 keepIamSessionAlive）：
+      // 否则 OA 靠 LtpaToken 一直免登录，IAM 却在后台悄悄 idle 过期，
+      // 表现就是「应用整体正常，但工作台里点入口跳 IAM 要重新扫码」。
+      // 注：这里刻意**不**弹「重新登录文件系统」。
+      // 心跳是 10 分钟一次的常驻动作，用户可能根本没在用 wjxt，弹窗就成了骚扰。
+      // 登录引导只由「用户真的用到了 wjxt」（工具报未登录 / 预览窗白屏）触发。
+      if (sessionValid) void keepIamSessionAlive(session.fromPartition(PARTITION))
+    }
+  } catch (e: any) {
+    debugLog('[SESSION] heartbeat tick error: ' + (e?.message || e))
+  } finally {
+    // 每次 tick 后重算间隔：失败越多、下一次越晚
+    if (sessionCheckTimer === null && !quitting) scheduleSessionHeartbeat()
+  }
 }
+
 function stopSessionHeartbeat(): void {
   if (sessionCheckTimer) {
-    clearInterval(sessionCheckTimer)
+    clearTimeout(sessionCheckTimer)
     sessionCheckTimer = null
   }
 }
 
 /** 窗口被调出（托盘单击 / 菜单 / 任务栏图标）时：强制检测一次，自愈仍失败才拉起登录 */
 async function onWindowShownCheck(): Promise<void> {
+  // 用户回来了：退避阶梯清零，下一次心跳恢复基础频率（否则一次整夜失败要再等 40 分钟）
+  healFailureStreak = 0
   await checkSessionAndNotify('window-shown')
+  if (sessionCheckTimer) scheduleSessionHeartbeat()
 }
 
 async function isOALoggedin(): Promise<boolean> {
@@ -1579,6 +1725,18 @@ async function isOALoggedinStrict(sess: Electron.Session): Promise<boolean> {
 // 导致启动期整条探测链（migrate/restore/probe）跑两遍、多发 6 次 OA 请求。
 // 并发调用共享同一次 in-flight 检查。
 let loginCheckInFlight: Promise<void> | null = null
+/**
+ * 启动期的「一次性」工作是否已做过（migrate / restore / dump cookie 诊断）。
+ *
+ * 2026-10-27 修（10-26 07:20:05 / 07:20:06 日志实证）：渲染层加载完成后会发一次
+ * `OA_RELOAD`，与 createWindow 末尾的首次 checkLoginAndNotify 只差 660ms ——
+ * 两个调用没有并发重叠（第一个已返回），防重入的 inFlight 拦不住，于是整条启动探测链
+ * （migrate → restore → dump → probe → LOGIN-VIEW）完整跑了两遍，登录层被强制刷新两次。
+ * 现在：这三步进程内只做一次，后续调用只做真实探测；并对 3 秒内的重复调用直接跳过。
+ */
+let startupRestoreDone = false
+let startupRestoreOk = false
+let lastLoginCheckAt = 0
 
 function checkLoginAndNotify(): Promise<void> {
   if (loginCheckInFlight) {
@@ -1587,6 +1745,7 @@ function checkLoginAndNotify(): Promise<void> {
   }
   loginCheckInFlight = doCheckLoginAndNotify().finally(() => {
     loginCheckInFlight = null
+    lastLoginCheckAt = Date.now()
     // 1.0.53：启动检测到此结束（正常返回、forceQr 提前 return 或抛异常都算）→ 之后
     // 窗口 focus 才能触发检测。放在这里而不是函数内部，是为了一次覆盖它的全部分支。
     startupLoginChecked = true
@@ -1596,6 +1755,12 @@ function checkLoginAndNotify(): Promise<void> {
 
 async function doCheckLoginAndNotify() {
   if (!mainWindow) return
+  // 重复调用抑制：渲染层 OA_RELOAD 紧跟 createWindow 的首次检测到达（实测间隔 660ms），
+  // 上一个检查已返回、inFlight 为空，会完整重跑一遍并把登录层强制刷新第二次。见上方注释。
+  if (startupLoginChecked && Date.now() - lastLoginCheckAt < 3000) {
+    debugLog(`[startup] duplicate login check skipped (${Date.now() - lastLoginCheckAt}ms after previous)`)
+    return
+  }
 
   // 强制走二维码登录判定：
   // 同时满足「当天首次登录」与「token 间隔 > 1 小时」时，跳过 token 免密恢复/探测，
@@ -1618,12 +1783,17 @@ async function doCheckLoginAndNotify() {
     return
   }
 
-  // 一次性迁移旧备份（若 partition 已空且有老文件）；之后信任 persist 持久化
-  await migrateLegacyBackupIfNeeded()
-  // 若 partition 内无 OA 会话，尝试从文件恢复（解决 session cookie 跨启动丢失）
-  const restoredOk = await restoreOaSession(session.fromPartition(PARTITION))
-  // 打印诊断，确认跨启动后 Cookie 是否仍在
-  await dumpPersistedCookies()
+  // 以下三步都是「进程启动期一次」的工作，重复调用不再重跑（见 startupRestoreDone 注释）
+  if (!startupRestoreDone) {
+    // 一次性迁移旧备份（若 partition 已空且有老文件）；之后信任 persist 持久化
+    await migrateLegacyBackupIfNeeded()
+    // 若 partition 内无 OA 会话，尝试从文件恢复（解决 session cookie 跨启动丢失）
+    startupRestoreOk = await restoreOaSession(session.fromPartition(PARTITION))
+    // 打印诊断，确认跨启动后 Cookie 是否仍在
+    await dumpPersistedCookies()
+    startupRestoreDone = true
+  }
+  const restoredOk = startupRestoreOk
   // 恢复后仍需真实探测确认 OA 认可登录态：1.0.13 回归证明「cookie 已恢复≠OA 认可」，
   // 恢复成功但 OA 接口仍 901 reauth（IAM↔OA 信任链未打通）时，必须重新走 SSO 而非放行，
   // 否则进工具后所有查询被 OA 302 踢回 IAM、内部功能全废（见 2026-08-26 日志）。
@@ -1894,7 +2064,7 @@ async function setCookiesFromHeader(sess: Electron.Session, setCookieHeader: str
     let okSet = await setOne(url, path)
     if (!okSet) okSet = await setOne(`${secure ? 'https' : 'http'}://${host}${path}`, path)
     if (okSet) {
-      debugLog(`[COOKIE] set ${name.trim()} for ${host}${portSuffix} path=${path}`)
+      verboseLog(`[COOKIE] set ${name.trim()} for ${host}${portSuffix} path=${path}`)
       // 关键修复(1.0.13 实证 + 日志印证)：IAM 票据(usk/REQID 等)多为 path=/idp，
       // 而 SPA 落地页在 /ac/#/index，浏览器 path 规则下 /ac/ 请求不携带 /idp 的 cookie
       // → SPA 首请求 Cookie contains usk = false → IAM 不认 → OA 弹回 reauth 死循环。
@@ -1905,7 +2075,8 @@ async function setCookiesFromHeader(sess: Electron.Session, setCookieHeader: str
       if (isIamTicket && (path || '/') !== '/') {
         // 用同 host、path=/ 的 url 再 set 一份（value 同源完整），使 /ac/ 等任意路径请求都能带上票据。
         const rootOk = await setOne(`${secure ? 'https' : 'http'}://${host}/`, '/')
-        debugLog(`[COOKIE] replicate ${name.trim()} path=${path} -> / ${rootOk ? 'ok' : 'FAIL'}`)
+        if (rootOk) verboseLog(`[COOKIE] replicate ${name.trim()} path=${path} -> / ok`)
+        else debugLog(`[COOKIE] replicate ${name.trim()} path=${path} -> / FAIL`)
       }
     } else {
       debugLog(`[COOKIE] failed ${name.trim()}: all attempts`)
@@ -2243,6 +2414,21 @@ const IAM_SSO_ENTRY_URL =
 /** IAM 会话判定：true=已登录 / false=已失效 / null=无法判定（定义在 shared/ai-types，两侧共用） */
 type IamAlive = SharedIamAlive
 
+/**
+ * edoc2（鸿翼）的 IAM 授权入口（1.0.64 新增）。
+ *
+ * 为什么要单独探它：`IAM_SSO_ENTRY_URL` 用的是 `client_id=oa`，实测会话失效时的形态是
+ * 「302 → `iam.streamax.com/ac/#/index`（不带 lck）、body=0」，`judgeIamAlive` 只能判成
+ * unknown。而 edoc2 这条链有**明确的成功终点**：IAM 能签票就会 302 回
+ * `https://wj.streamax.com:9443/sso/auth/callback?code=…`；签不出来就停在授权页。
+ * 用它对 unknown 补判，能把「判不出来」变成「明确失效」，从而触发登录引导。
+ * `redirect_uri` 必须与站点一致（日志实测值），否则 IAM 会直接报错、永远判死。
+ */
+const WJXT_SSO_CALLBACK_URL = 'https://wj.streamax.com:9443/sso/auth/callback'
+const IAM_EDOC2_ENTRY_URL =
+  'https://iam.streamax.com/idp/authCenter/authenticate?response_type=code&client_id=edoc2' +
+  `&redirect_uri=${encodeURIComponent(WJXT_SSO_CALLBACK_URL)}&state=IAM_EDOC2_SSO`
+
 /** IAM 授权端点与登录页的响应体上限：判据特征总在页头附近，而 IAM 的 SPA 首页可能不小，
  *  不限长会有内存与耗时风险（2026-10-10 起改为收集正文以支撑分级判据）。 */
 const IAM_BODY_CAP = 128 * 1024
@@ -2351,7 +2537,156 @@ function judgeIamAlive(status: number, location: string, body: string, bodyTrunc
   return [null, bodyTruncated ? 'body:truncated-unknown' : `status=${status}:unknown`]
 }
 
+/**
+ * 不跟随 302 的裸 GET（IAM 探活专用）。
+ *
+ * 抽出来是因为 1.0.64 起有**两条**探针需要同一套行为：`client_id=oa` 与 `client_id=edoc2`。
+ * 共性要求：只读响应头 + 限长正文、绝不真的走到 OA 落地、超时按「无法判定」处理
+ * （网络抖动不能当成"未登录"，那样会误伤可用的 SSO 入口）。
+ */
+function iamProbeGet(
+  url: string,
+  cookieStr: string
+): Promise<{ status: number; location: string; setCookie?: string[]; body: string; truncated: boolean }> {
+  const u = new URL(url)
+  return new Promise((resolve, reject) => {
+    const req = https.get({
+      hostname: u.hostname,
+      port: u.port || 443,
+      path: u.pathname + u.search,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+        'Cookie': cookieStr
+      }
+    }, (r) => {
+      let body = ''
+      let truncated = false
+      r.on('data', (chunk: Buffer) => {
+        if (truncated) return
+        body += chunk.toString('utf8')
+        if (body.length > IAM_BODY_CAP) { body = body.slice(0, IAM_BODY_CAP); truncated = true }
+      })
+      r.on('end', () => resolve({
+        status: r.statusCode || 0,
+        location: String(r.headers.location || ''),
+        setCookie: r.headers['set-cookie'] as string[] | undefined,
+        body,
+        truncated
+      }))
+      // 出错也要 resolve（否则挂到超时才结束，白等 8 秒）
+      r.on('error', () => resolve({ status: r.statusCode || 0, location: '', setCookie: undefined, body: '', truncated: false }))
+    })
+    req.on('error', reject)
+    // IAM 冷态可能要 20~30s：这里只是后台保活，超时就放弃，绝不影响 UI。
+    req.setTimeout(8000, () => { req.destroy(); reject(new Error('timeout')) })
+  })
+}
+
+/**
+ * 用 **edoc2 这条链**判 IAM 会话（1.0.64）。
+ *
+ * 判据比 `client_id=oa` 那条硬：成功换票一定会 302 回
+ * `wj.streamax.com:9443/sso/auth/callback?code=…`；换不出来就停在 IAM 授权页。
+ * 因此它能对 `302 → ac/#/index`（oa 探针的 unknown 形态）给出明确结论。
+ */
+async function probeEdoc2Sso(cookieStr: string): Promise<{ verdict: IamAlive; reason: string }> {
+  try {
+    const res = await iamProbeGet(IAM_EDOC2_ENTRY_URL, cookieStr)
+    const loc = res.location
+    if (/^https?:\/\/wj\.streamax\.com:9443\/sso\/auth\/callback/i.test(loc)) {
+      return /[?&]code=/.test(loc)
+        ? { verdict: true, reason: 'edoc2:302→wjxt+code' }
+        : { verdict: false, reason: 'edoc2:302→wjxt-no-code' }
+    }
+    if (/idp\/authCenter|\/ac\/#\/login|goToLoginPage/i.test(loc)) {
+      // 停在授权页 = 换不出票，需要人工登录
+      return { verdict: false, reason: 'edoc2:302→iamAuthPage' }
+    }
+    if (res.status === 401 || res.status === 403) {
+      return { verdict: false, reason: `edoc2:status=${res.status}` }
+    }
+    if (IAM_BODY_SIGN.notLoggedIn.test(res.body) || IAM_BODY_SIGN.iamLoginPage.test(res.body)) {
+      return { verdict: false, reason: 'edoc2:body:loginPage' }
+    }
+    if (/[?&]code=/.test(loc)) return { verdict: true, reason: 'edoc2:302+code' }
+    // `ac/#/index?lck=` 是 **AC 登录页**（需人工扫码/确认），不是"已登录"。
+    // 别照抄 judgeIamAlive 里把 lck 当活证据的写法 —— wjxtSkill.isAcLoginUrl 才是正解。
+    if (/ac\/#\/index\?lck=/.test(loc)) return { verdict: false, reason: 'edoc2:302→acLoginPage' }
+    return { verdict: null, reason: `edoc2:status=${res.status}:unknown` }
+  } catch (e: any) {
+    return { verdict: null, reason: 'edoc2:probe-failed:' + (e?.message || e) }
+  }
+}
+
 let iamKeepAliveInFlight: Promise<IamAlive> | null = null
+
+/**
+ * 「需要人工登录文件系统」的一次性引导（1.0.64）。
+ *
+ * 背景（真实日志）：OA 会话有效 → `isOALoggedin=true` → 应用不弹登录层；
+ * 而 edoc2 的会话要靠 IAM 换票，IAM 失效后隐藏窗口永远停在 authCenter 授权页，
+ * WebCore 一直回「未登录」小信封。整条链路**没有任何一步会告诉用户"去登录一下"**，
+ * 用户只看到「wjxt 突然不能用了」。
+ *
+ * 这里把最后一步补上：节流 10 分钟 + 登录态复探（已恢复就不打扰）+ 一键进 H5 登录窗。
+ * H5 登录一次会把 IAM 会话一起续上，之后 SSO 换票恢复，无需重启。
+ */
+let wjxtLoginPromptAt = 0
+let wjxtLoginPrompting = false
+/** 本次运行最多打扰 3 次：防止用户明确选择"稍后再说"后被反复弹 */
+let wjxtLoginPromptCount = 0
+const WJXT_LOGIN_PROMPT_MAX = 3
+async function promptWjxtLogin(reason: string): Promise<void> {
+  // 2026-10-27：三个提前 return 此前都是静默的。排查"AI 报未登录却不弹引导"时，
+  // 日志里既没有 shown 也没有 skipped，无法区分「被节流挡住」还是「压根没触发」。
+  if (wjxtLoginPrompting) {
+    debugLog(`[wjxt] login prompt suppressed (reason=${reason}, already prompting)`)
+    return
+  }
+  if (wjxtLoginPromptCount >= WJXT_LOGIN_PROMPT_MAX) {
+    debugLog(`[wjxt] login prompt suppressed (reason=${reason}, count=${wjxtLoginPromptCount}/${WJXT_LOGIN_PROMPT_MAX})`)
+    return
+  }
+  const sinceLast = Date.now() - wjxtLoginPromptAt
+  if (sinceLast < 10 * 60 * 1000) {
+    debugLog(`[wjxt] login prompt suppressed (reason=${reason}, throttled ${Math.round(sinceLast / 1000)}s ago)`)
+    return
+  }
+  wjxtLoginPrompting = true
+  try {
+    // 可能刚刚已自动恢复：先真探一次，避免无谓打扰
+    const logged = await wjxtProbeLoggedIn().catch(() => null)
+    if (logged !== false) {
+      debugLog(`[wjxt] login prompt skipped (reason=${reason}, loggedIn=${logged})`)
+      return
+    }
+    wjxtLoginPromptAt = Date.now()
+    wjxtLoginPromptCount++
+    debugLog(`[wjxt] login prompt shown (reason=${reason}, #${wjxtLoginPromptCount}/${WJXT_LOGIN_PROMPT_MAX})`)
+    const opts = {
+      type: 'warning' as const,
+      buttons: ['立即登录', '稍后再说'],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true,
+      title: '企业内容库需要重新登录',
+      message: '文件系统（鸿翼企业内容库）的登录态已失效，现在读不到文件。',
+      detail: '统一身份（IAM）会话也一起过期了，所以无法自动换票。\n' +
+        '点「立即登录」用账号密码登录一次即可恢复（登录后无需重启应用）。'
+    }
+    const host = mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined
+    const r = host ? await dialog.showMessageBox(host, opts) : await dialog.showMessageBox(opts)
+    if (r.response !== 0) return
+    const ok = await wjxtH5Login().catch(() => false)
+    debugLog(`[wjxt] h5 login ${ok ? 'ok' : 'failed'}`)
+  } catch (e: any) {
+    debugLog('[wjxt] login prompt error: ' + (e?.message || e))
+  } finally {
+    wjxtLoginPrompting = false
+  }
+}
 
 /** 保活 + 探活 IAM 会话；true=已登录 / false=已失效 / null=无法判定（网络异常、超时、形态未知） */
 function keepIamSessionAlive(sess: Electron.Session): Promise<IamAlive> {
@@ -2360,47 +2695,10 @@ function keepIamSessionAlive(sess: Electron.Session): Promise<IamAlive> {
     try {
       const cookieStr = await getStreamaxCookieString(sess, IAM_SSO_ENTRY_URL)
       if (!cookieStr) return null
-      const u = new URL(IAM_SSO_ENTRY_URL)
-      const res = await new Promise<{ status: number; location: string; setCookie?: string[]; body: string; truncated: boolean }>((resolve, reject) => {
-        const req = https.get({
-          hostname: u.hostname,
-          port: u.port || 443,
-          path: u.pathname + u.search,
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-            'Cookie': cookieStr
-          }
-        }, (r) => {
-          // 不跟随重定向：读完响应头与正文就断开，绝不真的走到 OA 落地。
-          // 2026-10-10 起**收集正文**（此前是 r.resume() 直接丢弃），因为 200 形态下
-          // 只能靠正文区分「授权页 / 登录页」；限长 IAM_BODY_CAP，超出截断并标记。
-          let body = ''
-          let truncated = false
-          r.on('data', (chunk: Buffer) => {
-            if (truncated) return
-            body += chunk.toString('utf8')
-            if (body.length > IAM_BODY_CAP) { body = body.slice(0, IAM_BODY_CAP); truncated = true }
-          })
-          r.on('end', () => resolve({
-            status: r.statusCode || 0,
-            location: String(r.headers.location || ''),
-            setCookie: r.headers['set-cookie'] as string[] | undefined,
-            body,
-            truncated
-          }))
-          // 出错也要 resolve（否则挂到超时才结束，白等 8 秒）
-          r.on('error', () => resolve({ status: r.statusCode || 0, location: '', setCookie: undefined, body: '', truncated: false }))
-        })
-        req.on('error', reject)
-        // IAM 冷态可能要 20~30s：这里只是后台保活，超时就放弃，绝不影响 UI。
-        // 超时按「无法判定」处理（catch 分支返回 null），**不能当成未登录**。
-        req.setTimeout(8000, () => { req.destroy(); reject(new Error('timeout')) })
-      })
+      const res = await iamProbeGet(IAM_SSO_ENTRY_URL, cookieStr)
       // IAM 顺手刷新的票据（如新的 REQID）写回分区，避免下次又用旧值
       if (res.setCookie?.length) await setCookiesFromHeader(sess, res.setCookie)
-      const [alive, reason] = judgeIamAlive(res.status, res.location, res.body, res.truncated)
+      let [alive, reason] = judgeIamAlive(res.status, res.location, res.body, res.truncated)
       // 判不出来时**额外记一段脱敏正文摘要**（2026-10-10 补）。
       // 为什么必须有：`iamLoginPage` 那组特征是按推断写的，真实页面一变就判不出，
       // 而日志只有 `by=status=200:unknown` + 字节数 —— 无法据此校准，只能反复复现。
@@ -2408,6 +2706,21 @@ function keepIamSessionAlive(sess: Electron.Session): Promise<IamAlive> {
       // 并把长串随机值（token / lck / nonce）替换掉，避免把票据写进日志。
       const peek = alive === null ? summarizeIamBody(res.body) : ''
       debugLog(`[iamKeepalive] status=${res.status} location=${res.location.split('?')[0] || '(empty)'} body=${res.body.length}${res.truncated ? '(truncated)' : ''} iamSessionAlive=${alive} by=${reason}${peek ? ` peek=${JSON.stringify(peek)}` : ''}`)
+
+      // 1.0.64：oa 探针判不出来时，用 **edoc2 这条链**补判一次。
+      // 历史日志里的典型现场：`302 → ac/#/index`（不带 lck）→ unknown → 没有任何后续动作，
+      // 而实际上 edoc2 的票根本换不出来（停在 authCenter 授权页），wjxt 完全不可用。
+      // 只多打一次 GET，且仅发生在 unknown 分支，不影响正常保活开销。
+      if (alive === null) {
+        const edoc2 = await probeEdoc2Sso(cookieStr)
+        if (edoc2.verdict !== null) {
+          alive = edoc2.verdict
+          reason = `${reason} + ${edoc2.reason}`
+          debugLog(`[iamKeepalive] refined by edoc2 probe -> iamSessionAlive=${alive} (${edoc2.reason})`)
+        } else {
+          debugLog(`[iamKeepalive] edoc2 probe inconclusive (${edoc2.reason})`)
+        }
+      }
       return alive
     } catch (e: any) {
       // 超时 / 网络异常 / 冷态一律 null（= 无法判定），不是 false
@@ -2565,7 +2878,10 @@ ipcMain.handle(IPC.OA_QR_LOGIN_START, () => {
     if (pref.lastTokenTs && sinceLastSso > 30 * 60 * 1000) {
       debugLog(`[QR-START] IAM cold start (idle ${(sinceLastSso / 60000) | 0}min), adaptive warm-up probing IAM...`)
       // 1.0.22：冷态恢复实测偶需 >40s（次日首登 5 次探针全 timeout），上限延长到 70s 以覆盖更冷的 IAM。
-      const probeDeadline = Date.now() + 70 * 1000
+      // 2026-10-27：实测该上限曾写成 70s 而日志文案仍是「40s」，排查时会被误导 —— 统一走 WARMUP_MS。
+      const WARMUP_MS = 70 * 1000
+      const warmupStarted = Date.now()
+      const probeDeadline = warmupStarted + WARMUP_MS
       let ready = false
       while (Date.now() < probeDeadline) {
         try {
@@ -2579,7 +2895,9 @@ ipcMain.handle(IPC.OA_QR_LOGIN_START, () => {
           await new Promise(r => setTimeout(r, 2000))
         }
       }
-      if (!ready) debugLog('[QR-START] IAM warm-up probe timed out (40s), fall through to step1 retry')
+      if (!ready) {
+        debugLog(`[QR-START] IAM warm-up probe timed out (${Math.round((Date.now() - warmupStarted) / 1000)}s / cap ${WARMUP_MS / 1000}s), fall through to step1 retry`)
+      }
     }
 
     let loginPage

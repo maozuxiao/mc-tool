@@ -2,7 +2,7 @@ appId: com.streamax.mcquery
 productName: MC物料查询
 copyright: Copyright © 2026 Sean Mao
 # 应用/文件版本号（四位，区别于 package.json 三段产品版本）
-buildVersion: 1.0.59.0
+buildVersion: 1.0.65.0
 
 directories:
   output: dist
@@ -67,6 +67,14 @@ extraResources:
       - '!**/node_modules/pptxgenjs/**'
       - '!**/node_modules/test/**'
       - '!**/node_modules/tests/**'
+  # 内置技能：Outlook 工作邮箱助手（1.0.61，源技能 email-auto 的适配版）。
+  # 只有 SKILL.md + references，**执行层在主进程**（src/main/ai/emailSkill.ts，
+  # Device Code + Microsoft Graph），不随包分发任何 Python 脚本或运行时 ——
+  # 这与 wjxt-file-download 是同一范式，也是本次没有沿用源技能 py 实现的原因：
+  # mc-tool 只有 Node，没有 Python（skillRuntime 只 spawn node）。
+  # 该技能的可写状态（配置/令牌/日志）落在 userData/email-auto/，不写安装目录。
+  - from: resources/skills/email-auto
+    to: skills/email-auto
 
 # 启用 asar 打包（减小体积 + 加快加载）
 asar: true

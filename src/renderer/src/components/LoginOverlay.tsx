@@ -21,6 +21,17 @@ type StatusKey =
 
 const MAX_POLL_MS = 3 * 60 * 1000 // 最多轮询 3 分钟
 
+/**
+ * 拉码失败后的自动重试次数（2026-10-27 由 6 降到 1）。
+ *
+ * 每一次尝试在主进程侧最坏要 70s 冷启动预热 + 30s step1 硬上限 ≈ 100s，
+ * 6 次自动重试就是**十几分钟一直转圈**，最后只弹一句「网络异常」
+ * （10-26 00:30~00:43 日志实证：连续 7 轮、12 分钟后才报错）。
+ * IAM 冷态在第 1~2 轮就已恢复，剩下的重试基本是空转 —— 留 1 次兜底，
+ * 再不行就交给用户点「刷新二维码」（forceQr 会立刻重来）。
+ */
+const QR_AUTO_RETRY = 1
+
 export function LoginOverlay({ loginState }: Props) {
   const lang = useStore(s => s.lang)
   const t = useStore(s => s.t)
@@ -175,7 +186,7 @@ export function LoginOverlay({ loginState }: Props) {
       // 「qrRefetchSeq effect」，两路并发只会让主进程重复跑 QR-START（互斥锁下白等）
       if (Date.now() - lastFetchAtRef.current < 800) return
       setExpired(false)
-      fetchQr(true, 6)
+      fetchQr(true, QR_AUTO_RETRY)
     }
   }, [loginState, qrToken, fetchQr])
 
@@ -188,7 +199,7 @@ export function LoginOverlay({ loginState }: Props) {
     lastRefetchSeqRef.current = qrRefetchSeq
     // 同上：主进程刚下发 logging 让登录层拉过码时，不再叠加第二次 QR-START
     if (Date.now() - lastFetchAtRef.current < 800) return
-    fetchQr(true, 6)
+    fetchQr(true, QR_AUTO_RETRY)
   }, [qrRefetchSeq, fetchQr])
 
   // 二维码拿到后开始长轮询（authExecute）
@@ -334,7 +345,7 @@ export function LoginOverlay({ loginState }: Props) {
 
         <div className="qr-actions">
           {/* 原生 button + 自建立体样式 → 库 <Button type="primary">，主色跟随主题 */}
-          <Button type="primary" onClick={() => fetchQr(true, 6)} disabled={loading}>
+          <Button type="primary" onClick={() => fetchQr(true, 2)} disabled={loading}>
             {loading ? t('qrLoadingBtn') : t('qrRefresh')}
           </Button>
         </div>

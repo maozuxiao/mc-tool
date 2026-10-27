@@ -14,6 +14,7 @@ import {
   runWjxtSearch, runWjxtDownload
 } from './wjxtSkill'
 import { cachedToolDefinitions, cachedToolNames, callTool as mcpCallTool, getMcpToolRoute, isMcpTool, setReservedNames } from './mcpClient'
+import { MAIL_TOOL_ENTRIES } from './emailSkill'
 
 export interface OpenFolderResult {
   ok: boolean
@@ -181,7 +182,9 @@ const REGISTRY: Record<string, ToolEntry> = {
       name: input?.name,
       roots: ctx.allowedRoots
     })
-  }
+  },
+  // Outlook 工作邮箱助手（1.0.61）：执行层在主进程，不随包分发脚本/运行时
+  ...MAIL_TOOL_ENTRIES
 }
 
 /**
@@ -193,7 +196,9 @@ const REGISTRY: Record<string, ToolEntry> = {
 setReservedNames(Object.keys(REGISTRY))
 
 const SKILL_TOOLS: Record<string, string[]> = {
-  'wjxt-file-download': ['wjxt_search', 'wjxt_download']
+  'wjxt-file-download': ['wjxt_search', 'wjxt_download'],
+  // Outlook 工作邮箱助手（1.0.61）：授权 / 配置 / 检索 / 读取 / 写草稿 / 回读草稿
+  'email-auto': ['mail_auth', 'mail_config', 'mail_search', 'mail_read', 'mail_draft_save', 'mail_drafts_list']
 }
 
 /**
@@ -263,6 +268,25 @@ function buildFileSummary(name: string, result: any): string {
         : `已写回 ${result.replaced ?? 0} 段，生成 ${result.path || ''}（布局保持原样）`
     case 'open_folder':
       return result.ok ? `已打开目录（别名 ${result.alias}）` : `打开目录被拒绝：${result.error || ''}`
+    // ── Outlook 工作邮箱助手（1.0.61）─────────────────────
+    case 'mail_auth':
+      if (result?.userCode) return `待授权：验证码 ${result.userCode}`
+      return result?.authorized ? '邮箱已授权' : '邮箱未授权'
+    case 'mail_config':
+      return result?.updated?.length ? `已更新配置 ${result.updated.join(',')}` : '已读取配置'
+    case 'mail_search':
+      return result?.hasMore
+        ? `找到 ${result.total ?? 0} 封（还有更多）`
+        : `找到 ${result.total ?? 0} 封邮件`
+    case 'mail_read':
+      return `已读取「${String(result?.subject || '').slice(0, 24)}」${result?.truncated ? '（正文已截断）' : ''}`
+    case 'mail_draft_save':
+      if (result?.dryRun) return `排版自检：${result.paragraphs ?? 0} 段${result.formatOk ? '' : '（需改写）'}`
+      return result?.formatOk
+        ? `已写入草稿箱（${result.paragraphs ?? 0} 段）`
+        : `草稿已写入但结构存疑（${result.paragraphs ?? 0} 段）`
+    case 'mail_drafts_list':
+      return `草稿箱最近 ${result?.total ?? 0} 封`
     default:
       // MCP 工具：摘要带上返回体量，便于一眼看出「调用成功但内容为空」
       if (result?.source === 'mcp') {

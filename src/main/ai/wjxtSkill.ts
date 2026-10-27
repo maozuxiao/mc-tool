@@ -1,6 +1,6 @@
 // dialog / safeStorage 曾用于「记住账号密码」弹窗与口令加密落盘 —— 该机制已于 1.0.48 移除
 import { app, BrowserWindow, session } from 'electron'
-import { appendFileSync } from 'fs'
+import { appendFileSync, existsSync, statSync, renameSync, unlinkSync } from 'fs'
 import { join } from 'path'
 import { PARTITION, downloadToDir, type DownloadToDirResult } from './fileDownload'
 import type { AIExtraRoot, IamAlive } from '@shared/ai-types'
@@ -58,10 +58,31 @@ const DEFAULT_TIMEOUT_MS = 30000
 /** 单次搜索最多返回条数（服务端是 ES 分页，给太大没意义还慢） */
 const MAX_SEARCH_SIZE = 50
 
+/** wjxt.log 单文件上限；超过则滚动成 `wjxt.log.1`（只保留一份备份） */
+const WJXT_LOG_MAX_BYTES = 2 * 1024 * 1024
+let wjxtLogRotateDay = ''
+/**
+ * wjxt.log 滚动（2026-10-27 补）—— 与 debug-login.log 同样的理由：
+ * 该文件只增不减，一个月 899KB / 5218 行，其中大半是未登录时的 off-site / Failed to fetch。
+ */
+function rotateWjxtLogIfNeeded(logPath: string): void {
+  const day = new Date().toISOString().slice(0, 10)
+  if (day === wjxtLogRotateDay) return
+  wjxtLogRotateDay = day
+  try {
+    if (!existsSync(logPath) || statSync(logPath).size < WJXT_LOG_MAX_BYTES) return
+    const bak = logPath + '.1'
+    if (existsSync(bak)) unlinkSync(bak)
+    renameSync(logPath, bak)
+  } catch { /* ignore */ }
+}
+
 /** 诊断日志：写 userData/wjxt.log（与 index.ts 的 debugLog 同一套路，便于事后取回） */
 function wjxtLog(msg: string) {
+  const logPath = join(app.getPath('userData'), 'wjxt.log')
+  rotateWjxtLogIfNeeded(logPath)
   const line = `[${new Date().toISOString()}] ${msg}\n`
-  try { appendFileSync(join(app.getPath('userData'), 'wjxt.log'), line) } catch { /* ignore */ }
+  try { appendFileSync(logPath, line) } catch { /* ignore */ }
   console.log('[wjxt] ' + msg)
 }
 
@@ -73,6 +94,19 @@ function wjxtLog(msg: string) {
 let openLoginWindow: ((url: string) => void) | null = null
 export function setWjxtLoginOpener(fn: ((url: string) => void) | null): void {
   openLoginWindow = fn
+}
+
+/**
+ * 「需要人工登录」通知（1.0.64，由 index.ts 注入）。
+ *
+ * 为什么需要：edoc2 的会话靠 IAM 换票，IAM 一旦失效且判不出来（历史日志里
+ * `iamSessionAlive=null by=status=302:unknown`），应用既不会自动恢复、也不会主动提示，
+ * 用户侧的观感就是「wjxt 突然不能用了」。工具侧只知道「未登录」，
+ * 而**引导用户去登录**这件事必须由主进程做（弹窗 + 复用 H5 登录窗，登录一次即可打通）。
+ */
+let loginNeededNotifier: ((code: string) => void) | null = null
+export function setWjxtLoginNotifier(fn: ((code: string) => void) | null): void {
+  loginNeededNotifier = fn
 }
 
 /**
@@ -499,7 +533,18 @@ interface WjxtResponse {
    * 「结果可能不全，建议先登录再搜」，而不是把降级结果当完整清单。
    */
   viaFallback?: boolean
+  /**
+   * 为什么落到降级通道（2026-10-27 补，仅用于把原因透出给上层/UI）。
+   *
+   * - `'not-logged-in'`：隐藏窗口被 302 到了 iam（站外）——**登录态问题，不是通道故障**；
+   * - `'channel-tripped'`：页面通道熔断冷却中（上下文反复超时/被销毁）；
+   * - `'no-context'`     ：隐藏窗口建不起来；
+   * - `'page-error'`     ：页内 fetch / eval 失败。
+   */
+  viaFallbackReason?: WjxtFallbackReason
 }
+
+export type WjxtFallbackReason = 'not-logged-in' | 'channel-tripped' | 'no-context' | 'page-error'
 
 /** 最终落点是不是 SSO 登录页（goToLoginPage / sso/auth / login） */
 function isLoginUrl(u: string): boolean {
@@ -676,6 +721,9 @@ async function reloadCtxWin(): Promise<void> {
     if (!isOnSite(win.webContents.getURL())) await win.loadURL(WJXT_LOGIN_URL)
     else await win.webContents.reload()
     await new Promise(r => setTimeout(r, 1200))
+    // 会话刚被修好（登录成功 / 404 自愈）：连熔断与站外节流一起复位，
+    // 否则第一个请求仍可能因 30s 冷却被推到降级通道，拿回空结果。
+    resetPageChannel()
     wjxtLog('[page] hidden context reloaded')
   } catch (e: any) {
     wjxtLog('[page] reload failed: ' + String(e?.message || e) + ' -> rebuild')
@@ -705,6 +753,20 @@ const PAGE_CHAN_FAIL_LIMIT = 3
 const PAGE_CHAN_COOLDOWN_MS = 30_000
 let pageChanFails = 0
 let pageChanDisabledUntil = 0
+/**
+ * 「隐藏窗口在站外」的独立节流（2026-10-27 与通道健康度解耦）。
+ *
+ * 旧实现把 off-site 也计入 `pageChanFails`，于是「登录态过期」被当成「页面上下文坏了」：
+ * 熔断日志写成 `channel tripped (off-site)`，随后 30 秒内**即使已经登录成功**也不会再走
+ * 页面通道（那条通道才是能拿到完整结果的），用户只看到降级通道的空结果。
+ * 现在 off-site 只做短节流（避免「导航→又被跳走→再导航」的两秒一轮抖动），
+ * 不污染通道健康度；真正的上下文故障（eval 超时 / 被销毁）仍然走熔断。
+ */
+const OFFSITE_BACKOFF_MS = 5_000
+/** 站外日志节流：未登录时会持续命中，10 秒记一行足够定位 */
+const OFFSITE_LOG_INTERVAL_MS = 10_000
+let offSiteUntil = 0
+let lastOffSiteLogAt = 0
 
 function pageChanTripped(): boolean {
   return Date.now() < pageChanDisabledUntil
@@ -721,24 +783,41 @@ function pageChanNoteFailure(reason: string): void {
 
 function pageChanNoteSuccess(): void {
   if (pageChanFails) wjxtLog(`[page] channel recovered (reset ${pageChanFails} consecutive failures)`)
+  resetPageChannel()
+}
+
+/**
+ * 无条件复位通道状态（登录成功 / 换票落地 / 隐藏窗口重建后调用）。
+ * 与 `pageChanNoteSuccess` 的区别：这是「外部已知会话刚修好了」，不必等一次请求成功。
+ */
+function resetPageChannel(): void {
   pageChanFails = 0
   pageChanDisabledUntil = 0
+  offSiteUntil = 0
+  lastOffSiteLogAt = 0
 }
 
 async function pageFetch(
   path: string,
-  opts: { method?: string; form?: string; timeoutMs?: number } = {}
+  opts: { method?: string; form?: string; timeoutMs?: number } = {},
+  /** 出参：为什么没用上页面通道（调用方据此给结果打降级原因，见 wjxtRequest） */
+  skip?: { reason?: WjxtFallbackReason }
 ): Promise<WjxtResponse | null> {
+  const noteSkip = (r: WjxtFallbackReason) => { if (skip) skip.reason = r }
   // 熔断中：连窗口都不建，省掉「建窗口 → 等 1.2s → 导航 → 超时 → 销毁」这一整套空转
-  if (pageChanTripped()) return null
+  if (pageChanTripped()) { noteSkip('channel-tripped'); return null }
+  // 站外短节流：未登录时窗口会被反复 302 到 iam，这里直接退让，别每轮都导航一次
+  if (Date.now() < offSiteUntil) { noteSkip('not-logged-in'); return null }
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
   if (!(await ensureCtxWin(Math.min(timeoutMs, 25000)))) {
     pageChanNoteFailure('ensureCtxWin')
+    noteSkip('no-context')
     return null
   }
   const win = ctxWin
   if (!win || win.isDestroyed()) {
     pageChanNoteFailure('no-window')
+    noteSkip('no-context')
     return null
   }
 
@@ -749,9 +828,16 @@ async function pageFetch(
   //     （实测把日志刷爆、还不停向 IAM 发起新的 OAuth 跳转）；
   //   · 也不能拿它当业务结论 —— 交给降级通道去给出明确的「未登录」判据。
   if (!isOnSite(win.webContents.getURL())) {
-    wjxtLog(`[page] hidden window off-site (${win.webContents.getURL().slice(0, 120)}) -> not logged in, skip page-context fetch`)
-    // 站外同样计入失败：这是「未登录」最典型的表现，会把我们拖进上面那条抖动回路
-    pageChanNoteFailure('off-site')
+    // 日志节流：未登录时这条会持续命中（历史日志里 off-site + Failed to fetch 合计 500+ 行）
+    if (Date.now() - lastOffSiteLogAt > OFFSITE_LOG_INTERVAL_MS) {
+      lastOffSiteLogAt = Date.now()
+      wjxtLog(`[page] hidden window off-site (${win.webContents.getURL().slice(0, 120)}) -> not logged in, skip page-context fetch`)
+    }
+    // 2026-10-27 解耦：**不再计入通道健康度**（见 OFFSITE_BACKOFF_MS 注释）。
+    // 站外是「登录态失效」的表现，把它当成「上下文坏了」会让熔断日志误报，
+    // 且登录恢复后 30s 内仍然不走页面通道（拿不到完整结果）。
+    offSiteUntil = Date.now() + OFFSITE_BACKOFF_MS
+    noteSkip('not-logged-in')
     void renavigateCtxWinIfStale()
     return null
   }
@@ -792,6 +878,7 @@ async function pageFetch(
     wjxtLog(`[page] executeJavaScript failed (${String(e?.message || e)}) -> drop hidden context`)
     destroyCtxWinIf(win)
     pageChanNoteFailure('eval')
+    noteSkip('page-error')
     throwIfCancelled('pageFetch.eval')
     return null
   } finally {
@@ -801,6 +888,7 @@ async function pageFetch(
     wjxtLog('[page] empty eval result -> drop hidden context')
     destroyCtxWinIf(win)
     pageChanNoteFailure('empty-eval')
+    noteSkip('page-error')
     throwIfCancelled('pageFetch.empty')
     return null
   }
@@ -809,6 +897,7 @@ async function pageFetch(
     wjxtLog('[page] eval result not JSON: ' + String(raw).slice(0, 200))
     destroyCtxWinIf(win)
     pageChanNoteFailure('bad-json')
+    noteSkip('page-error')
     throwIfCancelled('pageFetch.parse')
     return null
   }
@@ -820,10 +909,12 @@ async function pageFetch(
     if (/failed to fetch|networkerror|load failed|err_/i.test(msg)) {
       destroyCtxWinIf(win)
       pageChanNoteFailure('fetch')
+      noteSkip('page-error')
       throwIfCancelled('pageFetch.fetch')
       return null
     }
     pageChanNoteFailure('fetch-error')
+    noteSkip('page-error')
     return null
   }
   const { count, names } = await cookieNamesFor(url)
@@ -893,15 +984,21 @@ async function wjxtRequest(
   path: string,
   opts: { method?: string; form?: string; timeoutMs?: number } = {}
 ): Promise<WjxtResponse> {
-  const viaPage = await pageFetch(path, opts)
+  const skip: { reason?: WjxtFallbackReason } = {}
+  const viaPage = await pageFetch(path, opts, skip)
   if (viaPage) return viaPage
   const viaMain = await mainFetch(path, opts)
-  // 降级通道拿到空结果时特别标注一次：这正是「主进程 fetch 拿不到数据」的现场
+  const reason: WjxtFallbackReason = skip.reason || 'page-error'
+  // 降级通道拿到空结果时特别标注一次：这正是「主进程 fetch 拿不到数据」的现场。
+  // 2026-10-27：把 reason 一起打出来 —— 此前只有一句「走降级了」，无法区分
+  // 「登录态过期（not-logged-in）」与「页面通道真坏了（channel-tripped/page-error）」，
+  // 排查时得回去翻前面的 off-site / tripped 日志才能拼出来。
   if (/GetMapSearchResultList/.test(opts.form || '')) {
-    wjxtLog('[fallback] search went through main-process fetch —— 该通道结果不可靠（常为空或不全），已在上层标注')
+    wjxtLog(`[fallback] search went through main-process fetch (reason=${reason}) —— ` +
+      '该通道结果不可靠（常为空或不全），已在上层标注')
   }
   // 打上标记：调用方（搜索/探测）据此判断「结果来自降级通道、不可当完整清单」
-  return { ...viaMain, viaFallback: true }
+  return { ...viaMain, viaFallback: true, viaFallbackReason: reason }
 }
 
 /** 进程内是否已做过一次会话预热 */
@@ -1415,7 +1512,7 @@ function sortClause(sort?: WjxtSort): Array<Record<string, any>> {
 export async function wjxtSearch(
   keyword: string,
   opts: { size?: number; query?: string; mode?: WjxtMatchMode; sort?: WjxtSort; from?: number } = {}
-): Promise<{ total: number; files: WjxtFileInfo[]; strategy?: string; sortMode?: string; nameReranked?: boolean; fallback?: boolean }> {
+): Promise<{ total: number; files: WjxtFileInfo[]; strategy?: string; sortMode?: string; nameReranked?: boolean; fallback?: boolean; fallbackReason?: WjxtFallbackReason }> {
   const size = Math.min(Math.max(Math.round(opts.size ?? 10), 1), MAX_SEARCH_SIZE)
   const from = Math.max(0, Math.round(Number(opts.from) || 0))
   const mode: WjxtMatchMode = opts.mode === 'contains' || opts.mode === 'exact' ? opts.mode : 'word'
@@ -1553,6 +1650,7 @@ export async function wjxtSearch(
   let json: any = null
   // 命中是否来自降级通道（见 WjxtResponse.viaFallback）：上层会据此提示「结果可能不全」
   let usedFallback = false
+  let usedFallbackReason: WjxtFallbackReason | undefined
   let parsed: { files: WjxtFileInfo[]; total: number; docList: any } = { files: [], total: 0, docList: {} }
   for (const s of strategies) {
     throwIfCancelled('search.strategies')
@@ -1560,6 +1658,7 @@ export async function wjxtSearch(
     const r = await attempt(s.query)
     usedStrategy = s.name
     usedFallback = r.res.viaFallback === true
+    usedFallbackReason = r.res.viaFallbackReason
     res = r.res
     json = r.json
     parsed = parseFiles(r.json)
@@ -1576,6 +1675,7 @@ export async function wjxtSearch(
       if (p2.files.length) {
         serverSortOk[sortKey] = false
         usedFallback = r2.res.viaFallback === true
+        usedFallbackReason = r2.res.viaFallbackReason
         res = r2.res
         json = r2.json
         parsed = p2
@@ -1630,7 +1730,15 @@ export async function wjxtSearch(
       head: res.body.slice(0, 600)
     }))
   }
-  return { total: parsed.total, files: parsed.files, strategy: usedStrategy, sortMode, nameReranked, fallback: usedFallback }
+  return {
+    total: parsed.total,
+    files: parsed.files,
+    strategy: usedStrategy,
+    sortMode,
+    nameReranked,
+    fallback: usedFallback,
+    fallbackReason: usedFallbackReason
+  }
 }
 
 /**
@@ -1869,6 +1977,10 @@ async function reloginResult(code: 'NEED_RELOGIN' | 'WJXT_NO_SESSION'): Promise<
   // 编号列表按**实际给出的入口**拼：IAM 失效时只有一个入口，就不要在文案里提到「选第2 种」
   const optionLines = options.map((o, i) => `${i + 1}. ${o.markdown} —— ${o.note}`).join('\n')
   const onlyOne = options.length === 1
+  // 1.0.64：确认「必须人工登录」后，通知主进程弹一次引导（内部有 10 分钟节流，
+  // 且会先再探一次登录态，已恢复就不打扰）。纯 AI 链路下这是唯一能把用户
+  // 从「工具报未登录」拉到「真的登进去」的动作。
+  try { loginNeededNotifier?.(code) } catch (e: any) { wjxtLog('[needlogin] notifier failed: ' + (e?.message || e)) }
   return {
     ok: false,
     error: code,
@@ -2171,7 +2283,7 @@ export async function runWjxtSearch(input: {
   const prevSignal = currentSignal
   setWjxtSignal(opts?.signal || null)
   try {
-    const { total, files, strategy, sortMode, nameReranked, fallback } = await wjxtSearch(keyword, {
+    const { total, files, strategy, sortMode, nameReranked, fallback, fallbackReason } = await wjxtSearch(keyword, {
       size: input?.size,
       query: input?.query,
       mode: input?.mode,
@@ -2196,6 +2308,17 @@ export async function runWjxtSearch(input: {
       notes.push('⚠ 当前企业内容库登录态异常，本次结果来自**降级通道**（主进程直连），' +
         '实测该通道拿到的结果常为空或**不完整**；汇报时必须向用户说明「结果可能不全、建议先登录文件系统后重搜」，' +
         '不要把这几条当成完整清单，也不要据此断言「只有这些文件」。')
+    }
+    // 2026-10-27 补：**0 条 + 降级** 是最容易被误报成「没有这个文件」的组合。
+    // 旧代码只在 files.length 时提示，于是降级通道返回空集时模型会直接回答「库里没有」——
+    // 而真实情况可能只是登录态过期（页面通道被熔断/窗口被跳到 IAM）。
+    if (!files.length && fallback) {
+      const why = fallbackReason === 'not-logged-in'
+        ? '企业内容库登录态已失效（隐藏窗口被 SSO 跳转到 IAM 登录页）'
+        : '企业内容库页面通道暂时不可用'
+      notes.push(`⚠ 本次**没有结果**，但原因不是「库里没有文件」：${why}。` +
+        '检索已降级到主进程直连通道，该通道实测**经常返回空集**；' +
+        '回答时必须说明「未能确认是否存在该文件，建议先登录文件系统后重搜」，**不要断言文件不存在**。')
     }
     // 服务端不支持该排序键时工具已改本地排序：说清楚，免得模型以为排序没生效又去折腾
     if (files.length && sortMode?.startsWith('local:')) {
