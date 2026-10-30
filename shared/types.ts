@@ -49,6 +49,7 @@ export const IPC = {
   OA_REFRESH_SESSION: 'oa-refresh-session',  // 重新预热 OA 会话（SSO 握手落地），消除 901 重复登录
   OA_QR_LOGIN_START: 'oa-qr-login-start',    // 获取 IAM 二维码
   OA_QR_LOGIN_POLL: 'oa-qr-login-poll',      // 轮询 IAM 二维码登录状态
+  OA_RENDERER_READY: 'oa-renderer-ready',    // 渲染层（重新）挂载报到：主进程据此复位「登录层已展示」
   LOG_ERROR: 'log-error',                     // 渲染进程上报崩溃日志
   COOKIE_GET: 'cookie-get',
   HOLIDAY_GET: 'holiday-get',                  // 拉取某年中国法定节假日安排（顶栏下班倒计时用）

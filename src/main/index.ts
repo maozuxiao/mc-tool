@@ -1451,6 +1451,25 @@ function markSessionHealthy(): void {
   loginViewShown = false
 }
 
+/**
+ * 渲染层（重新）挂载报到。
+ *
+ * 为什么需要：`loginViewShown` 是**主进程内存态**，只在「确认会话有效」时复位。
+ * dev 下改代码会触发渲染层整页重载，此时主进程仍认为登录层早已展示 —— 于是后续所有
+ * `requestLoginView` 都走 `skip (already shown)`，而新实例的登录层状态是空的，两边错位。
+ * 2026-10-30 现场即如此：reload 后连出 4 张二维码，5 次窗口焦点检查全被 skip，
+ * 用户扫了 20 分钟始终登不进去，只能重启进程绕过。
+ *
+ * 新实例挂载即意味着「上一次的展示状态已不存在」，所以这里无条件复位。
+ * 幂等性不受影响：真正的重复通知抑制仍由 requestLoginView 的 shown 判定承担，
+ * 而它会在下一次通知时重新置 true。
+ */
+ipcMain.handle(IPC.OA_RENDERER_READY, () => {
+  if (loginViewShown) debugLog('[LOGIN-VIEW] renderer remounted -> reset shown flag')
+  loginViewShown = false
+  return true
+})
+
 /** 窗口是否正处于「用户可见且聚焦」状态：决定此刻弹登录页算不算打扰 */
 function isWindowActivelyVisible(): boolean {
   return !!mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible() && mainWindow.isFocused()
@@ -1778,7 +1797,35 @@ async function doCheckLoginAndNotify() {
 
   if (forceQr) {
     debugLog(`[startup] force QR login: isFirstToday=${isFirstToday}, tokenAge=${Math.round(tokenAgeMs / 1000)}s (>1h=${tokenAgeMs > TOKEN_MAX_AGE_MS})`)
-    // 不尝试免密恢复，直接让渲染进程显示二维码登录视图
+    // 2026-10-30 修：这条分支此前**完全跳过免密恢复**，直接把用户推去扫码。
+    // 现场（04:16 那次）就是：backup 里明明存着可用 SESSION（重启后 restore 1/1 → probe ok=true），
+    // 却被「今日首次 + tokenAge>1h」判成必须扫码；而那次扫码链路本身卡在「有码、无人轮询」，
+    // 于是用户彻底登不进去，只能靠重启绕过。
+    // 现在先花一次 restore + 真实探测（通常 <1s）：真能用就直接放行，确实失效才去扫码。
+    // 注意这里要自己跑一遍 restore —— 正常情况下它在下面 `!startupRestoreDone` 分支里，
+    // 而本分支是提前 return 的，不先补跑就永远拿不到 startupRestoreOk。
+    if (!startupRestoreDone) {
+      await migrateLegacyBackupIfNeeded()
+      startupRestoreOk = await restoreOaSession(session.fromPartition(PARTITION))
+      startupRestoreDone = true
+    }
+    if (startupRestoreOk) {
+      const probed = await probeOaSession(session.fromPartition(PARTITION))
+      if (probed.ok) {
+        debugLog('[startup] force QR skipped: restored session is actually valid')
+        sessionValid = true
+        sessionExpired = false
+        sessionVerdict = 'valid'
+        markSessionHealthy()
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send(IPC.OA_CHECK_LOGGED, { loggedIn: true })
+        }
+        startSessionHeartbeat()
+        return
+      }
+      debugLog(`[startup] force QR proceeds: cookie restored but probe=${probed.reason}`)
+    }
+    // 免密不可用：让渲染进程显示二维码登录视图
     mainWindow.webContents.send(IPC.OA_LOGIN_STATE, { state: 'logging' })
     return
   }
@@ -3089,6 +3136,13 @@ ipcMain.handle(IPC.OA_QR_LOGIN_START, () => {
     const ok = status >= 200 && status < 300 && (json?.code === '0' || json?.code === 0 || json?.code === '200' || json?.code === 200 || json?.status === 'success' || json?.success === true)
     if (!ok && json?.message) throw new Error(json.message)
 
+    // 成功路径此前**没有任何收尾日志**：只看到 step1/2/3 成功，却无法确认「到底把什么交给了
+    // 渲染层」。2026-10-30 现场（04:16~04:20 连出 4 张码、main 侧 0 条 authExecute）就是卡在
+    // 这个盲区上 —— 有码、能扫、但前端没启动长轮询，且从日志看不出三要素齐不齐。
+    debugLog(
+      `[QR-START] done qrToken=${json?.data?.qrToken?.slice(0, 8)} ` +
+      `chain=${authChainCode.slice(0, 8)} lckLen=${lck.length} entityId=oa`
+    )
     return {
       success: ok,
       qrToken: json?.data?.qrToken,

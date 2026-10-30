@@ -8,7 +8,7 @@ import { MaterialTable } from './MaterialTable'
 import { BomTable } from './BomTable'
 import { FileTable } from './FileTable'
 import { WorkCountdown } from './WorkCountdown'
-import { THEMES, getThemePreset } from '../theme'
+import { THEMES, getThemePreset, themeBackdrop } from '../theme'
 
 import { NOOK_ICON } from './nookIcon'
 // 叶子图片：从 animal-island-ui@1.4.0（即 1.0.38 使用的版本）的
@@ -454,12 +454,12 @@ export function QueryPanel({ disabled }: { disabled: boolean }) {
                       </div>
                       <button
                         type="button"
-                        className="theme-summary"
+                        className={`theme-summary${themePreset.mode === 'dark' ? ' is-dark' : ''}`}
                         aria-expanded={themeOpen}
                         title={t(themeOpen ? 'themeCollapse' : 'themeExpand')}
                         onClick={() => setThemeOpen(v => !v)}
                       >
-                        <Background type={theme} className="theme-summary__dot" />
+                        <Background type={themeBackdrop(theme)} className="theme-summary__dot" />
                         <span className="theme-summary__text">{t(themePreset.labelKey)}</span>
                         <span className={`theme-arrow${themeOpen ? ' open' : ''}`}>
                           <Icon name="Play" size={12} />
@@ -473,11 +473,11 @@ export function QueryPanel({ disabled }: { disabled: boolean }) {
                               type="button"
                               role="radio"
                               aria-checked={p.id === theme}
-                              className={`theme-swatch${p.id === theme ? ' active' : ''}`}
+                              className={`theme-swatch${p.id === theme ? ' active' : ''}${p.mode === 'dark' ? ' is-dark' : ''}`}
                               title={t(p.labelKey)}
                               onClick={() => setTheme(p.id)}
                             >
-                              <Background type={p.id} className="theme-swatch__bg" />
+                              <Background type={themeBackdrop(p.id)} className="theme-swatch__bg" />
                               <span className="theme-swatch__name">{t(p.labelKey)}</span>
                             </button>
                           ))}

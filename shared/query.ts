@@ -59,11 +59,73 @@ export function buildItemNoUrl(itemNo: string, seq = Date.now()): string {
 }
 
 // ── 批量料号查询 ───────────────────────────────────────────
+/**
+ * 料号归一化（2026-10-30）。
+ *
+ * 背景：业务同事从邮件 / Excel 里复制过来的料号常常是 **4-4-4(-1) 分组带空格**的样子
+ * （如 `5154 0211 0005 1`），而 OA 的 `q.ITEM_NUMBER` 只认连续数字串。旧实现按空白拆分，
+ * 于是一个料号被拆成 4 个碎片逐个去查，必然全部 miss（用户实测：8 个料号全查不到）。
+ *
+ * 规则：全角转半角 → 去掉所有空白与 `-` / `_` → 若结果是 12 或 13 位纯数字则视为料号、
+ * 返回紧凑串；否则**原样返回**（trim 后），以免把描述关键词之类的内容改坏。
+ * 13 位是「4-4-4 + 1 位版本」的形态（如 5110 0381 0002 9）。
+ */
+export function normalizeItemNo(raw: string): string {
+  const trimmed = String(raw ?? '').trim()
+  const compact = trimmed
+    // 全角字符（\uFF01-\uFF5E）与半角相差 0xFEE0，全角空格 \u3000 单独换成半角空格
+    .replace(/[\uFF01-\uFF5E]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))
+    .replace(/\u3000/g, ' ')
+    .replace(/[\s\-_]/g, '')
+  return isItemNo(compact) ? compact : trimmed
+}
+
+/** 料号形态：12 位或 13 位纯数字 */
+export function isItemNo(v: string): boolean {
+  return /^\d{12,13}$/.test(v)
+}
+
+/**
+ * 批量料号解析。
+ *
+ * 逐行处理，行内再按需要拆分 —— 这样「一行一个带空格料号」的粘贴形态不会被切碎：
+ *  ① 整行归一化后就是一个料号 → 直接收下；
+ *  ② 否则按逗号 / 分号 / 顿号 / 空白切成 token，再把**相邻的纯数字 token 重新聚合**
+ *     成 12 或 13 位（覆盖「一行里两个带空格料号」这种形态）。
+ *
+ * 聚合时「12 位之后紧跟单个数字」不切分 —— 那是 13 位料号的最后一位，
+ * 早切会把 `5154 0211 0005 1` 变成 `515402210005` + `1`。
+ */
 export function parseBatchItemNos(text: string): string[] {
-  return (text || '')
-    .split(/[\s,，;；、\t\n\r]+/)
-    .map(s => s.trim())
-    .filter(Boolean)
+  const out: string[] = []
+  const push = (v: string) => { const s = v.trim(); if (s) out.push(s) }
+
+  for (const line of String(text ?? '').split(/[\r\n]+/)) {
+    const seg = line.trim()
+    if (!seg) continue
+
+    const whole = normalizeItemNo(seg)
+    if (isItemNo(whole)) { push(whole); continue }
+
+    const toks = seg.split(/[\s,，;；、|\t]+/).filter(Boolean)
+    let buf = ''
+    for (let i = 0; i < toks.length; i++) {
+      const tk = toks[i]
+      if (!/^\d+$/.test(tk)) {
+        if (buf) { push(buf); buf = '' }
+        push(normalizeItemNo(tk))
+        continue
+      }
+      buf += tk
+      const nextIsSingleDigit = /^\d$/.test(toks[i + 1] || '')
+      if (buf.length === 13 || (buf.length === 12 && !nextIsSingleDigit) || buf.length > 13) {
+        push(buf)
+        buf = ''
+      }
+    }
+    if (buf) push(buf)
+  }
+  return out
 }
 
 export function buildBatchUrl(itemNo: string, seq: number): string {

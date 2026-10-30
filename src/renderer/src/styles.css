@@ -16,16 +16,28 @@
   --mc-accent: #725d42;
   --mc-accent-soft: #d4c4a8;
 
+  /* ── 明暗基色（2026-10-30 为「黑夜模式」引入）──
+     派生 token 不再写死 #fffdf8 / #4d3e36 这类具体颜色，而是从这 6 个基色混出来。
+     暗色主题只需在 [data-mode="dark"] 里覆盖这 6 个值 + accent-deep 的混合方向，
+     就能让整站（含库组件）一起转暗，不必逐条改派生公式。 */
+  --mc-paper: #fffdf8;          /* 纸张白：卡片底与所有混色的亮端基准 */
+  /* 强调色底上的文字色。浅色主题 accent 都是压过暗度的深色 → 白字；
+     暗色主题 accent 反过来是浅金 → 必须用深色字，否则白字糊成一片。 */
+  --mc-on-accent: #ffffff;
+  --mc-ink: #4d3e36;            /* 主文字 */
+  --mc-ink-soft: #8a7a6c;       /* 次要文字 */
+  --mc-shadow-ink: #2f2620;     /* 深压色：给 accent 调深度用 */
+  --mc-line-base: #e7ddca;      /* 描边基色 */
+  --mc-line-strong-base: #cbbca0;
+
   /* ── 派生 token（color-mix 在 Electron 33 / Chromium 130 可用）── */
-  --mc-accent-deep: color-mix(in srgb, var(--mc-accent) 84%, #2f2620);
-  --mc-accent-tint: color-mix(in srgb, var(--mc-accent) 14%, #fffdf8);
-  --mc-surface: color-mix(in srgb, var(--mc-page) 22%, #fffdf8);
-  --mc-surface-2: color-mix(in srgb, var(--mc-page) 45%, #fffdf8);
+  --mc-accent-deep: color-mix(in srgb, var(--mc-accent) 84%, var(--mc-shadow-ink));
+  --mc-accent-tint: color-mix(in srgb, var(--mc-accent) 14%, var(--mc-paper));
+  --mc-surface: color-mix(in srgb, var(--mc-page) 22%, var(--mc-paper));
+  --mc-surface-2: color-mix(in srgb, var(--mc-page) 45%, var(--mc-paper));
   --mc-surface-veil: color-mix(in srgb, var(--mc-surface) 88%, transparent);
-  --mc-line: color-mix(in srgb, var(--mc-accent-soft) 38%, #e7ddca);
-  --mc-line-strong: color-mix(in srgb, var(--mc-accent-soft) 72%, #cbbca0);
-  --mc-ink: #4d3e36;
-  --mc-ink-soft: #8a7a6c;
+  --mc-line: color-mix(in srgb, var(--mc-accent-soft) 38%, var(--mc-line-base));
+  --mc-line-strong: color-mix(in srgb, var(--mc-accent-soft) 72%, var(--mc-line-strong-base));
   --mc-radius: 18px;
   --mc-radius-sm: 10px;
   --mc-radius-lg: 28px;
@@ -84,9 +96,125 @@
   --animal-blue: var(--mc-blue);
   --animal-radius: var(--mc-radius);
   --animal-radius-lg: var(--mc-radius-lg);
+  /* 2026-10-30 补齐其余库 token（除阴影）：不补齐的话，库内部仍取自己 :root 里的
+     浅色默认值，黑夜主题下输入框 / 下拉 / 弹窗 / 禁用态会一块块露白。
+     阴影刻意不覆盖 —— 库的 shadow token 语义是 0 2px 4px 的小阴影，与 mc 的大阴影不同。 */
+  --animal-bg-color-disabled: var(--mc-surface-2);
+  --animal-border-color-hover: var(--mc-accent);
+  --animal-border-color-light: var(--mc-line);
+  --animal-text-color-muted: var(--mc-ink-soft);
+  --animal-text-color-disabled: color-mix(in srgb, var(--mc-ink) 40%, transparent);
+  --animal-mask-bg: color-mix(in srgb, var(--mc-page) 62%, transparent);
   /* 注意：不再占用 --animal-shadow / --animal-shadow-soft —— 前者是库自己的 token 名，
      语义是 0 2px 4px 的小阴影，与 mc-tool 的大阴影不同，继续借用会污染库组件。 */
 }
+
+/* ── 黑夜模式（2026-10-30）────────────────────────────────────────────────
+   由 applyTheme() 写入 `<html data-mode="dark">` 触发，与具体主题 id 无关：
+   任何 `mode: 'dark'` 的主题都复用这套暗色基色，只有 page / accent / accent-soft
+   三色由主题自带（当前只有 `night` 一套）。
+
+   accent-deep 在暗色下必须**向白**混：浅色模式里它是「比 accent 更深、用来压白字」，
+   暗色模式里同一用途需要的是「比 accent 更亮、在深底上依然清晰」，方向得反过来。 */
+[data-mode='dark'] {
+  /* paper 是卡片底与混色亮端：必须比 night 的 page(#12100b) 亮一档，
+     否则 --mc-surface 混出来跟页面底色几乎同色，卡片/输入框边界会消失 */
+  --mc-paper: #221f19;
+  /* accent 在暗色主题里是浅金 #c9ae86，白字压不住 —— 改用深墨棕 */
+  --mc-on-accent: #241f18;
+  --mc-ink: #e8e0d3;
+  --mc-ink-soft: #a2968a;
+  --mc-shadow-ink: #000000;
+  --mc-line-base: #322d26;
+  --mc-line-strong-base: #4d453b;
+  --mc-accent-deep: color-mix(in srgb, var(--mc-accent) 82%, #ffffff);
+  /* 深底上阴影要更重才看得出层次 */
+  --mc-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+  --mc-shadow-soft: 0 2px 10px rgba(0, 0, 0, 0.3);
+}
+
+/* 壁纸：同一张暖色点阵原样铺着会让整屏割裂成「浅色底 + 深色卡片」，
+   压暗并降饱和度 —— 只留纹理，不当主色用。
+   ⚠️ 这里必须用 filter 而不是 opacity：`.mc-backdrop` 带入场动画
+   `mc-backdrop-in … both`，其 `to { opacity: 1 }` 会以填充态常驻，
+   把后面写的 opacity 覆盖掉（实测写 opacity:0.16 完全不生效）。 */
+[data-mode='dark'] .mc-backdrop {
+  filter: brightness(0.3) saturate(0.55);
+}
+
+/* ── 暗色下的库组件补丁（2026-10-30，按实测逐个补）─────────────────────────
+   库有一部分组件**不走 --animal-* token**，直接在 CSS 里写死浅色（实测出处：
+   node_modules/animal-island-ui/dist/index.css 里 `.animal-tabs-I3QAo{background:#f8f8f0;
+   border:2px solid #e8e2d6}` 这类规则，全库共 70 处）。这些只能按类名前缀覆盖。
+
+   类名带构建期 hash（`.animal-tabs-I3QAo`），所以必须用 [class*=]。这是本项目里
+   **唯一**允许命中库内部类名的位置 —— 因为没有 token 可以覆盖，不用前缀匹配就只能
+   等库作者补 token。升级库时若前缀变了，这些规则会失效（表现为又露白），
+   但不会误伤别的组件。
+   全部限定在 [data-mode='dark']，浅色主题观感零变化。 */
+[data-mode='dark'] [class*='animal-tabs-'] {
+  background: var(--mc-surface);
+  border-color: var(--mc-line);
+}
+[data-mode='dark'] [class*='animal-tabList-'] { background: transparent; }
+/* :not([class*='app-']) —— 库的彩色卡片（app-pink / app-yellow / app-red…）是
+   Tag / Avatar 的语义配色，不能刷成 surface，否则彩色标签会全变灰。 */
+[data-mode='dark'] [class*='animal-card-']:not([class*='app-']) {
+  background: var(--mc-surface);
+  border-color: var(--mc-line);
+}
+[data-mode='dark'] [class*='animal-panel-'],
+[data-mode='dark'] [class*='animal-dropdown-'] {
+  background: var(--mc-surface);
+  border-color: var(--mc-line);
+}
+[data-mode='dark'] [class*='animal-modalClipped-'],
+[data-mode='dark'] [class*='animal-notification-'] { background: var(--mc-surface); }
+[data-mode='dark'] [class*='animal-thead-'],
+[data-mode='dark'] [class*='animal-tbody-'] { background: var(--mc-surface); }
+[data-mode='dark'] [class*='animal-striped-'] { background: var(--mc-surface-2); }
+[data-mode='dark'] [class*='animal-jumperInput-'] {
+  background: var(--mc-surface);
+  color: var(--mc-ink);
+}
+[data-mode='dark'] [class*='animal-loadingOverlay-'] {
+  background: color-mix(in srgb, var(--mc-page) 72%, transparent);
+}
+/* tooltip 保留库的浅色底（暗底界面里浅底气泡反而更醒目），只把文字压到深棕：
+   实测 `var(--mc-ink)` 在暗色下变成浅米色，配上浅底气泡直接糊成一片。
+   ！子元素也要一起管：库给内容层单独设了 color，父级 color 继承不下去。
+   用户指定 rgb(52,46,36) = #342e24。 */
+[data-mode='dark'] [class*='animal-tooltip-'],
+[data-mode='dark'] [class*='animal-tooltip-'] *:not(svg):not(path) { color: #342e24; }
+
+/* 超链接：暗色下 Chromium 默认的 #0000EE 几乎看不见（AI 回复「引用文档」里那几个
+   .docx 链接实测是深蓝黑）。统一改浅蓝，只影响暗色。
+   注意选择器用 `.ai-bubble a` 而不是 `.ai-md a` —— MessageItem 里 ReactMarkdown 是
+   直接渲染进 `.ai-bubble` 的，没有 `.markdown-body` / `.ai-md` 这层包装（ai-chat.css
+   里有一段注释专门记过这个坑）。 */
+[data-mode='dark'] .ai-bubble a,
+[data-mode='dark'] .ai-bubble a.ai-md-link,
+[data-mode='dark'] .mq td a,
+[data-mode='dark'] .file-link {
+  color: #8fc3ff;
+}
+[data-mode='dark'] .ai-bubble a:hover,
+[data-mode='dark'] .ai-bubble a.ai-md-link:hover,
+[data-mode='dark'] .mq td a:hover,
+[data-mode='dark'] .file-link:hover { color: #b6d9ff; }
+
+/* 输入框内文字：库 <Input> 的 input 元素在暗色下跟到了 --animal-text-color，
+   但我们的 .mq-input wrapper 焦点态背景是 surface，实测料号输入框里的数字偏暗棕、
+   对比度不足。这里直接给文字色兜底（.mq-input input 命中我们的 wrapper 子元素，
+   不是库的哈希类名）。 */
+[data-mode='dark'] .mq-input input,
+[data-mode='dark'] .mq-input textarea,
+[data-mode='dark'] .hist-input input { color: var(--mc-ink); }
+[data-mode='dark'] .mq-input input::placeholder,
+[data-mode='dark'] .hist-input input::placeholder { color: var(--mc-ink-soft); }
+
+
+* { box-sizing: border-box; }
 
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
@@ -300,7 +428,7 @@ body {
   align-items: center;
   justify-content: center;
   background: color-mix(in srgb, var(--mc-accent) 88%, transparent);
-  color: #fff;
+  color: var(--mc-on-accent);
   font-size: 18px;
   font-weight: 700;
   border-radius: 12px;
@@ -657,7 +785,7 @@ body {
 }
 .settings-seg button.active {
   background: var(--mc-accent);
-  color: #fff;
+  color: var(--mc-on-accent);
   font-weight: 600;
 }
 /* 关闭按钮行为下拉：控件已换成库 <Select>，其 wrapper 自带 min-width:140px，
@@ -698,6 +826,14 @@ body {
 }
 /* 缩略图承载 <Background> 自身（就是一块壁纸纹理），只需给定高度 */
 .theme-swatch__bg { display: block; height: 40px; }
+/* 黑夜主题的缩略图（2026-10-30）：它复用 default 壁纸，直接渲染会是一块**浅色**图，
+   和选中后的真实观感（暗）完全相反。这里把壁纸压暗，让缩略图与结果一致。
+   注意只压壁纸层，不动名称条 —— 名称条跟随主题色，本来就会变。 */
+.theme-swatch.is-dark { background: #12100b; }
+.theme-swatch.is-dark .theme-swatch__bg { filter: brightness(0.32) saturate(0.6); }
+/* 顶部「当前主题」行左侧的小方块同理：它渲染的是当前主题的壁纸（黑夜模式复用 default），
+   不压暗就会「所选显示为浅色、实际界面全黑」（2026-10-30 用户截图）。 */
+.theme-summary.is-dark .theme-summary__dot { filter: brightness(0.32) saturate(0.6); }
 .theme-swatch__name {
   display: block;
   font-size: 11px;
@@ -1213,7 +1349,7 @@ table.mq.bom thead th:nth-child(10) { width: 56px; }
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .mc-select__option.hover { background: color-mix(in srgb, var(--mc-accent) 14%, transparent); }
-.mc-select__option.active { background: linear-gradient(135deg, var(--mc-accent), var(--mc-accent-deep)); color: #fff; }
+.mc-select__option.active { background: linear-gradient(135deg, var(--mc-accent), var(--mc-accent-deep)); color: var(--mc-on-accent); }
 /* 布局变体：撑满容器 / 固定宽（AI 工具栏的供应商下拉）/ 设置行内不压缩 */
 .mc-select--block { display: block; width: 100%; }
 .mc-select--block .mc-select__trigger { width: 100%; }
@@ -1361,7 +1497,7 @@ thead th .col-resizer:hover { background: color-mix(in srgb, var(--mc-accent) 25
 .view-switch button:hover { color: var(--mc-ink); }
 .view-switch button.active {
   background: var(--mc-accent);
-  color: #fff;
+  color: var(--mc-on-accent);
   box-shadow: 0 3px 10px color-mix(in srgb, var(--mc-accent) 32%, transparent);
 }
 

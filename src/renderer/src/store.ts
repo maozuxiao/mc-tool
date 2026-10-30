@@ -1,5 +1,4 @@
 import { create } from 'zustand'
-import type { BackgroundType } from 'animal-island-ui'
 import { I18N, Lang, translate } from '@shared/i18n'
 import { applyTheme, persistTheme, readStoredTheme } from './theme'
 import {
@@ -98,7 +97,8 @@ interface State {
   // 主题：字符串存 localStorage（与 mc-lang / mc-hidden-cols 同构）。
   // 不走主进程 prefs —— 那条通道是布尔专用（setSetting(key, boolean) + !!v），
   // 且 getAppPrefs() 是异步的，用它必然导致首屏先渲染默认主题再切肤。
-  theme: BackgroundType
+  // 2026-10-30：类型放宽为 string —— 主题 id 与「壁纸类型」已解耦（黑夜主题复用 default 壁纸）
+  theme: string
   updateInfo: { hasUpdate: boolean; version?: string; downloaded?: boolean; notes?: string; checking: boolean; latest?: boolean; downloading?: boolean; progress?: number; error?: string }
   appVersion: string
   // 行展开状态持久化到 store：切换 tab 时不丢失展开行与按钮点击事件
@@ -118,7 +118,7 @@ interface State {
   // actions
   t: (key: string, vars?: Record<string, string | number>) => string
   setLang: (l: Lang) => void
-  setTheme: (id: BackgroundType) => void
+  setTheme: (id: string) => void
   setLoggedIn: (v: boolean) => void
   setCheckingLogin: (v: boolean) => void
   setLanding: (v: boolean) => void

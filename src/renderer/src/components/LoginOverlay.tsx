@@ -87,6 +87,14 @@ export function LoginOverlay({ loginState }: Props) {
   const lastFetchAtRef = useRef(0)
   /** 二维码「刚拿到就失效」的连续自动重拉计数（正常过期不计数，见 4005 分支） */
   const autoRefreshRef = useRef(0)
+  /**
+   * 「出码成功但长轮询起不来」的自愈计数（2026-10-30）。
+   * 轮询要求 qrToken / authChainCode / lck 三者齐全，而二维码只依赖 qrMsg ——
+   * 缺任一项时界面照样显示一张能扫的码，却永远没人去 authExecute，
+   * 用户的表现就是「扫了登不上、还没任何提示」。这里主动重拉补救，最多 2 次，
+   * 避免真异常时无限空转。
+   */
+  const pollRepairRef = useRef(0)
 
   const fetchQr = useCallback(async (forceQr = true, retryLeft = 0) => {
     const seq = ++fetchSeqRef.current
@@ -205,7 +213,29 @@ export function LoginOverlay({ loginState }: Props) {
   // 二维码拿到后开始长轮询（authExecute）
   // 注意：必须是单条请求串行等待，authExecute 会挂起 60s；用 setInterval 会导致多个请求并发互相覆盖。
   useEffect(() => {
-    if (loginState !== 'logging' || !qrToken || !authChainCode || !lck) return
+    if (loginState !== 'logging') return
+    if (!qrToken || !authChainCode || !lck) {
+      // 2026-10-30 现场：界面**有二维码、能扫**，但全局只出码、main 侧一条 authExecute 都没有。
+      // 原因就是这里静默 return —— qrSrc 来自 qrMsg，缺 chain / lck 时二维码照样渲染，
+      // 于是「扫了永远登不上」且没有任何线索。现在把缺哪一项明确打出来。
+      console.warn(
+        '[QR] poll NOT started — token:', qrToken ? qrToken.slice(0, 8) : '(empty)',
+        'chain:', authChainCode || '(empty)',
+        'lck:', lck ? lck.slice(0, 16) : '(empty)'
+      )
+      // 自愈：缺要素时主动重拉（1.5s 内已拉过就跳过，避免和 fetchQr 的 800ms 去重打架）。
+      // 只在「已出过码」之后才重拉 —— 首次拉码本来就还没填齐，不该额外打一次。
+      if (pollRepairRef.current < 2 && qrToken && Date.now() - lastFetchAtRef.current > 1500) {
+        pollRepairRef.current++
+        console.warn('[QR] poll repair -> refetch #', pollRepairRef.current)
+        window.setTimeout(() => {
+          if (useStore.getState().loginState !== 'logging') return
+          fetchQr(true, 0)
+        }, 600)
+      }
+      return
+    }
+    pollRepairRef.current = 0
     console.log('[QR] start long-polling, token=', qrToken.slice(0, 8), 'chain=', authChainCode.slice(0, 8))
     startedAtRef.current = Date.now()
     pollingRef.current = true
@@ -300,7 +330,7 @@ export function LoginOverlay({ loginState }: Props) {
         pollTimerRef.current = null
       }
     }
-  }, [loginState, qrToken, authChainCode, lck, stopPolling])
+  }, [loginState, qrToken, authChainCode, lck, stopPolling, fetchQr])
 
   // 登录成功后清理
   useEffect(() => {

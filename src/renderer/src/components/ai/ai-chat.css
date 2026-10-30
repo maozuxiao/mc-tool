@@ -103,7 +103,7 @@
   padding: 0;
   transition: background .12s, color .12s;
 }
-.ai-side-toggle:hover, .ai-side-new:hover { background: var(--mc-accent); color: #fff; }
+.ai-side-toggle:hover, .ai-side-new:hover { background: var(--mc-accent); color: var(--mc-on-accent); }
 /* 收起：左侧栏变成 44px 竖条，只保留「展开」与「新对话」两个圆角小按钮 */
 .ai-page.side-collapsed { grid-template-columns: 44px minmax(0, 1fr); }
 .ai-page.side-collapsed .ai-sidebar-head {
@@ -135,7 +135,7 @@
   padding: 0;
   transition: background .12s, color .12s;
 }
-.ai-side-menu-btn:hover { background: var(--mc-accent); color: #fff; }
+.ai-side-menu-btn:hover { background: var(--mc-accent); color: var(--mc-on-accent); }
 .ai-history-item {
   display: flex;
   align-items: center;
@@ -185,7 +185,7 @@
   cursor: pointer;
 }
 .ai-side-selmode:hover { background: var(--mc-surface-2); border-color: var(--mc-accent); }
-.ai-side-selmode.on { background: var(--mc-accent); border-color: var(--mc-accent); color: #fff; }
+.ai-side-selmode.on { background: var(--mc-accent); border-color: var(--mc-accent); color: var(--mc-on-accent); }
 .ai-history-title {
   flex: 1;
   min-width: 0;
@@ -252,7 +252,7 @@
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .ai-model-option:hover { background: color-mix(in srgb, var(--mc-accent) 14%, transparent); }
-.ai-model-option.active { background: linear-gradient(135deg, var(--mc-accent), var(--mc-accent-deep)); color: #fff; }
+.ai-model-option.active { background: linear-gradient(135deg, var(--mc-accent), var(--mc-accent-deep)); color: var(--mc-on-accent); }
 
 /* 已删除：.ai-skill-toggle（MC Skill 开关）—— 该功能已从工具栏移除，全工程无引用 */
 
@@ -386,7 +386,7 @@
   display: grid;
   place-items: center;
   background: linear-gradient(135deg, var(--mc-accent), var(--mc-accent-deep));
-  color: #fff;
+  color: var(--mc-on-accent);
   font-weight: 800;
 }
 .ai-message { display: flex; gap: 10px; max-width: 92%; }
@@ -430,7 +430,7 @@
   place-items: center;
   font-size: 12px;
   font-weight: 700;
-  color: #fff;
+  color: var(--mc-on-accent);
   background: var(--mc-accent);
 }
 .ai-message.user .ai-avatar { background: var(--mc-amber); }
@@ -443,8 +443,25 @@
   box-shadow: var(--mc-shadow-soft);
   overflow: hidden;
 }
-.ai-message.user .ai-bubble { background: color-mix(in srgb, var(--mc-amber) 18%, var(--mc-surface)); }
+/* 用户气泡里可能嵌着带悬停预览的 chip：overflow:hidden 会把预览裁掉（看不到路径），
+   所以这里放开溢出。气泡内容都是文字/inline 元素，不会真的溢出。 */
+.ai-message.user .ai-bubble { background: color-mix(in srgb, var(--mc-amber) 18%, var(--mc-surface)); overflow: visible; }
 .ai-plain { white-space: pre-wrap; word-break: break-word; }
+/* 带内联附件的用户消息：chip 跟着文字走，靠 inline-block 回到基线附近 */
+.ai-plain--inline { display: block; }
+.ai-plain__chip {
+  display: inline-block;
+  vertical-align: -5px;
+  margin: 2px 3px;
+  max-width: 100%;
+}
+.ai-plain__chip .ai-attach-chip { vertical-align: middle; }
+/* 气泡里的 chip 预览朝**下**展开：气泡位于滚动流中，向上弹容易被列表顶部裁掉 */
+.ai-plain__chip .ai-attach-preview {
+  top: calc(100% + 8px);
+  bottom: auto;
+  transform: translateY(-4px);
+}
 .ai-bubble > .markdown-body, .ai-bubble .markdown-body { font-size: var(--mc-font-base); line-height: 1.65; }
 .ai-bubble h1, .ai-bubble h2, .ai-bubble h3 { margin: 12px 0 8px; color: var(--mc-ink); }
 .ai-bubble p { margin: 6px 0; }
@@ -579,7 +596,8 @@
 }
 /* 「复位」用原生按钮而非库 Button（悬停被压扁/切图被裁，见组件注释里的说明）。
    `flex: none` + `white-space: nowrap` 保证它永远不被挤压、不换行。
-   scale 已是 100% 时置灰 —— 没有可复位的东西还给一个可点的按钮，是噪声。 */
+   只在 scale **恰好 100%** 时置灰 —— 缩小（<100%）同样需要一键回到 100%，
+   此前判据写成 `scale <= 1`，45% 时按钮是灰的（2026-10-30 用户反馈）。 */
 .ai-img-reset-btn {
   flex: none;
   white-space: nowrap;
@@ -613,7 +631,8 @@
   min-width: 0;
   min-height: 0;
   overflow: auto;
-  background: #fff;
+  /* 图片衬底跟随明暗（2026-10-30）：写死 #fff 时黑夜主题下会围出一圈刺眼白框 */
+  background: var(--mc-paper);
   border-radius: 8px;
   text-align: center;
 }
@@ -913,27 +932,131 @@
      .ai-composer-input-wrap 就在本容器内部（position: relative），加隔离不会挪位。 */
   contain: layout style;
 }
-.ai-composer textarea {
+/* 主输入框（2026-10-30：textarea → contenteditable）
+   换掉 textarea 的唯一原因是「附件 chip 要内联在文字中间」—— textarea 只能放纯文本。
+   高度沿用 textarea 的 72~180 区间：内容多了自己长高，超出才滚动。
+   `white-space: pre-wrap` 让 Shift+Enter 的 <br> 与粘贴的换行都正常换行。 */
+.ai-composer-editor {
   width: 100%;
   min-height: 72px;
   max-height: 180px;
-  resize: vertical;
+  overflow-y: auto;
   border: 1px solid var(--mc-line);
   border-radius: 12px;
-  padding: 10px 12px;
+  padding: 10px 12px 10px 38px;   /* 左侧 38px 留给 + 按钮（见 .ai-prompt-toggle） */
   font: inherit;
   color: var(--mc-ink);
   outline: none;
   background: var(--mc-surface);
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.6;
 }
-.ai-composer textarea:focus { border-color: var(--mc-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--mc-accent) 12%, transparent); }
+.ai-composer-editor:focus { border-color: var(--mc-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--mc-accent) 12%, transparent); }
+.ai-composer-editor-wrap { position: relative; }
+/* 占位符用独立元素：编辑器里有 chip 时不再是 :empty，::before 会立刻失效，
+   而「已经粘了附件、正文还没写」恰恰最需要提示语还在。 */
+.ai-composer-ph {
+  position: absolute;
+  left: 38px;
+  top: 10px;
+  max-width: calc(100% - 52px);
+  color: var(--mc-ink-soft);
+  font-size: var(--mc-font-base);
+  line-height: 1.6;
+  pointer-events: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── 编辑器内的内联附件 chip（2026-10-30）────────────────────────
+   chip 是 contentEditable=false 的节点，跟着光标落在文字之间。
+   `vertical-align: middle` 让它与文字基线对齐，不把行高撑开。 */
+.ai-inline-attach {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 240px;
+  margin: 0 2px;
+  padding: 1px 2px;
+  border: 1px solid var(--mc-line);
+  border-radius: 8px;
+  background: var(--mc-surface-2);
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--mc-ink);
+  vertical-align: middle;
+  /* 整块不可拆：否则全选复制时 chip 会被拆成一堆碎片 */
+  user-select: none;
+  cursor: default;
+}
+.ai-inline-attach__thumb { width: 18px; height: 18px; flex: none; border-radius: 5px; object-fit: cover; }
+.ai-inline-attach__ico {
+  flex: none;
+  padding: 0 3px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--mc-accent) 16%, transparent);
+  color: var(--mc-accent-deep);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .02em;
+}
+.ai-inline-attach__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-inline-attach__del {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--mc-ink-soft);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+.ai-inline-attach__del:hover { background: var(--mc-red-deep); color: #fff; }
+
+/* 悬停浮层：图片给原图，其他格式给完整路径。
+   必须是 position: fixed 且由 JS 在 mouseenter 时算坐标 —— 编辑器是 overflow:auto，
+   绝对定位的浮层会被直接裁掉（这也是复用不了 .ai-attach-preview 的原因）。 */
+.ai-inline-attach__tip {
+  position: fixed;
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 300px;
+  padding: 6px 8px;
+  border: 1px solid var(--mc-line);
+  border-radius: 10px;
+  background: var(--mc-surface);
+  box-shadow: var(--mc-shadow);
+  opacity: 0;
+  transform: translateY(-100%);
+  pointer-events: none;
+  transition: opacity .12s ease;
+}
+.ai-inline-attach__tip.on { opacity: 1; }
+.ai-inline-attach__tip img {
+  display: block;
+  max-width: 288px;
+  max-height: 288px;
+  border-radius: 6px;
+  object-fit: contain;
+}
+.ai-inline-attach__tip-path { font-size: 11.5px; color: var(--mc-ink); word-break: break-all; line-height: 1.5; }
+.ai-inline-attach__tip-meta { font-size: 11px; color: var(--mc-ink-soft); }
 .ai-composer-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 8px; }
 .ai-title { font-size: 12px; color: var(--mc-ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ai-notice { font-size: 12px; color: var(--mc-red-deep); margin-bottom: 8px; }
 
 /* 自定义提示词：+ 按钮在输入框左下角，展开可滚动列表面板，支持管理弹窗增删查改 */
 .ai-composer-input-wrap { position: relative; display: block; }
-.ai-composer-input-wrap textarea { padding-left: 38px; }
+/* 左侧内边距已由 .ai-composer-editor 自己承担（textarea 已被 contenteditable 取代） */
 .ai-prompt-toggle {
   position: absolute;
   left: 8px;
@@ -953,7 +1076,7 @@
   padding: 0;
   transition: background .12s, color .12s, transform .12s;
 }
-.ai-prompt-toggle:hover, .ai-prompt-toggle.open { background: var(--mc-accent); color: #fff; transform: scale(1.05) rotate(45deg); }
+.ai-prompt-toggle:hover, .ai-prompt-toggle.open { background: var(--mc-accent); color: var(--mc-on-accent); transform: scale(1.05) rotate(45deg); }
 .ai-prompt-toggle:not(.open):hover { transform: scale(1.05); }
 .ai-prompt-panel {
   position: absolute;
@@ -1152,9 +1275,11 @@
 .ai-queue-op:hover { background: color-mix(in srgb, var(--mc-ink) 6%, transparent); color: var(--mc-ink); }
 .ai-queue-op.danger:hover { color: var(--mc-red-deep); }
 
-/* ── 附件（1.0.43）：粘贴截图 / 拖入文件 / 选择文件，统一变成 chip ── */
-.ai-composer-drop { display: block; }
-.ai-attach-list { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 8px; }
+/* ── 附件（1.0.43 引入 / 2026-10-30 改版）：粘贴截图 / 拖入文件 / 选择文件 ──
+   drop 容器改成纵向 flex：附件列表已在**输入框内顶部**（见 ChatPanel 的 DOM 调整），
+   它与输入框之间由 gap 排版，列表自身不再需要 margin-bottom。 */
+.ai-composer-drop { display: flex; flex-direction: column; gap: 6px; }
+.ai-attach-list { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .ai-attach-chip {
   position: relative; /* 悬停预览层的定位基准 */
   display: inline-flex;
@@ -1216,8 +1341,28 @@
 }
 .ai-attach-preview__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ai-attach-preview__size { flex: none; }
-.ai-attach-chip.image { border-color: var(--mc-accent-soft); }
-.ai-attach-chip__thumb { width: 20px; height: 20px; object-fit: cover; border-radius: 6px; flex: none; }
+/* 完整路径（含所在文件夹）：chip 本体只显示文件名，路径只在悬停浮层里出现，允许折行 */
+.ai-attach-preview__path {
+  max-width: 280px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--mc-ink);
+  word-break: break-all;
+}
+/* 图片附件在 chip 里的小缩略图（2026-10-30 定稿）：
+   用户要的是「chip 风格 + 鼠标悬停才看大图」—— chip 本体只露文件名与这张 14px 小图，
+   原图交给上面的 `.ai-attach-preview` 浮层。所以这里**不做**大方块卡片：
+   大方块会占掉整行，一个附件就顶满输入框宽度，反而妨碍「一边打字一边看附件列表」。 */
+.ai-attach-chip__thumb {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  border-radius: 4px;
+  object-fit: cover;
+}
+/* 文件类附件现在只显示文件名（完整路径放在悬停浮层里），
+   所以不再单独放宽宽度；260px 上限 + ellipsis 足够长文件名用。 */
+.ai-attach-chip.file .ai-attach-chip__name { max-width: 220px; }
 .ai-attach-chip__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ai-attach-chip__size { flex: none; font-size: 11px; color: var(--mc-ink-soft); }
 .ai-attach-chip__warn { flex: none; color: var(--mc-red-deep); }
@@ -1576,5 +1721,5 @@ html.win-idle .ai-jump-btn.is-live::after { animation-play-state: paused; }
   .ai-toolbar { padding: 10px 12px; gap: 6px; }
   /* 已删除 .ai-select —— 库 <Select> 不接受 className，宽度由 .ai-select-wrap--* 约束 */
   .ai-model-input { width: 180px; }
-  .ai-composer textarea { min-height: 60px; }
+  .ai-composer-editor { min-height: 60px; }
 }

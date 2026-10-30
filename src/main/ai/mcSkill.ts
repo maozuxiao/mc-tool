@@ -5,6 +5,7 @@ import { join } from 'path'
 import { promisify } from 'util'
 import { execFile } from 'child_process'
 import type { AIAgentMode, AIToolRun, AIExtraRoot } from '@shared/ai-types'
+import { normalizeItemNo } from '@shared/query'
 
 const execFileAsync = promisify(execFile)
 
@@ -76,6 +77,12 @@ ${MODE_SWITCH_NOTE}
 3. 描述含 IMX307 的物料，必须提示替代料号信息；如果查询结果中 imx307_replacement 为空数组，要明确说明未找到映射记录。
 3.1 结果里带 pn_switch 字段（料号切换/替代通知，如 AD Plus2.0 8G eMMC → 内置 128GB）时，**必须**主动说明：这是已切换的料号、新料号是多少、截止日期（如 2026-10-31 之后旧料号一律不接单）；role=old 是切换前（别再按它报价/下单），role=new 是切换后新料号。若该料号在 MC 里查不到但返回里带了 [PN][WARN]，同样要把新料号告知用户（旧料号查不到往往正是切换造成的）。涉及客户邮件时可用 notice 里的 customer_notice_template。
 4. 批量查询时不要并发，一次 mc_query 可传入多个料号参数。
+4.1 **料号书写（硬规则，实测最容易出错的一条）**：回复里出现的料号必须与查询返回的
+   ITEM_NUMBER **逐字一致**，写成连续数字（如 515402210148）。**禁止**用 4-4-4 空格分组
+   （不要写成 5154 0221 0148）、**禁止**省略或改写中间任何一位 —— 用户反馈过「输出料号时
+   会少中间字段的位数」，那是模型凭记忆抄写造成的，必须从工具返回值里复制，不要手打。
+   用户若用带空格 / 全角 / 连字符的写法提问，工具侧已自动归一化，你按返回值中的紧凑形式输出即可；
+   输出前核对位数（12 位或 13 位），位数不符说明记错了，重新查一次确认后再回答。
 ${specDownloadRule}
 
 【必填字段】用户询问某料号的相关信息时，回复中必须明确列出：物料描述、类型、生命周期、库存 四项；若 MC 系统未返回其中某项，需说明「未返回」，禁止只给料号就结束。`
@@ -226,7 +233,7 @@ export const MC_QUERY_TOOL_DEFINITION = {
       type: 'object',
       properties: {
         command: { type: 'string', enum: ['search', 'item', 'batch', 'bom', 'spec'] },
-        args: { type: 'array', items: { type: 'string' }, description: '子命令参数，例如料号或描述关键词' }
+        args: { type: 'array', items: { type: 'string' }, description: '子命令参数，例如料号或描述关键词。料号请传连续数字（如 515402210148），不要用 4-4-4 空格分组' }
       },
       required: ['command', 'args']
     }
@@ -237,7 +244,18 @@ function validateInput(input: any): { command: string; args: string[] } {
   const allowed = new Set(['search', 'item', 'batch', 'bom', 'spec'])
   const command = String(input?.command || '')
   if (!allowed.has(command)) throw new Error(`不支持的 MC 查询命令: ${command}`)
-  const args = Array.isArray(input?.args) ? input.args.map((x: any) => String(x).trim()).filter(Boolean) : []
+  // 料号类命令的参数做归一化（2026-10-30）：模型很容易照着用户原话把 `5154 0211 0005 1`
+  // 这种 4-4-4(-1) 分组的料号原样传进来，而 OA 的 `q.ITEM_NUMBER` 只认连续数字串 ——
+  // 不归一化就会「8 个料号全查不到」。search 走的是描述关键词，不能去空格，保持原样。
+  const itemCmds = command !== 'search'
+  const args = Array.isArray(input?.args)
+    ? input.args
+        .map((x: any) => {
+          const s = String(x).trim()
+          return itemCmds ? normalizeItemNo(s) : s
+        })
+        .filter(Boolean)
+    : []
   if (!args.length) throw new Error('MC 查询参数不能为空')
   if (args.length > 50) throw new Error('单次最多查询 50 个参数')
   if (args.some((x: any) => !x.trim() || x.length > 500 || /[\r\n\0]/.test(x))) throw new Error('MC 查询参数包含非法字符')

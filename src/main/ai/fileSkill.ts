@@ -44,7 +44,7 @@ export const FILE_READ_TOOL_DEFINITION = {
   type: 'function',
   function: {
     name: 'file_read',
-    description: '读取文件。支持纯文本（md/txt/csv/json/log/yml/xml/html 等）、docx、xls、xlsx、pptx、pdf；pdf 与中文文档已自动处理编码。单次最多返回约 200KB，返回里 truncated 为 true 表示被截断，需更多时用 offset/limit 分段读取。路径直接用本机绝对路径（如 C:/Users/张三/文档/报告.xlsx、D:/共享/出货记录.xls），也可用 open_folder 打开目录后返回的「别名/路径」前缀；不传别名时按绝对/相对路径直接访问本机文件。若返回 EBUSY/文件被占用，说明该文件正被其他程序（如 Excel）打开，提示用户关闭后再重试即可。',
+    description: '读取文件。支持：① 文本类（md/txt/csv/tsv/json/log/yml/xml/html/sql 以及 vue/kt/kts/swift/dart/toml/proto 等源码与配置，扩展名不认识时会嗅探内容，无扩展名文件按文本读）；② Office：docx/docm/dotx、xlsx/xlsm/xltx、xls、pptx/pptm/ppsx、doc、ppt（老版 .doc/.ppt 会先判断真实容器 —— 实为 docx/rtf/html 的精确读取，真正的 OLE 二进制则按 UTF-16 尽力抽取并在 note 里说明）；③ OpenDocument 与电子书：odt/ods/odp/epub；④ rtf；⑤ pdf。pdf 与中文文档已自动处理编码。单次最多返回约 200KB，返回里 truncated 为 true 表示被截断，需更多时用 offset/limit 分段读取。路径直接用本机绝对路径（如 C:/Users/张三/文档/报告.xlsx、D:/共享/出货记录.xls），也可用 open_folder 打开目录后返回的「别名/路径」前缀；不传别名时按绝对/相对路径直接访问本机文件。若返回 EBUSY/文件被占用，说明该文件正被其他程序（如 Excel）打开，提示用户关闭后再重试即可。',
     parameters: {
       type: 'object',
       properties: {

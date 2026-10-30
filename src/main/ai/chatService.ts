@@ -2,7 +2,7 @@ import { app, BrowserWindow, net, dialog } from 'electron'
 import { randomUUID } from 'crypto'
 import { appendFileSync, existsSync, statSync } from 'fs'
 import { dirname, join, resolve } from 'path'
-import type { AISendPayload, AIAttachment, AIExtraRoot as AllowedRoot } from '@shared/ai-types'
+import type { AISendPayload, AIAttachment, AIInlineMark, AIExtraRoot as AllowedRoot } from '@shared/ai-types'
 import { resolveMode } from '@shared/ai-types'
 import { getProvider, savePreferences } from './providerStore'
 import { opencodeSessionHeaders } from './providerApi'
@@ -206,11 +206,35 @@ function openAIToolResponse(toolCallId: string, content: unknown): any {
  * - 图片 → `image_url`（dataURL），因此需要所选模型支持视觉，否则由服务端报错，前端原样提示；
  * - 文本附件 → 追加成一段带文件名的代码块（内联给模型，避免多一次工具往返）；
  * - 其他文件（xlsx/docx/pdf…）→ 只给本机路径并提示用 file_read 读取（仅 build 模式有该工具）。
+ *
+ * 2026-10-30：用户把附件放在句子中间时（「按 README.md 说的改一下这里」），
+ * 附件列表本身看不出指向关系，所以按 `inlineMarks` 把「【附件：名字】」插回原位置。
  */
-function buildUserContent(input: { content: string; attachments?: AIAttachment[] }): any {
+function inlineMarksText(content: string, marks?: AIInlineMark[]): string {
+  if (!marks?.length) return content
+  const sorted = marks
+    .filter(m => m && typeof m.at === 'number')
+    .slice()
+    .sort((a, b) => a.at - b.at)
+  let out = ''
+  let prev = 0
+  for (const m of sorted) {
+    const at = Math.max(prev, Math.min(Math.max(0, m.at), content.length))
+    out += content.slice(prev, at) + `【附件：${m.name}】`
+    prev = at
+  }
+  return out + content.slice(prev)
+}
+
+function buildUserContent(input: {
+  content: string
+  attachments?: AIAttachment[]
+  inlineMarks?: AIInlineMark[]
+}): any {
   const atts = (input.attachments || []).filter(Boolean)
-  if (!atts.length) return input.content
-  const parts: any[] = [{ type: 'text', text: input.content }]
+  const text = inlineMarksText(input.content, input.inlineMarks)
+  if (!atts.length) return text
+  const parts: any[] = [{ type: 'text', text }]
 
   const texts = atts.filter(a => a.kind === 'text' && a.text)
   if (texts.length) {
@@ -305,7 +329,10 @@ async function streamOpenAICompatible(input: {
           }
           // 历史里的用户消息若带附件，同样还原成 content 数组：图片继续可见、文本继续内联
           if (m.role === 'user' && m.attachments?.length) {
-            return { role: 'user', content: buildUserContent({ content: m.content, attachments: m.attachments }) }
+            return {
+              role: 'user',
+              content: buildUserContent({ content: m.content, attachments: m.attachments, inlineMarks: m.inlineMarks })
+            }
           }
           if (m.role === 'assistant' && keepReasoning) {
             return { role: 'assistant', content: m.content, reasoning_content: m.reasoning }
@@ -537,7 +564,13 @@ export async function sendMessage(payload: AISendPayload): Promise<void> {
   const existing = getConversation(conversationId)
   // 用 UI 选择的工作区 / 额外目录初始化本会话白名单（运行时 open_folder 可再追加）
   sessionRoots.set(conversationId, mergeRoots(sessionRoots.get(conversationId) || [], payload))
-  appendMessage({ conversationId, role: 'user', content: payload.content, attachments: payload.attachments })
+  appendMessage({
+    conversationId,
+    role: 'user',
+    content: payload.content,
+    attachments: payload.attachments,
+    inlineMarks: payload.inlineMarks
+  })
   const assistant = appendMessage({
     conversationId,
     role: 'assistant',

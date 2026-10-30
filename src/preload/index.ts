@@ -76,6 +76,10 @@ const mcApi = {
   startQrLogin: (forceQr?: boolean): Promise<any> => ipcRenderer.invoke(IPC.OA_QR_LOGIN_START, { forceQr: !!forceQr }),
   pollQrLogin: (payload: { qrToken: string; authChainCode: string; lck: string; entityId?: string }): Promise<any> =>
     ipcRenderer.invoke(IPC.OA_QR_LOGIN_POLL, payload),
+  // 渲染层每次（重新）挂载报到一次。主进程用它复位 loginViewShown ——
+  // 否则 dev 下 HMR 整页重载后，主进程仍认为「登录层已展示」，后续所有
+  // requestLoginView 都被 skip，新实例的登录层状态与主进程彻底错位。
+  rendererReady: (): Promise<boolean> => ipcRenderer.invoke(IPC.OA_RENDERER_READY),
 
   logError: (msg: string) => ipcRenderer.send(IPC.LOG_ERROR, msg),
 

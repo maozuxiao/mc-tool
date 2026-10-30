@@ -38,7 +38,7 @@ const fs = require('fs')
 const path = require('path')
 const crypto = require('crypto')
 const { SandboxError, resolveSafe } = require('./lib/sandbox')
-const { readerFor } = require('./lib/readers')
+const { readerFor, SUPPORTED_FORMATS } = require('./lib/readers')
 
 const DEFAULT_MAX_BYTES = 200 * 1024 // 单次读取上限，避免撑爆模型上下文
 const HARD_MAX_BYTES = 2 * 1024 * 1024 // 无论如何不超过 2MB
@@ -232,17 +232,57 @@ function cmdPing() {
 }
 
 // ── 命令：read ────────────────────────────────────────────
+// 已知按纯文本读取的扩展名。
+// 2026-10-30 放宽：把常见的配置/脚本/前端/文档源码后缀一并纳入，避免模型每次遇到
+// .vue/.kt/.toml 之类都要先报「不支持」——它们本来就是文本。
+// 未列出的扩展名也不再直接拒绝，交给下面的 sniff 判断（见 looksLikeText）。
 const TEXT_EXT = new Set([
-  '.md', '.markdown', '.txt', '.text', '.csv', '.tsv', '.json', '.jsonl',
-  '.log', '.yml', '.yaml', '.xml', '.html', '.htm', '.ini', '.conf',
-  '.properties', '.sql', '.js', '.ts', '.jsx', '.tsx', '.py', '.ps1',
-  '.bat', '.sh', '.gitignore', '.env', '.editorconfig'
+  '.md', '.markdown', '.mdx', '.txt', '.text', '.rst', '.tex', '.adoc',
+  '.csv', '.tsv', '.json', '.jsonl', '.ndjson', '.json5',
+  '.log', '.yml', '.yaml', '.xml', '.html', '.htm', '.xhtml', '.svg',
+  '.ini', '.conf', '.cfg', '.properties', '.toml', '.env', '.editorconfig',
+  '.sql', '.graphql', '.gql', '.proto', '.diff', '.patch',
+  '.js', '.mjs', '.cjs', '.ts', '.jsx', '.tsx', '.vue', '.svelte', '.astro',
+  '.py', '.pyi', '.ps1', '.psm1', '.bat', '.cmd', '.sh', '.bash', '.zsh', '.fish',
+  '.java', '.kt', '.kts', '.scala', '.groovy', '.gradle', '.clj', '.cljs',
+  '.c', '.h', '.cc', '.cpp', '.cxx', '.hpp', '.hh', '.cs', '.fs', '.vb',
+  '.go', '.rs', '.swift', '.m', '.mm', '.dart', '.lua', '.pl', '.pm', '.r', '.jl',
+  '.php', '.rb', '.ex', '.exs', '.erl', '.hs', '.elm', '.zig', '.nim',
+  '.tf', '.hcl', '.dockerfile', '.makefile', '.cmake', '.mk', '.bazel', '.bzl'
 ])
 
 function isTextFile(filePath) {
   const ext = path.extname(filePath).toLowerCase()
   if (TEXT_EXT.has(ext)) return true
-  return ext === '' // 无扩展名（LICENSE、Dockerfile）按文本处理
+  return ext === '' // 无扩展名（LICENSE、Dockerfile、Makefile）按文本处理
+}
+
+/**
+ * 未知扩展名时判断「内容像不像文本」。
+ *
+ * 宁可让少数二进制被当成乱码文本（模型能自己看出来），也不要让 .kt/.proto 这类
+ * 明明是文本的文件被硬拒。判据：前 8KB 无 NUL 字节（UTF-16 BOM 例外），
+ * 且控制字符占比 < 5%。
+ */
+function looksLikeText(abs) {
+  let buf
+  try {
+    const fd = fs.openSync(abs, 'r')
+    buf = Buffer.alloc(Math.min(8192, fs.fstatSync(fd).size))
+    fs.readSync(fd, buf, 0, buf.length, 0)
+    fs.closeSync(fd)
+  } catch {
+    return false
+  }
+  if (!buf.length) return false
+  // UTF-16 LE/BE 带 BOM：内容是文本，只是编码不同
+  if ((buf[0] === 0xff && buf[1] === 0xfe) || (buf[0] === 0xfe && buf[1] === 0xff)) return true
+  if (buf.includes(0x00)) return false
+  let ctrl = 0
+  for (const b of buf) {
+    if (b < 0x09 || (b > 0x0d && b < 0x20)) ctrl++
+  }
+  return ctrl / buf.length < 0.05
 }
 
 // 单个文件读取（多根版）：返回 { abs, relative, size, format, truncated, content }
@@ -260,19 +300,25 @@ async function readOne(roots, target, opts = {}) {
 
   let text
   let format
+  let note
   const reader = readerFor(ext)
   if (reader) {
     const raw = await reader(abs)
     text = raw.text
     format = raw.format
-  } else if (isTextFile(abs)) {
+    note = raw.note
+  } else if (isTextFile(abs) || looksLikeText(abs)) {
+    // 未知扩展名但内容像文本（.vue/.proto/.kt，或没扩展名的脚本）→ 按文本读，
+    // 不再一律拒绝；真正二进制（zip/exe/图片）会被 looksLikeText 挡在门外。
     const buf = fs.readFileSync(abs)
     const d = decodeText(buf)
     text = d.text
     format = 'text'
+    if (!ext) note = '无扩展名，已按纯文本读取'
   } else {
     throw new CommandError(
-      `暂不支持读取该格式：${path.basename(abs)}（支持文本类 / docx / xls / xlsx / pptx / pdf）`,
+      `暂不支持读取该格式：${path.basename(abs)}（支持：文本类源码/配置、` +
+      `${SUPPORTED_FORMATS.join(' / ')}；压缩包、可执行文件、图片等二进制请勿用本工具）`,
       'UNSUPPORTED_FORMAT'
     )
   }
@@ -283,6 +329,9 @@ async function readOne(roots, target, opts = {}) {
     relative: displayRel(aliasOf(roots, root), root, abs),
     size: stat.size,
     format,
+    // 读法说明（如「扩展名是 .doc，实际是 HTML」「老版 .doc 尽力提取」），让模型知道
+    // 内容可能不完整，回答时据此提示用户，而不是把缺失的结构当成「文件里没有」
+    ...(note ? { note } : {}),
     bytesRead: Buffer.byteLength(content, 'utf8'),
     truncated,
     truncatedBy,
@@ -303,6 +352,7 @@ async function cmdRead(positional, flags, roots) {
     source: r.relative,
     size: r.size,
     format: r.format,
+    ...(r.note ? { note: r.note } : {}),
     bytesRead: r.bytesRead,
     truncated: r.truncated,
     ...(r.truncated
@@ -339,6 +389,7 @@ async function cmdReadBatch(positional, flags, roots) {
         source: r.relative,
         size: r.size,
         format: r.format,
+        ...(r.note ? { note: r.note } : {}),
         truncated: r.truncated,
         ...(r.truncated
           ? {

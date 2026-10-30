@@ -31,7 +31,9 @@ export type ThemePattern =
  * 天然同色系，不需要自造配色，也不会和库组件撞色。
  *
  * 设计取舍：
- * - 只做浅色系（不做深色/夜间模式）。
+ * - 以浅色系为主（库的 18 种壁纸全覆盖）；2026-10-30 起额外提供**一套黑夜主题**
+ *   （`mode: 'dark'`），它复用 `default` 壁纸、只把配色与基色换成暗色版。
+ *   不做「每套主题各配一份暗色变体」——那会让主题数翻倍、切换 UI 也要多一层明暗开关。
  * - `accent` 取配套 pattern 的**前景色**（如 pattern-app-green 的 #3a6b3a）而不是
  *   描边色：库的 pattern-* 前景色都是压过暗度的同色系深色，配白字可读，
  *   而描边色（如 #8ac68a）太亮，做按钮底会让白字糊掉。
@@ -43,10 +45,24 @@ export type ThemePattern =
  */
 
 export interface ThemePreset {
-  /** 壁纸图案，直接传给 `<Background type={...}>` */
-  id: BackgroundType
+  /**
+   * 主题唯一标识（localStorage 里存的就是它）。
+   *
+   * 2026-10-30：类型由 `BackgroundType` 放宽为 `string` —— 黑夜主题要复用现有壁纸
+   * （`default`），而库的 18 种壁纸值已被 18 套浅色主题占满，不能再拿"壁纸类型"当唯一 id。
+   * 壁纸改由下面的 `bg` 指定；未写 `bg` 的主题仍按 `id` 取（历史 18 套不用逐个改）。
+   */
+  id: string
+  /** 壁纸图案，传给 `<Background type={...}>`；省略时回退到 `id`（历史行为） */
+  bg?: BackgroundType
   /** 配套配色，与库 `Card` 的 `pattern-*` 系列同色系 */
   pattern: ThemePattern
+  /**
+   * 明暗模式。省略即 `'light'`。
+   * `'dark'` 时 `applyTheme()` 会写 `data-mode="dark"`，styles.css 用另一套暗色基色
+   * （paper / ink / line）重算全部派生 token。
+   */
+  mode?: 'light' | 'dark'
   /** 名称的 i18n key */
   labelKey: string
   /** 页面底色（与壁纸基底同色，作为壁纸层之下的兜底色） */
@@ -67,6 +83,21 @@ export const THEMES: ThemePreset[] = [
     page: '#f7f3df',
     accent: '#725d42',
     accentSoft: '#d4c4a8'
+  },
+  {
+    // 黑夜模式（2026-10-30）：默认主题的暗色版 —— 同一张暖色点阵壁纸（刻意压暗到 16%
+    // 不透明度，只留一点纹理），配色反过来：深底 + 浅金强调。
+    // accent 取浅金 #c9ae86 而不是深棕：暗底上要承载文字与图标，必须够亮。
+    id: 'night',
+    bg: 'default',
+    pattern: 'default',
+    mode: 'dark',
+    labelKey: 'themeNight',
+    // page 要足够暗、与暗色 paper(#221f19) 拉开亮度差，否则 surface 混出来跟底色几乎同色，
+    // 卡片边界整片糊掉 —— 这是暗色主题最常见的翻车点
+    page: '#12100b',
+    accent: '#c9ae86',
+    accentSoft: '#5a4c3c'
   },
   {
     id: 'grid',
@@ -210,7 +241,7 @@ export const THEMES: ThemePreset[] = [
   }
 ]
 
-export const DEFAULT_THEME: BackgroundType = 'default'
+export const DEFAULT_THEME = 'default'
 
 const STORAGE_KEY = 'mc-theme'
 
@@ -221,20 +252,32 @@ export function getThemePreset(id: string): ThemePreset {
 }
 
 /**
+ * 主题实际使用的壁纸类型：显式写了 `bg` 就用它，否则回退到 `id`
+ * （历史 18 套的 id 本身就是库的 BackgroundType 值，行为完全不变）。
+ *
+ * 为什么必须收口成函数：`<Background type>` 只接受 `BackgroundType`，
+ * 而 `id` 现在是任意字符串（黑夜主题 id 为 `night`，不能直接传给壁纸组件）。
+ */
+export function themeBackdrop(id: string): BackgroundType {
+  const preset = getThemePreset(id)
+  return (preset.bg ?? preset.id) as BackgroundType
+}
+
+/**
  * 读取上次选择的主题。与 `mc-hidden-cols` 同构的容错写法：
  * 存储被禁用、值损坏或指向已下线的主题时一律回落到默认主题。
  */
-export function readStoredTheme(): BackgroundType {
+export function readStoredTheme(): string {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    if (raw && byId.has(raw)) return raw as BackgroundType
+    if (raw && byId.has(raw)) return raw
   } catch {
     /* 存储不可用时忽略 */
   }
   return DEFAULT_THEME
 }
 
-export function persistTheme(id: BackgroundType): void {
+export function persistTheme(id: string): void {
   try {
     localStorage.setItem(STORAGE_KEY, id)
   } catch {
@@ -257,11 +300,14 @@ export function persistTheme(id: BackgroundType): void {
  * 该函数是同步的、只写样式属性，不触发任何 React 重渲染，可在
  * `createRoot().render()` 之前调用，从根上消除首屏闪色。
  */
-export function applyTheme(id: BackgroundType): void {
+export function applyTheme(id: string): void {
   const preset = getThemePreset(id)
   const root = document.documentElement
 
   root.dataset.theme = preset.id
+  // 明暗模式：styles.css 用 [data-mode="dark"] 覆盖 paper / ink / line 等基色。
+  // 写显式 'light' / 'dark' 而不是「有值即暗」，将来要加第三档（如高对比）不必改判据。
+  root.dataset.mode = preset.mode ?? 'light'
 
   // 主题原始值：派生 token 的输入
   root.style.setProperty('--mc-page', preset.page)

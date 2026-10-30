@@ -166,9 +166,15 @@ export default function ImagePreviewModal() {
     >
       <div className="ai-img-preview-wrap">
         <div className="ai-img-preview-bar">
-          <span className="ai-img-preview-count">
-            {total > 1 ? `${preview.index + 1} / ${total}` : ''}
-          </span>
+          {/* 只有一张图时不渲染计数（2026-10-30 用户反馈「100% 左边那条白色的横是什么」）。
+              此前是无条件渲染、只把文本置空，而 CSS 给了 `.ai-img-preview-count`
+              `min-width:46px` + `background` + `border-radius:999px` —— 空文本照样画出
+              一条 46px 的浅色胶囊，看起来就是一根没来由的白条。
+              这里改成条件渲染而不是「空文本 + 取消样式」：多图时它本就该占位，
+              少一个元素比多一套 `.is-empty` 覆盖规则更干净。 */}
+          {total > 1 && (
+            <span className="ai-img-preview-count">{preview.index + 1} / {total}</span>
+          )}
           {/* 缩放比例：滚轮缩放后用户需要一个数值反馈，否则不知道当前是 100% 还是 400%。
               scale 在 useState 里，缩放时本组件重渲染 → 比例实时更新。 */}
           <span className="ai-img-preview-ratio">{Math.round(scale * 100)}%</span>
@@ -177,12 +183,15 @@ export default function ImagePreviewModal() {
             {/* 「复位」刻意用**原生 button**而不是库 <Button>：库 Button 在 flex 容器里
                 悬停时会被自己的 hover 样式压扁成一条竖线（用户反馈「鼠标悬停时显示不全」），
                 切图时也会被挤出容器右边界被裁掉。原生按钮样式完全可控，也与两侧翻页按钮一致。 */}
+            {/* disabled 判据必须是「恰好 100%」而不是 `scale <= 1`（2026-10-30 用户反馈：
+                缩到 45% 时「复位」按钮是灰的，恰恰最需要它的时候点不动）。滚轮从 1 开始
+                乘/除 1.12，所以回到 1 时会有浮点残差，用 1e-6 容差比较。 */}
             <button
               type="button"
               className="ai-img-reset-btn"
               onClick={() => applyScale(1)}
               title={t('aiImgReset')}
-              disabled={scale <= 1}
+              disabled={Math.abs(scale - 1) < 1e-6}
             >
               {t('aiImgReset')}
             </button>

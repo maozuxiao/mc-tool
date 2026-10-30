@@ -84,6 +84,20 @@ export interface AIConversation {
   mode?: AIAgentMode
 }
 
+/**
+ * 内联附件在正文里的位置（落在第几个字符之后）。
+ *
+ * 用户把附件放在某句话中间时（「按 README.md 的说明改一下这里：…」），
+ * 只把附件当独立列表发给模型是看不出指向关系的。这份位置信息两边都用：
+ *  - 渲染层：消息气泡按原位把 chip 摆回文字中间；
+ *  - 主进程：把 `【附件：名字】` 标记插到同一个位置再发给模型。
+ */
+export interface AIInlineMark {
+  at: number
+  id: string
+  name: string
+}
+
 export type AIMessageRole = 'user' | 'assistant' | 'tool'
 
 export interface AIToolRun {
@@ -107,6 +121,8 @@ export interface AIMessage {
   toolRuns?: AIToolRun[]
   /** 随消息发出的附件（1.0.43）：历史里保留下 payload，便于后续追问仍能引用 */
   attachments?: AIAttachment[]
+  /** 附件在正文里的原始位置（2026-10-30）：气泡回显时把 chip 摆回文字中间 */
+  inlineMarks?: AIInlineMark[]
   providerId?: string
   modelId?: string
   inputTokens?: number
@@ -218,6 +234,8 @@ export interface AISendPayload {
   lang?: string
   // 随消息发出的附件（图片 / 文本 / 其他文件），见 AIAttachment
   attachments?: AIAttachment[]
+  // 附件在提问正文里的位置：主进程据此把「【附件：名字】」插到同一位置再发给模型
+  inlineMarks?: AIInlineMark[]
   // 本会话启用的技能 id（内置 + 导入）。build 模式下会把它们的 SKILL.md 注入系统提示，
   // 并按其声明下发对应工具（如鸿翼文件查询）。
   enabledSkills?: string[]

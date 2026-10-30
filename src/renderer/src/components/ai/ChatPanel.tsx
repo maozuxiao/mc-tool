@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeSanitize from 'rehype-sanitize'
 import rehypeHighlight from 'rehype-highlight'
-import type { AIAgentMode, AIAttachment, AIConversation, AIMessage, AIProviderConfig, AISkillInfo, AIToolRun, SavedPrompt, AIProtocol } from '@shared/ai-types'
+import type { AIAgentMode, AIAttachment, AIInlineMark, AIConversation, AIMessage, AIProviderConfig, AISkillInfo, AIToolRun, SavedPrompt, AIProtocol } from '@shared/ai-types'
 import { AI_PROTOCOL_LABELS, skillKey } from '@shared/ai-types'
 import { OA_ORIGIN } from '@shared/constants'
 import { useStore } from '../../store'
@@ -15,6 +15,21 @@ import ImagePreviewModal from './ImagePreviewModal'
 import { NaiveIcon } from '../NaiveIcon'
 import { McSelect } from '../McSelect'
 import { McpModal } from './McpModal'
+// 内联附件的纯逻辑（去重 / 按光标插入 / 结构快照 / 撤回恢复），见该文件顶部说明
+import {
+  collapseBatch,
+  chipBadge,
+  insertChips,
+  dedupeChipNodes,
+  captureStructure,
+  insertStructure,
+  measureText,
+  sliceStructure,
+  readEditorText,
+  presentAttachIds,
+  pruneToPresent,
+  placeCaretAtEnd
+} from './inlineAttach'
 
 interface ProviderBundle {
   providers: AIProviderConfig[]
@@ -121,11 +136,41 @@ const IMG_MAX_EDGE = 1568
 const IMG_MAX_BYTES = 1_200_000
 /** 文本类附件内联上限（超出截断并在消息里标注） */
 const TEXT_MAX_BYTES = 200_000
-/** 按扩展名识别的文本类文件（拖进来的 File 常常没有 mime） */
+/**
+ * 按扩展名识别的文本类文件（拖进来的 File 常常没有 mime）。
+ *
+ * 2026-10-30 与技能脚本的 TEXT_EXT 对齐并放宽：源码/配置类后缀直接按文本内联进消息，
+ * 不必绕到「只给路径 + Build 模式用 file_read」。清单对不上时以「能内联就内联」为准 ——
+ * 内联少一次工具往返，也避免非 Build 模式下这类文件根本发不出去。
+ */
 const TEXT_EXT = new Set([
-  'txt', 'md', 'markdown', 'csv', 'tsv', 'json', 'jsonl', 'yml', 'yaml', 'xml', 'html', 'htm', 'log', 'ini', 'conf',
-  'js', 'jsx', 'ts', 'tsx', 'py', 'java', 'c', 'h', 'cpp', 'cs', 'go', 'rs', 'php', 'rb', 'sh', 'ps1', 'sql', 'bat', 'gradle', 'properties'
+  'txt', 'md', 'markdown', 'mdx', 'rst', 'tex', 'adoc', 'text',
+  'csv', 'tsv', 'json', 'jsonl', 'ndjson', 'json5', 'yml', 'yaml', 'xml', 'html', 'htm', 'xhtml', 'svg',
+  'log', 'ini', 'conf', 'cfg', 'properties', 'toml', 'env', 'editorconfig',
+  'sql', 'graphql', 'gql', 'proto', 'diff', 'patch',
+  'js', 'mjs', 'cjs', 'jsx', 'ts', 'tsx', 'vue', 'svelte', 'astro',
+  'py', 'pyi', 'java', 'kt', 'kts', 'scala', 'groovy', 'gradle', 'clj', 'cljs',
+  'c', 'h', 'cc', 'cpp', 'cxx', 'hpp', 'hh', 'cs', 'fs', 'vb',
+  'go', 'rs', 'swift', 'm', 'mm', 'dart', 'lua', 'pl', 'pm', 'r', 'jl',
+  'php', 'rb', 'ex', 'exs', 'erl', 'hs', 'elm', 'zig', 'nim',
+  'sh', 'bash', 'zsh', 'fish', 'ps1', 'psm1', 'bat', 'cmd',
+  'tf', 'hcl', 'cmake', 'mk', 'bazel', 'bzl'
 ])
+
+/**
+ * 输入区自有的剪贴板格式：复制时把「正文 + chip 结构与附件内容」一起写进剪贴板，
+ * 粘贴回本输入区时按原样还原（含图片缩略图与落点）。
+ *
+ * 自定义 MIME 的好处：粘到外部程序时 Chromium 仍会带 text/plain / text/html，
+ * 外部内容粘进来则没有这个类型、走纯文本分支，互不干扰。
+ */
+const CLIP_TYPE = 'application/x-mc-inline-attach'
+/** 剪贴板里的结构：正文 + 每枚 chip 落在第几个字符之后 + 附件本身（图片带 dataUrl） */
+interface ClipPayload {
+  v: 1
+  text: string
+  chips: { at: number; att: AIAttachment }[]
+}
 
 function humanSize(n?: number): string {
   const v = Number(n || 0)
@@ -190,10 +235,18 @@ async function filesToAttachments(files: File[]): Promise<{ list: AIAttachment[]
   for (const f of files) {
     const name = f.name || '未命名'
     const id = `att_${Date.now().toString(36)}_${seq++}`
+    /**
+     * 路径对**三种类型都取一次**。
+     *
+     * 以前只有 kind=file 才存 path，而图片/文本附件（图片、rules.txt 这类）只留了 name ——
+     * 于是 chip 和悬停浮层永远只能显示文件名（用户反馈「文件未显示完整的本地地址」）。
+     * 剪贴板里的截图是内存 Blob、没有真实文件，取到空串，此时退化为只显示文件名。
+     */
+    const path = window.mcApi.getPathForFile?.(f) || ''
     try {
       if (f.type.startsWith('image/')) {
         const { dataUrl, size } = await shrinkImage(f)
-        list.push({ id, name, kind: 'image', mime: f.type, size, dataUrl })
+        list.push({ id, name, kind: 'image', mime: f.type, size, dataUrl, path: path || undefined })
         continue
       }
       const ext = extOf(name)
@@ -205,11 +258,11 @@ async function filesToAttachments(files: File[]): Promise<{ list: AIAttachment[]
           mime: f.type || `text/${ext || 'plain'}`,
           size: f.size,
           text: truncated ? raw.slice(0, TEXT_MAX_BYTES) : raw,
-          truncated
+          truncated,
+          path: path || undefined
         })
         continue
       }
-      const path = window.mcApi.getPathForFile?.(f) || ''
       if (!path) { skipped.push(name); continue }
       list.push({ id, name, kind: 'file', mime: f.type, size: f.size, path })
     } catch {
@@ -295,6 +348,14 @@ export function ChatPanel({ disabled }: Props) {
   const skillPanelRef = useRef<HTMLDivElement | null>(null)
   // ── 附件（粘贴 / 拖拽 / 选择文件）──
   const [attachments, setAttachments] = useState<AIAttachment[]>([])
+  // 事件回调 / 撤回快照要读「最新」的附件列表，用 ref 兜住闭包里的旧数组
+  const attachmentsRef = useRef<AIAttachment[]>(attachments)
+  attachmentsRef.current = attachments
+  /**
+   * 已经进了 state、但 chip 还没插进 DOM 的附件 id（图片压缩/文本读取还在路上）。
+   * 「按 DOM 对齐附件」时必须把它们排除在外，否则刚粘贴的大文件会被自己删掉。
+   */
+  const pendingAttachRef = useRef(new Set<string>())
   const [attachBusy, setAttachBusy] = useState(false)
   // ── 待发队列的拖动排序状态（1.0.43）──
   const [queueDrag, setQueueDrag] = useState<number | null>(null)
@@ -400,7 +461,11 @@ export function ChatPanel({ disabled }: Props) {
       setSavedPrompts(list || [])
     } catch { /* 忽略 */ }
   }
-  const applyPrompt = (p: SavedPrompt) => { setInput(p.text); setPromptPanelOpen(false) }
+  const applyPrompt = (p: SavedPrompt) => {
+    replaceEditorRef.current = true
+    setInput(p.text)
+    setPromptPanelOpen(false)
+  }
   const saveCurrentAsPrompt = async () => {
     const text = input.trim()
     if (!text) return
@@ -816,7 +881,10 @@ export function ChatPanel({ disabled }: Props) {
   }
 
   const send = async (override?: string, overrideAtts?: AIAttachment[]) => {
-    const content = (override ?? input).trim()
+    const rawText = override ?? input
+    const content = rawText.trim()
+    // 正文被 trim 掉的前导空白，会让 chip 的字符位置整体前移，先算出来用于校正
+    const lead = rawText.length - rawText.trimStart().length
     if (!content || streaming || disabled) return
     // 主动发送：无论此刻滚到哪儿都跟着新消息回到底部（按钮兜住的是「被动流式」那段）
     forceFollowRef.current = true
@@ -832,7 +900,27 @@ export function ChatPanel({ disabled }: Props) {
     if (mode !== 'build' && sendAtts?.some(a => a.kind === 'file')) {
       setNotice(t('aiAttachFileNeedsBuild'))
     }
-    if (override === undefined) { setInput(''); setAttachments([]); setEnhanceBackup(null) }
+    /**
+     * 附件在正文里的位置：**必须在清空输入区之前**抓。
+     *
+     * 用户把 chip 放在句子中间时（截图里「测试下图片」这种），只发一份附件列表
+     * 模型是看不出「文字指的是哪份附件」的。这里连同位置一起发下去，
+     * 主进程据此在正文里插入「【附件：名字】」，气泡回显也按它摆回中间。
+     */
+    const inlineMarks = (() => {
+      if (override !== undefined || !sendAtts?.length) return undefined
+      const st = captureStructure(editorRef.current)
+      if (!st.chips.length) return undefined
+      const byId = new Map(sendAtts.map(a => [a.id, a]))
+      const list: AIInlineMark[] = []
+      for (const c of st.chips) {
+        const a = byId.get(c.id)
+        if (!a) continue
+        list.push({ at: Math.max(0, c.at - lead), id: a.id, name: a.name })
+      }
+      return list.length ? list : undefined
+    })()
+    if (override === undefined) { replaceEditorRef.current = true; setInput(''); setAttachments([]); setEnhanceBackup(null) }
     // 只标记「当前会话」进入生成态：别的会话仍可继续提问（并发）
     if (conversationId) markStreaming(conversationId, true)
     else setPendingNewStream(true)
@@ -844,6 +932,7 @@ export function ChatPanel({ disabled }: Props) {
       role: 'user',
       content,
       attachments: sendAtts,
+      inlineMarks,
       createdAt: Date.now()
     }])
     // 生成 requestId：新会话落地前 conversationId 还是 null，
@@ -865,6 +954,7 @@ export function ChatPanel({ disabled }: Props) {
         mode,
         lang,
         attachments: sendAtts,
+        inlineMarks,
         // 技能只在 build 模式生效（Skills 面板也只在 build 模式出现）
         enabledSkills: mode === 'build' ? enabledSkills : undefined
       })
@@ -889,6 +979,7 @@ export function ChatPanel({ disabled }: Props) {
         text: content,
         attachments: attachments.length ? attachments : undefined
       }])
+      replaceEditorRef.current = true
       setInput('')
       setAttachments([])
       setEnhanceBackup(null)
@@ -912,18 +1003,451 @@ export function ChatPanel({ disabled }: Props) {
   const onContinue = useCallback(() => continueRef.current(), [])
 
   // ── 附件 ──────────────────────────────────────────────────────
-  const attachFromFiles = useCallback(async (files: FileList | File[] | null) => {
+  /**
+   * 最近一次「已受理」的附件指纹。
+   *
+   * 为什么需要：contenteditable 上同一次「复制 → 粘贴」可能派发多次 paste，
+   * 每次都会走到 attachFromFiles。用「文件名 + 大小 + 类型」指纹配合一个很短的窗口
+   * 挡住**同一次手势**里的重复投递即可；窗口不能太长 —— 用户确实想贴两份 README.md
+   * （多个实例），几秒后重贴必须生效。
+   */
+  const lastAttachSigRef = useRef<{ sig: string; at: number }>({ sig: '', at: 0 })
+
+  const attachFromFiles = useCallback(async (files: FileList | File[] | null, caretRange?: Range | null) => {
     const arr = files ? Array.from(files as File[]) : []
     if (!arr.length) return
+    const sig = arr.map(f => `${f.name}:${f.size}:${f.type}`).join('|')
+    // 150ms：只兜住「一次 Ctrl+V 被派发多次」这种情况，不阻止用户连续贴同一份文件
+    if (sig === lastAttachSigRef.current.sig && Date.now() - lastAttachSigRef.current.at < 150) return
+    lastAttachSigRef.current = { sig, at: Date.now() }
     setAttachBusy(true)
     try {
       const { list, skipped } = await filesToAttachments(arr)
-      if (list.length) setAttachments(prev => [...prev, ...list])
+      if (list.length) {
+        // 只折叠**这一次粘贴内部的**重复条目（同一次 paste 重复投递同一个文件），
+        // 不跨次去重：用户确实可能想贴两份 README.md。
+        const batch = collapseBatch(list)
+        // 这一批附件共用一个「插入位置盒子」：粘贴时光标在哪，这批 chip 就连着排在哪。
+        // Range 是活的 —— 压缩图片这段异步时间里用户继续打的字会让它自动后移。
+        const box = { range: caretRange ? caretRange.cloneRange() : null }
+        for (const a of batch) {
+          insertBoxByAtt.current.set(a, box)
+          pendingAttachRef.current.add(a.id)
+        }
+        setAttachments(prev => [...prev, ...batch])
+      }
       if (skipped.length) setNotice(t('aiAttachSkipped', { names: skipped.join('、') }))
     } finally {
       setAttachBusy(false)
     }
   }, [t])
+
+  // ── 内联附件编辑器（2026-10-30）─────────────────────────────────
+  // 用户第三次明确要求「附件像 IDE 输入框那样内联在文字中间」，而 textarea 只能放纯文本、
+  // 无处安放 chip，所以主输入框改为 contenteditable。
+  //
+  // 这里有一条必须绕开的坑：**绝不能让 React 渲染编辑器的子节点**。每次 setState 重渲染
+  // 都会重建 DOM —— 光标跳回开头、中文输入法被打断。因此编辑器内部一律命令式操作：
+  // 文本由浏览器自己管，chip 由下面两个 effect 在真实 DOM 上增删，React 只负责那个空容器。
+  const editorRef = useRef<HTMLDivElement>(null)
+  /** 中文输入法组词中：此时 Enter 是「上屏确认」，不能当发送 */
+  const composingRef = useRef(false)
+  /**
+   * 每批 chip 各自的插入位置（粘贴瞬间记下的光标 Range）。
+   *
+   * 键是附件对象本身（WeakMap：附件从 state 移除后自动回收），值是**整批共享**的盒子 ——
+   * 插完一枚就把盒子推进到它后面的空格之后，同一批的多枚 chip 因此保持顺序。
+   *
+   * 以前是全组件共用一枚 `insertRangeRef`：连续粘贴两批、或图片压缩（异步）期间用户又
+   * 敲了字/换了光标，后一批会覆盖前一批的位置，chip 于是插到别处去 —— 也就是用户看到的
+   * 「粘贴后重新排列」。拖拽 / 选择文件没有光标上下文，仍走末尾追加。
+   */
+  const insertBoxByAtt = useRef(new WeakMap<AIAttachment, { range: Range | null }>())
+  /**
+   * 只在「外部整段写入」时，才允许把 `input` 回写进编辑器 DOM。
+   *
+   * 以前这里是「DOM 文本 !== input 就整段重建」：重建会把所有段落压成一个文本节点，
+   * 并把所有 chip 挪到末尾 —— 粘贴文本或换行后就会看到内容重新排列。
+   * 打字、粘贴时 DOM 才是事实来源，绝不能回写。
+   */
+  const replaceEditorRef = useRef(false)
+
+  const removeAttachment = (id: string) => setAttachments(prev => prev.filter(x => x.id !== id))
+  // chip 的 × 是命令式绑定的监听器，闭包会锁住创建时的 removeAttachment，
+  // 用 ref 转一道，保证永远调用到最新那份
+  const removeAttachRef = useRef(removeAttachment)
+  removeAttachRef.current = removeAttachment
+
+  /** 把一条附件做成 DOM 节点（含悬停浮层），供编辑器直接插入 */
+  const makeChipNode = (a: AIAttachment): HTMLElement => {
+    const isImg = a.kind === 'image' && !!a.dataUrl
+    const el = document.createElement('span')
+    el.className = `ai-inline-attach ${a.kind}`
+    el.dataset.attachId = a.id
+    // contentEditable=false：让光标整体跨过 chip，而不是钻进去改文件名
+    el.contentEditable = 'false'
+    // 不设原生 title：下面自建的悬停浮层已经显示完整路径与文件夹，
+    // 再加上系统白底 tooltip 会同时冒出两个、还遮住上层内容（用户 2026-10-30 反馈）
+
+    if (isImg) {
+      const img = document.createElement('img')
+      img.className = 'ai-inline-attach__thumb'
+      img.src = a.dataUrl!
+      img.alt = ''
+      el.appendChild(img)
+    } else {
+      const ico = document.createElement('span')
+      ico.className = 'ai-inline-attach__ico'
+      // 角标显示真实扩展名（README.md → MD、rules.txt → TXT、报告.xlsx → XLSX），
+      // 以前一律写 TXT/FILE，用户以为 markdown 被当成纯文本读（用户 2026-10-30 反馈）
+      ico.textContent = chipBadge(a.name, a.kind)
+      el.appendChild(ico)
+    }
+
+    const name = document.createElement('span')
+    name.className = 'ai-inline-attach__name'
+    // 一律只显示文件名：完整路径太长，会把输入区挤成一行半（用户 2026-10-30 要求改回文件名，
+    // 完整路径与所在文件夹都放到悬停浮层里，见下面的 tip）
+    name.textContent = a.name
+    el.appendChild(name)
+
+    const del = document.createElement('button')
+    del.type = 'button'
+    del.className = 'ai-inline-attach__del'
+    del.title = t('delete')
+    del.textContent = '×'
+    del.addEventListener('mousedown', ev => ev.preventDefault()) // 别抢走编辑器焦点
+    del.addEventListener('click', ev => {
+      ev.preventDefault()
+      ev.stopPropagation()
+      removeAttachRef.current(a.id)
+    })
+    el.appendChild(del)
+
+    // 悬停浮层：图片给原图，其他格式给完整路径。
+    // 用 position:fixed + mouseenter 时算坐标 —— 编辑器是 overflow:auto，
+    // 绝对定位的浮层会被直接裁掉（这也是不能沿用 .ai-attach-preview 的原因）。
+    const tip = document.createElement('span')
+    tip.className = 'ai-inline-attach__tip'
+    if (isImg) {
+      const big = document.createElement('img')
+      big.src = a.dataUrl!
+      big.alt = a.name
+      tip.appendChild(big)
+      const meta = document.createElement('span')
+      meta.className = 'ai-inline-attach__tip-meta'
+      meta.textContent = `${a.name}${a.size ? ` · ${humanSize(a.size)}` : ''}`
+      tip.appendChild(meta)
+      // 图片：缩略图之外再给一行完整路径（截图没有真实文件，此时不显示）
+      if (a.path) {
+        const p = document.createElement('span')
+        p.className = 'ai-inline-attach__tip-path'
+        p.textContent = a.path
+        tip.appendChild(p)
+      }
+    } else {
+      const p = document.createElement('span')
+      p.className = 'ai-inline-attach__tip-path'
+      p.textContent = a.path || a.name
+      tip.appendChild(p)
+      if (a.size) {
+        const s = document.createElement('span')
+        s.className = 'ai-inline-attach__tip-meta'
+        s.textContent = humanSize(a.size)
+        tip.appendChild(s)
+      }
+    }
+    // 浮层挂到 body 而不是 chip 内部：`.ai-composer` 上有 `contain: layout`，
+    // 它会让 position:fixed 的子元素以该容器为包含块 —— 那样 JS 算出来的视口坐标
+    // 会整体偏移，浮层跑到别处。挂 body 才真正相对视口定位。
+    tip.dataset.attachTip = a.id
+    document.body.appendChild(tip)
+    el.addEventListener('mouseenter', () => {
+      const r = el.getBoundingClientRect()
+      tip.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - 320))}px`
+      tip.style.top = `${r.top - 6}px` // 配合 transform: translateY(-100%) 向上展开
+      tip.classList.add('on')
+    })
+    el.addEventListener('mouseleave', () => tip.classList.remove('on'))
+    return el
+  }
+
+  /** 读当前编辑器正文（实现见 inlineAttach.readEditorText，chip 会被整块跳过） */
+  const readText = () => readEditorText(editorRef.current)
+
+  // ── 撤回 / 重做（自有栈）───────────────────────────────────────
+  // 为什么不用浏览器原生 undo：chip 是命令式插进 DOM 的，不在它的撤销栈里，
+  // 于是「Ctrl+Z 撤销的是上一段文字、刚贴的附件纹丝不动」，或者把 chip 节点撤掉后
+  // 附件状态还留着。这里对「正文 + chip 位置 + 附件」整体做快照，撤回是整体还原。
+  type Snap = { text: string; chips: { at: number; id: string }[]; atts: AIAttachment[] }
+  const historyRef = useRef<{ undo: Snap[]; redo: Snap[] }>({ undo: [], redo: [] })
+
+  const pushHistory = useCallback(() => {
+    const st = captureStructure(editorRef.current)
+    const byId = new Map(attachmentsRef.current.map(a => [a.id, a]))
+    const snap: Snap = {
+      text: st.text,
+      chips: st.chips,
+      atts: st.chips.map(c => byId.get(c.id)).filter(Boolean) as AIAttachment[]
+    }
+    const h = historyRef.current
+    const top = h.undo[h.undo.length - 1]
+    const sig = (s: Snap) => `${s.text}|${s.chips.map(c => `${c.at}:${c.id}`).join(',')}`
+    if (top && sig(top) === sig(snap)) return
+    h.undo.push(snap)
+    if (h.undo.length > 60) h.undo.shift()
+    h.redo = []
+  }, [])
+
+  /** 把快照整体写回编辑器与附件列表 */
+  const applySnap = (snap: Snap | null) => {
+    const ed = editorRef.current
+    if (!ed) return
+    const atts = snap?.atts || []
+    const byId = new Map(atts.map(a => [a.id, a]))
+    ed.innerHTML = ''
+    if (snap) {
+      insertStructure(ed, { text: snap.text, chips: snap.chips }, {
+        makeChip: id => {
+          const a = byId.get(id)
+          return a ? makeChipNode(a) : null
+        }
+      })
+    }
+    setAttachments(atts)
+    setInput(snap?.text || '')
+    placeCaretAtEnd(ed)
+    ed.focus()
+  }
+
+  const undoEdit = () => {
+    pushHistory()                       // 保证「当前状态」在栈顶（输入是防抖入栈的）
+    const h = historyRef.current
+    if (h.undo.length < 2) return false
+    h.redo.push(h.undo.pop()!)
+    applySnap(h.undo[h.undo.length - 1])
+    return true
+  }
+
+  const redoEdit = () => {
+    const h = historyRef.current
+    if (!h.redo.length) return false
+    const snap = h.redo.pop()!
+    h.undo.push(snap)
+    applySnap(snap)
+    return true
+  }
+
+  // 打字/附件变化后 300ms 落一个快照（拖拽缩放等连续操作不会灌满栈）。
+  // 撤回恢复本身也会触发这里，但快照签名与栈顶相同 → pushHistory 内部直接跳过。
+  useEffect(() => {
+    const id = window.setTimeout(() => pushHistory(), 300)
+    return () => window.clearTimeout(id)
+  }, [attachments, input, pushHistory])
+
+  // 挂载时先铺一个空快照，撤回才有「栈底」可回
+  useEffect(() => {
+    pushHistory()
+  }, [pushHistory])
+
+  /**
+   * 以 DOM 为准对齐附件列表：chip 被删掉（覆盖粘贴 / 撤回 / 手动删）的附件一并移除。
+   * 还在异步读取中的（pendingAttachRef）不算，避免刚粘贴就被自己删掉。
+   */
+  const syncAttachmentsWithDom = () => {
+    const ed = editorRef.current
+    if (!ed) return
+    const present = presentAttachIds(ed)
+    for (const id of pendingAttachRef.current) present.add(id)
+    setAttachments(prev => pruneToPresent(prev, present))
+  }
+
+  /**
+   * 粘贴「本输入区复制的结构」：编号重排后按原样还原正文与 chip。
+   * 选区会被整体替换（与普通粘贴语义一致），因此结束后要把被替换掉的 chip 从附件里清掉。
+   */
+  const pasteStructure = (raw: string) => {
+    const ed = editorRef.current
+    if (!ed) return
+    let data: ClipPayload | null = null
+    try { data = JSON.parse(raw) as ClipPayload } catch { return }
+    if (!data || typeof data.text !== 'string') return
+
+    const idMap = new Map<string, AIAttachment>()
+    const added: AIAttachment[] = []
+    for (const c of data.chips || []) {
+      const src = c?.att
+      if (!src || !src.name) continue
+      const att: AIAttachment = { ...src, id: `att_${Date.now().toString(36)}_${added.length}` }
+      added.push(att)
+      idMap.set(src.id, att)
+    }
+
+    const sel = window.getSelection()
+    const range = sel && sel.rangeCount > 0 ? sel.getRangeAt(0) : null
+    insertStructure(
+      ed,
+      { text: data.text, chips: (data.chips || []).map(c => ({ at: Number(c.at) || 0, id: c.att?.id || '' })) },
+      { range, makeChip: id => { const a = idMap.get(id); return a ? makeChipNode(a) : null } }
+    )
+
+    // 刚插进去的 chip 已经在 DOM 里了：一并纳入「现存」集合再对齐，避免被当成多余的删掉
+    const present = presentAttachIds(ed)
+    for (const id of pendingAttachRef.current) present.add(id)
+    setAttachments(prev => [...pruneToPresent(prev, present), ...added])
+    setInput(readText())
+  }
+
+  // 附件 → DOM：补齐缺失的 chip、移除已删除的
+  useEffect(() => {
+    const ed = editorRef.current
+    if (!ed) return
+
+    // 删除侧：chip 与它的浮层一起清（浮层挂在 body 上，不会跟着 chip 自动消失）
+    ed.querySelectorAll('[data-attach-id]').forEach(n => {
+      const id = (n as HTMLElement).dataset.attachId!
+      if (!attachments.some(a => a.id === id)) n.remove()
+    })
+    document.querySelectorAll('[data-attach-tip]').forEach(t => {
+      const id = (t as HTMLElement).dataset.attachTip!
+      if (!attachments.some(a => a.id === id)) t.remove()
+    })
+
+    // 先清掉同一 id 的重复副本（默认 HTML 粘贴会带来僵尸节点）
+    dedupeChipNodes(ed)
+    // 新增侧：每批 chip 用自己粘贴时记下的 Range 插入；没有光标上下文（拖拽/选择文件）才追加到末尾
+    const { tail, atCaret } = insertChips(ed, attachments, {
+      boxOf: a => insertBoxByAtt.current.get(a),
+      makeChip: makeChipNode
+    })
+    // 已经落到 DOM 里的就不用再算「待插入」了
+    pendingAttachRef.current.forEach(id => {
+      if (ed.querySelector(`[data-attach-id="${id}"]`)) pendingAttachRef.current.delete(id)
+    })
+
+    // 粘贴后把光标落到最后一枚 chip 之后并保持焦点，用户可以立刻接着打字。
+    // 只在「确实按光标插入」时做 —— 拖拽进来的附件不该抢走别处的焦点。
+    if (tail && atCaret) {
+      const sel = window.getSelection()
+      if (sel) {
+        const r = document.createRange()
+        r.setStartAfter(tail)
+        r.collapse(true)
+        sel.removeAllRanges()
+        sel.addRange(r)
+      }
+      ed.focus()
+    }
+  }, [attachments])
+
+  /**
+   * 复制 / 剪切：把「正文 + chip + 附件」写进自有剪贴板格式，粘回来才能原样还原。
+   *
+   * 为什么挂在 document 捕获阶段，而不是 JSX 的 onCopy：
+   * Ctrl+A 之后选区端点常常落在编辑器元素本身（甚至焦点短暂跑到外层），
+   * React 的委托监听会漏掉这一次，剪贴板里就只剩纯文本 —— 粘贴回来 chip 全丢。
+   * 这里对页面上所有复制/剪切都过一遍，只有选区落在输入区内才接管。
+   *
+   * 剪切还多一步：chip 是 `user-select:none` 的，**不在浏览器的选区内**，
+   * 浏览器只删文字删不掉它们，所以按字符区间自己把区间内的 chip 一并删掉。
+   */
+  useEffect(() => {
+    const handle = (e: ClipboardEvent) => {
+      const ed = editorRef.current
+      const sel = window.getSelection()
+      if (!ed || !sel || sel.isCollapsed || !sel.rangeCount) return
+      const r = sel.getRangeAt(0)
+      if (!ed.contains(r.commonAncestorContainer)) return   // 复制的是别处的内容，放行
+
+      const st = captureStructure(ed)
+      if (!st.chips.length) return                          // 没有 chip，默认复制就是对的
+
+      // chip 不在选区里，只能靠字符偏移把区间内的 chip 找出来
+      let headLen = 0
+      let endLen = st.text.length
+      try {
+        const before = document.createRange()
+        before.selectNodeContents(ed)
+        before.setEnd(r.startContainer, r.startOffset)
+        headLen = measureText(before.cloneContents())
+
+        const upto = document.createRange()
+        upto.selectNodeContents(ed)
+        upto.setEnd(r.endContainer, r.endOffset)
+        endLen = Math.max(headLen, measureText(upto.cloneContents()))
+      } catch {
+        headLen = 0
+        endLen = st.text.length
+      }
+
+      const slice = sliceStructure(st, headLen, endLen)
+      const byId = new Map(attachmentsRef.current.map(a => [a.id, a]))
+      const chips: { at: number; att: AIAttachment }[] = []
+      for (const c of slice.chips) {
+        const a = byId.get(c.id)
+        if (a) chips.push({ at: c.at, att: a })
+      }
+      if (!chips.length) return                             // 选区内没有 chip，交给浏览器
+
+      e.preventDefault()
+      e.clipboardData?.setData(CLIP_TYPE, JSON.stringify({ v: 1, text: slice.text, chips } as ClipPayload))
+      e.clipboardData?.setData('text/plain', slice.text)
+
+      if (e.type !== 'cut') return
+      // 先删文字，再删选区内的 chip（chip 不在 Range 内，浏览器不会帮我们删）
+      r.deleteContents()
+      const doomed = new Set(slice.chips.map(c => c.id))
+      ed.querySelectorAll('[data-attach-id]').forEach(n => {
+        const id = (n as HTMLElement).dataset.attachId
+        if (id && doomed.has(id)) n.remove()
+      })
+      setAttachments(prev => prev.filter(a => !doomed.has(a.id)))
+      setInput(readEditorText(ed))
+    }
+
+    document.addEventListener('copy', handle, true)
+    document.addEventListener('cut', handle, true)
+    return () => {
+      document.removeEventListener('copy', handle, true)
+      document.removeEventListener('cut', handle, true)
+    }
+  }, [])
+
+  // 卸载时清掉挂在 body 上的浮层（它们不归 React 管，不主动删就会残留）
+  useEffect(() => () => {
+    document.querySelectorAll('[data-attach-tip]').forEach(t => t.remove())
+  }, [])
+
+  /**
+   * 外部整段写入（套用提示词 / 增强与撤销 / 队列载回 / 发送后清空）→ 同步回 DOM。
+   *
+   * 只有这些路径会置 `replaceEditorRef`；打字与粘贴来的改动 DOM 是事实来源，一律不回写
+   * ——否则每次「DOM 文本与 input 不完全一致」都会触发整段重建，段落被压平、chip 全被
+   * 挪到末尾，看起来就是内容重新排列。
+   */
+  useEffect(() => {
+    const ed = editorRef.current
+    if (!ed) return
+    if (!replaceEditorRef.current) return
+    replaceEditorRef.current = false
+    const chips = Array.from(ed.querySelectorAll('[data-attach-id]'))
+    ed.innerHTML = ''
+    // 按行拆成 <br>：单个文本节点里的 \n 在 contenteditable 里并不会换行
+    input.split('\n').forEach((line, i) => {
+      if (i > 0) ed.appendChild(document.createElement('br'))
+      if (line) ed.appendChild(document.createTextNode(line))
+    })
+    chips.forEach(c => ed.appendChild(c))
+    // 光标放到末尾：套用提示词 / 载回队列项后可以直接接着改
+    const sel = window.getSelection()
+    if (sel) {
+      const r = document.createRange()
+      r.selectNodeContents(ed)
+      r.collapse(false)
+      sel.removeAllRanges()
+      sel.addRange(r)
+    }
+  }, [input])
 
   const pickFiles = () => {
     const el = document.createElement('input')
@@ -959,6 +1483,7 @@ export function ChatPanel({ disabled }: Props) {
     const item = queue.find(q => q.id === id)
     if (!item) return
     setQueue(prev => prev.filter(q => q.id !== id))
+    replaceEditorRef.current = true
     setInput(item.text)
     if (item.attachments?.length) setAttachments(item.attachments)
   }
@@ -973,6 +1498,7 @@ export function ChatPanel({ disabled }: Props) {
       const res = await window.mcApi.ai.optimizePrompt({ providerId, modelId, text, lang })
       if (!res?.ok) { setNotice(res?.message || t('aiEnhanceFailed')); return }
       setEnhanceBackup(text)
+      replaceEditorRef.current = true
       setInput(String(res.text || ''))
     } catch (e: any) {
       setNotice(e.message)
@@ -982,6 +1508,7 @@ export function ChatPanel({ disabled }: Props) {
   }
   const undoEnhance = () => {
     if (enhanceBackup === null) return
+    replaceEditorRef.current = true
     setInput(enhanceBackup)
     setEnhanceBackup(null)
   }
@@ -1601,24 +2128,18 @@ export function ChatPanel({ disabled }: Props) {
               ))}
             </div>
           )}
-          {/* 附件 chips：粘贴截图 / 拖拽文件 / 选择文件都会落到这里，发送时随消息一起带走 */}
-          {attachments.length > 0 && (
-            <div className="ai-attach-list">
-              {attachments.map(a => (
-                <AttachChip
-                  key={a.id}
-                  a={a}
-                  onRemove={id => setAttachments(prev => prev.filter(x => x.id !== id))}
-                />
-              ))}
-              <button type="button" className="ai-attach-clear" onClick={() => setAttachments([])}>{t('aiAttachClear')}</button>
-            </div>
-          )}
           <div
             className="ai-composer-drop"
             onDragOver={e => { e.preventDefault() }}
             onDrop={e => { e.preventDefault(); void attachFromFiles(e.dataTransfer?.files || null) }}
           >
+          {/* 附件：粘贴截图 / 拖拽文件 / 选择文件都会落到这里，发送时随消息一起带走。
+              2026-10-30 用户要求「粘贴的图片升级为内联样式」：列表从 composer 上方挪进
+              drop 容器的**顶部**（即输入框内顶部），图片本身渲染成方形缩略图卡片
+              （见 AttachChip）。放在 drop 内部还有个附带好处：拖拽高亮范围覆盖了附件区，
+              不会出现「拖着文件悬在附件上方时没有反馈」。 */}
+          {/* 附件不再单独占一行：它们以 chip 形式内联在下方编辑器（contenteditable）
+              的文字流中，见 makeChipNode 与两个同步 effect。拖拽高亮仍覆盖整个 drop 容器。 */}
           <div className="ai-composer-input-wrap">
             <button
               type="button"
@@ -1657,32 +2178,133 @@ export function ChatPanel({ disabled }: Props) {
                 </div>
               </div>
             )}
-            <textarea
-              value={input}
-              placeholder={disabled ? t('aiLoginRequired') : t('aiInputPh')}
-              disabled={disabled}
-              onChange={e => {
-                // 输入延迟探针（仅开发模式）：只在「本次输入到下一帧」超过 30ms 时打印，
-                // 用来判断打字卡顿是否还在、以及是否已经降到可忽略。
-                // 打包后 import.meta.env.DEV 为 false，整段被摇掉。
-                if ((import.meta as any).env?.DEV === true) {
-                  const t0 = performance.now()
-                  requestAnimationFrame(() => {
-                    const dt = performance.now() - t0
-                    if (dt > 30) console.log(`[perf] 输入到下一帧 ${dt.toFixed(1)}ms（>30ms）`)
+            <div className="ai-composer-editor-wrap">
+              {/* 占位符用独立元素而不是 ::before —— 编辑器里一旦有 chip 就不再是 :empty，
+                  ::before 会立刻失效，而「有附件、正文还没写」恰恰需要提示语还在。 */}
+              {!(input.trim() || attachments.length) && (
+                <span className="ai-composer-ph">{disabled ? t('aiLoginRequired') : t('aiInputPh')}</span>
+              )}
+              <div
+                ref={editorRef}
+                className="ai-composer-editor"
+                contentEditable={!disabled}
+                suppressContentEditableWarning
+                role="textbox"
+                aria-multiline="true"
+                onInput={e => {
+                  // 输入延迟探针（仅开发模式）：只在「本次输入到下一帧」超过 30ms 时打印，
+                  // 用来判断打字卡顿是否还在、以及是否已经降到可忽略。
+                  // 打包后 import.meta.env.DEV 为 false，整段被摇掉。
+                  if ((import.meta as any).env?.DEV === true) {
+                    const t0 = performance.now()
+                    requestAnimationFrame(() => {
+                      const dt = performance.now() - t0
+                      if (dt > 30) console.log(`[perf] 输入到下一帧 ${dt.toFixed(1)}ms（>30ms）`)
+                    })
+                  }
+                  const type = (e.nativeEvent as InputEvent).inputType || ''
+                  if (type === 'historyUndo' || type === 'historyRedo') {
+                    // 原生撤销（右键菜单 / 未拦截的快捷键）会连带还原 chip 节点：
+                    // 以 DOM 为准把 state 对齐，避免「界面上 chip 没了、附件列表还留着」
+                    setAttachments(prev => pruneToPresent(prev, presentAttachIds(editorRef.current)))
+                  }
+                  setInput(readText())
+                }}
+                onCompositionStart={() => { composingRef.current = true }}
+                onCompositionEnd={() => { composingRef.current = false; setInput(readText()) }}
+                onKeyDown={e => {
+                  // 撤销 / 重做走自有栈（正文 + chip + 附件整体还原），见 undoEdit 的说明
+                  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+                    if (e.shiftKey ? redoEdit() : undoEdit()) {
+                      e.preventDefault()
+                      return
+                    }
+                  }
+                  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+                    if (redoEdit()) {
+                      e.preventDefault()
+                      return
+                    }
+                  }
+                  if (e.key === 'Enter') {
+                    // 中文输入法组词中的 Enter 是「上屏确认」，绝不能当发送
+                    if (composingRef.current || (e.nativeEvent as any).isComposing) return
+                    if (e.shiftKey) {
+                      // Shift+Enter 换行：原生会插 <div>，统一成 <br>，readEditorText 更稳
+                      e.preventDefault()
+                      document.execCommand('insertLineBreak')
+                      return
+                    }
+                    e.preventDefault()
+                    submit()
+                    return
+                  }
+                  // 光标紧贴 chip 右侧时先删 chip —— contentEditable=false 的节点浏览器删不掉
+                  if (e.key === 'Backspace') {
+                    const sel = window.getSelection()
+                    if (sel && sel.isCollapsed && sel.anchorNode) {
+                      const node = sel.anchorNode
+                      const prev = node.nodeType === Node.TEXT_NODE ? node.previousSibling : null
+                      if (prev instanceof HTMLElement && prev.dataset.attachId) {
+                        e.preventDefault()
+                        removeAttachment(prev.dataset.attachId)
+                      }
+                    }
+                  }
+                }}
+                // 粘贴：自家结构 → 原样还原；文件 → 变附件；纯文本/富文本 → 去格式插入。
+                // **无条件拦截默认粘贴**：一旦漏掉一次，浏览器就会把剪贴板 HTML 原样插进来，
+                // 里面带着带 `data-attach-id` 的 chip 副本和外层 <div>，
+                // 于是出现「同一批 chip 重复 + 嵌套容器」的脏结构（用户 2026-10-30 反馈）。
+                onPaste={e => {
+                  e.preventDefault()
+                  e.stopPropagation()
+
+                  const raw = e.clipboardData?.getData(CLIP_TYPE)
+                  if (raw) { pasteStructure(raw); return }
+
+                  const files = e.clipboardData?.files
+                  if (files && files.length) {
+                    // 记下粘贴瞬间的光标位置 —— 插入是异步的（图片还要压缩），那时 selection 已经变了。
+                    // 直接把 Range 交给这一批附件带走，不做全局单例（否则两次粘贴会互相覆盖）。
+                    const sel = window.getSelection()
+                    const caret = sel && sel.rangeCount > 0 ? sel.getRangeAt(0) : null
+                    void attachFromFiles(files, caret)
+                    return
+                  }
+
+                  /**
+                   * 纯文本 / 富文本一律走「自己插 <br>」而不是 execCommand('insertText')。
+                   *
+                   * 多行文本交给 insertText 时，Chromium 会按行包出 `<div>`，粘几次就套出
+                   * 一层层嵌套容器（用户截到的「输入框嵌套」），后续光标、chip 位置都会错乱。
+                   * 这里统一成 <br>，结构永远扁平。
+                   */
+                  const ed = editorRef.current
+                  if (!ed) return
+                  const plain = e.clipboardData?.getData('text/plain') || (() => {
+                    // 只剩 HTML（网页 / Word）时只取纯文本，保留换行，绝不插入原始标签
+                    const html = e.clipboardData?.getData('text/html')
+                    if (!html) return ''
+                    const doc = new DOMParser().parseFromString(html, 'text/html')
+                    doc.querySelectorAll('script,style').forEach(n => n.remove())
+                    return (doc.body?.textContent || '').replace(/\u00a0/g, ' ')
+                  })()
+                  if (!plain) return
+
+                  const sel = window.getSelection()
+                  const range = sel && sel.rangeCount > 0 ? sel.getRangeAt(0) : null
+                  insertStructure(ed, { text: plain.replace(/\r\n?/g, '\n'), chips: [] }, {
+                    range,
+                    makeChip: () => null
                   })
-                }
-                setInput(e.target.value)
-              }}
-              onKeyDown={e => {
-                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit() }
-              }}
-              // 粘贴：剪贴板里的截图，以及从资源管理器复制的文件，都直接变成附件
-              onPaste={e => {
-                const files = e.clipboardData?.files
-                if (files && files.length) { e.preventDefault(); void attachFromFiles(files) }
-              }}
-            />
+                  // 覆盖粘贴会删掉选区里的 chip：以 DOM 为准把附件状态对齐，
+                  // 否则被删掉的 chip 会被下面的 effect 重新补到末尾（用户看到的「内容跑位/消失」）
+                  syncAttachmentsWithDom()
+                  setInput(readText())
+                }}
+              />
+            </div>
           </div>
           </div>
           <div className="ai-composer-actions">
@@ -1974,22 +2596,81 @@ export function ChatPanel({ disabled }: Props) {
 }
 
 /**
+ * 用户消息正文：把 chip 按发送时的位置摆回文字中间。
+ *
+ * 之前气泡里是「一排附件 + 一段文字」，看不出「这句话在说哪份附件」；
+ * 有 `inlineMarks` 时就还原成输入区的样子（没有位置信息的老消息仍走纯文本）。
+ */
+function InlineMessageContent({
+  content,
+  marks,
+  attachments
+}: {
+  content: string
+  marks?: AIInlineMark[]
+  attachments?: AIAttachment[]
+}) {
+  if (!marks?.length || !attachments?.length) {
+    return <div className="ai-plain">{content}</div>
+  }
+  const byId = new Map(attachments.map(a => [a.id, a]))
+  const sorted = marks.slice().sort((a, b) => a.at - b.at)
+  const nodes: React.ReactNode[] = []
+  let prev = 0
+
+  sorted.forEach((m, i) => {
+    const at = Math.max(prev, Math.min(m.at, content.length))
+    if (at > prev) nodes.push(<span key={`t${i}`}>{content.slice(prev, at)}</span>)
+    const a = byId.get(m.id)
+    if (a) {
+      nodes.push(
+        <span className="ai-plain__chip" key={`c${i}`}>
+          <AttachChip a={a} />
+        </span>
+      )
+    }
+    prev = at
+  })
+  if (prev < content.length) nodes.push(<span key="tail">{content.slice(prev)}</span>)
+
+  return <div className="ai-plain ai-plain--inline">{nodes}</div>
+}
+
+/**
  * 附件 chip（输入区待发列表与消息气泡回显共用，1.0.43）。
  *
- * 图片类型**鼠标悬停（或键盘聚焦）时在 chip 上方浮出原图预览** ——
- * 此前只有一个 20px 缩略图，两张截图放一起根本分不清哪张是哪张；
- * 发送之后的回显同样可以悬停查看。
- * 预览层 `pointer-events: none`：鼠标移上去不会被它抢走 hover 导致闪烁。
+ * 2026-10-30 改版：**图片不再用胶囊，改成方形缩略图卡片**（用户要求「粘贴的图片
+ * 升级为内联样式」）。原因：20px 缩略图 + 文件名的小胶囊，贴两三张截图时几乎看不出
+ * 内容，还得逐张悬停才分得清；而图片最有辨识度的信息就是它本身，应当直接以缩略图呈现。
+ * 非图片附件（文本 / 本机文件）没有可视内容，继续用「图标 + 文件名 + 大小」的胶囊。
+ *
+ * 两种形态都保留**鼠标悬停（或键盘聚焦）时在上方浮出原图 + 文件名/大小**的能力
+ * （见 `.ai-attach-preview`）；预览层 `pointer-events: none`，不会被它抢走 hover 造成闪烁。
  */
-function AttachChip({ a, onRemove }: { a: AIAttachment; onRemove?: (id: string) => void }) {
+function AttachChip({ a, onRemove, preview = true }: {
+  a: AIAttachment
+  onRemove?: (id: string) => void
+  /**
+   * 是否显示悬停浮层（原图 / 完整路径）。
+   *
+   * 气泡里的内联 chip 关掉它：气泡本身是圆角小卡片，浮层会盖住上下几行文字
+   * （用户反馈「气泡显示被遮挡」）。气泡里保留原生 title，足够看全路径。
+   */
+  preview?: boolean
+}) {
   const t = useStore(s => s.t)
   const isImg = a.kind === 'image' && !!a.dataUrl
+  // chip 本体只放文件名（2026-10-30 第二次调整：完整路径会把 chip 撑得很长），
+  // 完整路径与所在文件夹放进悬停浮层（.ai-attach-preview）与原生 title。
+  const label = a.name
+
   return (
-    <span className={`ai-attach-chip ${a.kind}`} title={a.path || a.name}>
+    // 气泡里的 chip（preview=false）连原生 title 也不给：那个白底系统浮层会盖住上下两行文字
+    <span className={`ai-attach-chip ${a.kind}`} title={preview ? (a.path || a.name) : undefined}>
       {isImg
-        ? <img className="ai-attach-chip__thumb" src={a.dataUrl} alt="" />
+        ? <img className="ai-attach-chip__thumb" src={a.dataUrl} alt="" draggable={false} />
         : <Icon name={a.kind === 'text' ? 'Pencil' : 'File'} size={12} />}
-      <span className="ai-attach-chip__name">{a.name}</span>
+      <span className="ai-attach-chip__name">{label}</span>
       {a.size ? <span className="ai-attach-chip__size">{humanSize(a.size)}</span> : null}
       {a.truncated ? <span className="ai-attach-chip__warn">…</span> : null}
       {onRemove && (
@@ -2000,15 +2681,26 @@ function AttachChip({ a, onRemove }: { a: AIAttachment; onRemove?: (id: string) 
           onClick={() => onRemove(a.id)}
         ><Icon name="Close" size={11} /></button>
       )}
-      {isImg && (
+      {preview && (isImg ? (
         <span className="ai-attach-preview">
           <img src={a.dataUrl} alt={a.name} />
           <span className="ai-attach-preview__meta">
             <span className="ai-attach-preview__name">{a.name}</span>
             {a.size ? <span className="ai-attach-preview__size">{humanSize(a.size)}</span> : null}
           </span>
+          {a.path ? <span className="ai-attach-preview__path">{a.path}</span> : null}
         </span>
-      )}
+      ) : a.path ? (
+        // 文本 / 本机文件没有可视内容，浮层就给完整路径（含所在文件夹）+ 大小
+        <span className="ai-attach-preview">
+          <span className="ai-attach-preview__path">{a.path}</span>
+          {a.size ? (
+            <span className="ai-attach-preview__meta">
+              <span className="ai-attach-preview__size">{humanSize(a.size)}</span>
+            </span>
+          ) : null}
+        </span>
+      ) : null)}
     </span>
   )
 }
@@ -2234,6 +2926,46 @@ function MarkdownLink({ href, children }: { href?: string; children?: React.Reac
   )
 }
 
+/**
+ * 复制「正文 + 内联附件结构」。
+ *
+ * 自定义 MIME 走不了 `navigator.clipboard`（Chromium 只接受白名单类型，其余直接
+ * NotAllowedError），只能用「临时选中一个隐藏 textarea + 在 copy 事件里 setData」这条老路 ——
+ * 在 copy 事件里写进去的类型会原样进系统剪贴板。
+ *
+ * 这样已经发送出去的消息也能「点复制 → 粘回输入框」，附件与位置都不丢。
+ */
+function copyRich(text: string, customJson?: string): boolean {
+  if (!customJson) return false
+  const ta = document.createElement('textarea')
+  ta.value = text
+  ta.setAttribute('readonly', '')
+  ta.style.position = 'fixed'
+  ta.style.left = '-9999px'
+  ta.style.top = '0'
+  ta.style.opacity = '0'
+  document.body.appendChild(ta)
+  ta.select()
+
+  const handler = (e: ClipboardEvent) => {
+    e.clipboardData?.setData('text/plain', text)
+    e.clipboardData?.setData(CLIP_TYPE, customJson)
+    e.preventDefault()
+    // 别让输入区那个「复制带 chip」的全局监听再改写一次
+    e.stopPropagation()
+  }
+
+  document.addEventListener('copy', handler, true)
+  try {
+    return document.execCommand('copy')
+  } catch {
+    return false
+  } finally {
+    document.removeEventListener('copy', handler, true)
+    document.body.removeChild(ta)
+  }
+}
+
 // 复制优先用 Clipboard API；file:// 协议下它可能不可用，回退到 execCommand
 async function copyText(text: string): Promise<boolean> {
   try {
@@ -2302,7 +3034,20 @@ const MessageItem = memo(function MessageItem({ message, thinking, emptyHint, on
   useEffect(() => () => { if (copyTimer.current) window.clearTimeout(copyTimer.current) }, [])
 
   const handleCopy = async () => {
-    const ok = await copyText(message.content || '')
+    // 带内联附件结构的消息：复制时连 chip 与附件一起带走（粘回输入区能完整还原）
+    let payload: string | undefined
+    if (message.inlineMarks?.length && message.attachments?.length) {
+      const byId = new Map(message.attachments.map(a => [a.id, a]))
+      const chips = message.inlineMarks
+        .map(m => ({ at: m.at, att: byId.get(m.id) }))
+        .filter(c => !!c.att) as { at: number; att: AIAttachment }[]
+      if (chips.length) {
+        payload = JSON.stringify({ v: 1, text: message.content, chips } as ClipPayload)
+      }
+    }
+    const ok = payload
+      ? copyRich(message.content || '', payload)
+      : await copyText(message.content || '')
     if (!ok) return
     setCopied(true)
     if (copyTimer.current) window.clearTimeout(copyTimer.current)
@@ -2313,8 +3058,10 @@ const MessageItem = memo(function MessageItem({ message, thinking, emptyHint, on
     <div className={`ai-message ${message.role}`}>
       <div className="ai-avatar">{message.role === 'user' ? t('aiRoleUser') : 'AI'}</div>
       <div className="ai-message-body">
-        {/* 附件回显（1.0.43）：历史里也保留，追问时能对上「你说的是哪张图/哪个文件」 */}
-        {!!message.attachments?.length && (
+        {/* 附件回显（1.0.43）：历史里也保留，追问时能对上「你说的是哪张图/哪个文件」。
+            2026-10-30：有 inlineMarks 的（新消息）已经在正文里内联显示了，
+            这里不再额外铺一排，否则同一批附件会显示两遍、还把气泡顶下去。 */}
+        {!!message.attachments?.length && !message.inlineMarks?.length && (
           <div className="ai-msg-attach-list">
             {message.attachments.map(a => <AttachChip key={a.id} a={a} />)}
           </div>
@@ -2344,7 +3091,11 @@ const MessageItem = memo(function MessageItem({ message, thinking, emptyHint, on
                 )}
               </>
             )
-            : <div className="ai-plain">{message.content}</div>}
+            : <InlineMessageContent
+                content={message.content}
+                marks={message.inlineMarks}
+                attachments={message.attachments}
+              />}
         </div>
         <div className="ai-message-actions">
           <span className="ai-msg-time">{fmtDate(message.createdAt)}</span>

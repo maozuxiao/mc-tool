@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Background } from 'animal-island-ui'
 import { useStore } from './store'
+import { themeBackdrop } from './theme'
 import { LoginOverlay } from './components/LoginOverlay'
 import { QueryPanel } from './components/QueryPanel'
 import { ChatPanel } from './components/ai/ChatPanel'
@@ -166,6 +167,14 @@ export function App() {
     return () => { offs.forEach(off => off()) }
   }, [])
 
+  // 报到：告诉主进程「当前渲染层是新实例」，让它复位 loginViewShown。
+  // 没有这一步的话，dev 下整页重载后主进程仍认为登录层已展示，后续 requestLoginView
+  // 全被 `skip (already shown)` 吞掉，新实例的登录层再也收不到消息
+  // （2026-10-30 实测：reload 后出码 4 次、focus 检查 5 次全部 skip）。
+  useEffect(() => {
+    void window.mcApi.rendererReady()
+  }, [])
+
   // 窗口失焦 / 最小化 / 切到后台时，暂停纯装饰性动画（选中 Tab 的小叶子、壁纸入场），
   // 避免应用退到后台仍持续占用合成器与 GPU（任务管理器里 GPU 进程 124 MB 的一部分）。
   // 具体暂停规则见 styles.css 的 .win-idle。
@@ -192,7 +201,7 @@ export function App() {
       {/* 全局壁纸层：整窗最底层的一块「壁纸」，铺满视口、不占布局、不拦点击。
           放在这里（而不是各页面内部）才能让登录页、物料查询页、AI 助手页与顶部提示条
           共用同一张壁纸；切换主题只改这一个属性，不会触发两张表格重渲染。 */}
-      <MemoBackdrop type={theme} className="mc-backdrop" />
+      <MemoBackdrop type={themeBackdrop(theme)} className="mc-backdrop" />
       <UpdateBar />
       <SessionExpiredBar />
       {!loggedIn && !landing && <LoginOverlay loginState={loginState} />}
