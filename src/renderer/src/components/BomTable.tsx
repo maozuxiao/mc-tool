@@ -22,6 +22,7 @@ export const BomTable = memo(function BomTable() {
   const descState = useStore(s => s.descTrans.bom)
   const translateDescs = useStore(s => s.translateDescs)
   const toggleDescVisible = useStore(s => s.toggleDescVisible)
+  const clearDescError = useStore(s => s.clearDescError)
   // 行展开状态持久化到 store：切换 tab 后仍能保留展开行与按钮点击事件
   const expandedKeys = useStore(s => s.bomExpandedKeys)
   const toggle = useStore(s => s.toggleBomExpanded)
@@ -41,6 +42,16 @@ export const BomTable = memo(function BomTable() {
       <div className="count-line">
         <span>{t('countBom', { f: bomFiltered.length, s: bomData.length })}</span>
         <div className="count-actions">
+          {/* 翻译失败 / 超时常驻提示（1.0.67）：与物料结果页一致，点一下可关闭 */}
+          {descState.lastError && (
+            <span
+              className="mq-translate-hint"
+              title={`${descState.lastError}（${t('translateHintDismiss')}）`}
+              onClick={() => clearDescError('bom')}
+            >
+              {descState.lastError}
+            </span>
+          )}
           {/* 翻译物料描述（1.0.54）：与物料结果页同一套能力。loading 期间按钮仍可点击
               （.mq-translate-btn 覆盖库 pointer-events:none 且不置 disabled），
               再次点击 = 取消剩余批次。仅当还有未翻译的描述时可点。 */}

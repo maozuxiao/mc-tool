@@ -5,7 +5,7 @@ import { join } from 'path'
 import { promisify } from 'util'
 import { execFile } from 'child_process'
 import type { AIAgentMode, AIToolRun, AIExtraRoot } from '@shared/ai-types'
-import { normalizeItemNo } from '@shared/query'
+import { normalizeItemNo, isItemNo, parseBatchItemNos } from '@shared/query'
 
 const execFileAsync = promisify(execFile)
 
@@ -76,7 +76,9 @@ ${MODE_SWITCH_NOTE}
 2. 生命周期为退市、禁购、禁用时，必须给出明显风险警告。
 3. 描述含 IMX307 的物料，必须提示替代料号信息；如果查询结果中 imx307_replacement 为空数组，要明确说明未找到映射记录。
 3.1 结果里带 pn_switch 字段（料号切换/替代通知，如 AD Plus2.0 8G eMMC → 内置 128GB）时，**必须**主动说明：这是已切换的料号、新料号是多少、截止日期（如 2026-10-31 之后旧料号一律不接单）；role=old 是切换前（别再按它报价/下单），role=new 是切换后新料号。若该料号在 MC 里查不到但返回里带了 [PN][WARN]，同样要把新料号告知用户（旧料号查不到往往正是切换造成的）。涉及客户邮件时可用 notice 里的 customer_notice_template。
-4. 批量查询时不要并发，一次 mc_query 可传入多个料号参数。
+4. 批量查询时不要并发，一次 mc_query 可传入多个料号参数（args 传字符串数组）。
+4.0 **料号位数（硬规则）**：MC 料号有 **12 位和 13 位两种**（13 位 = 4-4-4 分组 + 1 位版本后缀，如 5196009100105）。13 位料号是正常料号，**禁止**以「常见是 12 位 / 位数不对 / 可能有识别误差」为由质疑用户给的料号、要求用户核对位数或截图 —— 直接照原样查。
+4.0.1 **工具报错不等于用户数据错**：mc_query 返回「参数不能为空」「不支持的 MC 查询命令」这类错误时，是**你传参的形态**有问题（args 必须是字符串数组），必须立刻改用 {"command":"batch","args":["料号1","料号2"]} 这种形态重试；**禁止**把工具失败说成「料号可能抄错了 / 请你确认位数」再让用户返工。只有工具明确返回「该料号在 MC 中不存在」时，才可以提示料号可能有问题。
 4.1 **料号书写（硬规则，实测最容易出错的一条）**：回复里出现的料号必须与查询返回的
    ITEM_NUMBER **逐字一致**，写成连续数字（如 515402210148）。**禁止**用 4-4-4 空格分组
    （不要写成 5154 0221 0148）、**禁止**省略或改写中间任何一位 —— 用户反馈过「输出料号时
@@ -233,30 +235,102 @@ export const MC_QUERY_TOOL_DEFINITION = {
       type: 'object',
       properties: {
         command: { type: 'string', enum: ['search', 'item', 'batch', 'bom', 'spec'] },
-        args: { type: 'array', items: { type: 'string' }, description: '子命令参数，例如料号或描述关键词。料号请传连续数字（如 515402210148），不要用 4-4-4 空格分组' }
+        args: {
+          type: 'array',
+          items: { type: 'string' },
+          description: '子命令参数，**必须是一维字符串数组**，例如 ["515402210148","5110038100029"]。' +
+            '多个料号批量查就用 batch 一次传完，不要写成对象（禁止 {"item":"515402210148"} 这种把料号当 key 的写法）。' +
+            '料号传连续数字（12 位或 13 位都可以），不要用 4-4-4 空格分组'
+        }
       },
       required: ['command', 'args']
     }
   }
 }
 
+/** 递归收集字符串（数组 / 嵌套对象 / 数字都摊平），用于宽容解析模型给的涂料号 */
+function collectStrings(v: any, out: string[], depth = 0): void {
+  if (v == null || depth > 6) return
+  if (typeof v === 'string' || typeof v === 'number') {
+    const s = String(v).trim()
+    if (s) out.push(s)
+    return
+  }
+  if (Array.isArray(v)) {
+    for (const x of v) collectStrings(x, out, depth + 1)
+    return
+  }
+  if (typeof v === 'object') {
+    for (const x of Object.values(v)) collectStrings(x, out, depth + 1)
+  }
+}
+
+/**
+ * 宽容解析 args（1.0.69）。
+ *
+ * 实测事故（2026-11-02）：模型把 schema 里的 `args: string[]` 理解成对象，
+ * 连续传了 `{"args":{"item":"5196009100105"}}`、`{"args":{"items":[...],"pns":[...]}}`
+ * 这类形态，而旧实现只认 `Array.isArray(args)` —— 于是 4 次调用全部返回
+ * 「MC 查询参数不能为空」，模型以为是用户料号有问题，反过来要用户核对位数、确认截图误差。
+ * 这里把「字符串 / 数组 / 对象 / 各种别名键」统一摊平成料号数组，让传参形态不再决定成败。
+ */
+function coerceArgs(input: any, command: string): string[] {
+  const { command: _cmd, ...rest } = (input && typeof input === 'object') ? input : {}
+  const raw = input?.args !== undefined ? input.args : rest
+  const itemCmds = command !== 'search'
+
+  // ① 整串文本：可能是 "料号1,料号2" 或「一行一个」（含 4-4-4 分组），交给既有的批量解析
+  if (typeof raw === 'string') {
+    const s = raw.trim()
+    if (!s) return []
+    if (!itemCmds) return [s]
+    return dedupe(parseBatchItemNos(s).map(normalizeItemNo).filter(Boolean))
+  }
+
+  // ② 数组 / 对象：递归摊平后去重
+  const flat: string[] = []
+  collectStrings(raw, flat)
+  const uniq = dedupe(flat)
+  if (!uniq.length) return []
+  if (!itemCmds) return uniq.slice(0, 1) // search 只需关键词
+  // 料号类命令：优先保留真正的 12/13 位料号，避免把 `{"keyword":"xxx"}` 这类杂项当料号查
+  const items = uniq.map(x => normalizeItemNo(x)).filter(x => isItemNo(x))
+  return dedupe(items.length ? items : uniq)
+}
+
+function dedupe(list: string[]): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const x of list) {
+    const s = String(x).trim()
+    if (!s || seen.has(s)) continue
+    seen.add(s)
+    out.push(s)
+  }
+  return out
+}
+
 function validateInput(input: any): { command: string; args: string[] } {
   const allowed = new Set(['search', 'item', 'batch', 'bom', 'spec'])
   const command = String(input?.command || '')
-  if (!allowed.has(command)) throw new Error(`不支持的 MC 查询命令: ${command}`)
+  if (!allowed.has(command)) {
+    throw new Error(
+      `不支持的 MC 查询命令: ${command || '(空)'}。command 只能是 search / item / batch / bom / spec 之一`
+    )
+  }
   // 料号类命令的参数做归一化（2026-10-30）：模型很容易照着用户原话把 `5154 0211 0005 1`
   // 这种 4-4-4(-1) 分组的料号原样传进来，而 OA 的 `q.ITEM_NUMBER` 只认连续数字串 ——
   // 不归一化就会「8 个料号全查不到」。search 走的是描述关键词，不能去空格，保持原样。
-  const itemCmds = command !== 'search'
-  const args = Array.isArray(input?.args)
-    ? input.args
-        .map((x: any) => {
-          const s = String(x).trim()
-          return itemCmds ? normalizeItemNo(s) : s
-        })
-        .filter(Boolean)
-    : []
-  if (!args.length) throw new Error('MC 查询参数不能为空')
+  const args = coerceArgs(input, command)
+  if (!args.length) {
+    // 报错必须告诉模型「我收到了什么」，否则它只能靠改字段名盲试（实测盲试了 4 轮）
+    const got = JSON.stringify(input?.args ?? null).slice(0, 200)
+    throw new Error(
+      `MC 查询参数不能为空（实际收到 args = ${got}）。正确写法：` +
+      `{"command":"batch","args":["515402210148","5110038100029"]} —— args 必须是**字符串数组**，` +
+      `不要把料号写成对象的 key（如 {"item":"..."}），也不要只传一个字符串字段名。`
+    )
+  }
   if (args.length > 50) throw new Error('单次最多查询 50 个参数')
   if (args.some((x: any) => !x.trim() || x.length > 500 || /[\r\n\0]/.test(x))) throw new Error('MC 查询参数包含非法字符')
   return { command, args }
@@ -267,8 +341,27 @@ function validateInput(input: any): { command: string; args: string[] } {
 export type McRunSink = (run: Omit<AIToolRun, 'id'> & { id?: string }) => { id: string }
 
 export async function runMcQuery(input: any, onRun?: McRunSink, signal?: AbortSignal): Promise<any> {
-  const { command, args } = validateInput(input)
   const started = Date.now()
+  let validated: { command: string; args: string[] }
+  try {
+    validated = validateInput(input)
+  } catch (e: any) {
+    // 校验失败也要把 run 收尾（1.0.69）：旧实现在建 run 之前抛错，onRun 从未被调用，
+    // 于是 UI 卡片永远停在「正在查询」—— 实测连挂 4 次，用户以为还在查，实际早就失败了。
+    const msg = e?.message || String(e)
+    if (onRun) {
+      onRun({
+        toolName: 'mc_query',
+        input,
+        status: 'error',
+        summary: msg,
+        output: { error: msg },
+        durationMs: Date.now() - started
+      })
+    }
+    throw e
+  }
+  const { command, args } = validated
   const run = {
     toolName: 'mc_query',
     input: { command, args },

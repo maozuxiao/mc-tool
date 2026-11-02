@@ -208,6 +208,49 @@ export function matchSkillDocByRelative(target: string): string[] {
 }
 
 /**
+ * PATH_NOT_FOUND 兜底（1.0.69）：模型给的是**绝对路径**，但该绝对路径在当前机器上不存在。
+ *
+ * 两条真实来路：① 升级/换盘后安装目录变了（旧版装在 `E:\Program Files\mc-material-query`，
+ * 新版装在别处），而模型从历史对话或 README 里抄了旧路径；② 技能文档被复制到另一台机器。
+ * 两者都会让「明明存在的文档」读不到，用户只能看到一句「路径不存在」。
+ *
+ * 这里按 `…/skills/<技能id>/<剩余路径>` 重定位到当前技能根；再退一步，按文件名在所有技能的
+ * `references/` 下找同名文件（只接受带扩展名的文件名，避免把目录名当文件找）。
+ */
+export function matchSkillDocByPathHint(target: string): string[] {
+  const t = String(target || '').replace(/\\/g, '/').trim()
+  if (!t) return []
+  const roots = [builtinRoot(), userSkillRoot()]
+  const out: string[] = []
+
+  const m = t.match(/\/skills\/([^/]+)\/(.+)$/i)
+  if (m) {
+    const [, id, rest] = m
+    const segs = rest.split('/').filter(Boolean)
+    for (const root of roots) {
+      const p = join(root, id, ...segs)
+      if (existsSync(p) && !out.includes(p)) out.push(p)
+    }
+    if (out.length) return out
+  }
+
+  const base = basename(t)
+  if (!base || !/\.[a-z0-9]{1,8}$/i.test(base)) return out
+  for (const root of roots) {
+    let ids: string[] = []
+    try {
+      ids = readdirSync(root, { withFileTypes: true }).filter(d => d.isDirectory()).map(d => d.name)
+    } catch { continue }
+    for (const id of ids) {
+      for (const p of [join(root, id, 'references', base), join(root, id, base)]) {
+        if (existsSync(p) && !out.includes(p)) out.push(p)
+      }
+    }
+  }
+  return out
+}
+
+/**
  * 内置技能的「路由提示」：**必须压在这段技能说明的最前面**。
  *
  * 为什么不能只写在 SKILL.md 或工具描述里：模型是**先定计划、再选工具**的 ——

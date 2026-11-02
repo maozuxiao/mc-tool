@@ -85,9 +85,10 @@ function resolveSymlink(abs) {
  */
 function resolveSafe(root, target, opts = {}) {
   if (!target || typeof target !== 'string') throw new SandboxError('路径不能为空', 'INVALID_PATH')
-  if (/[\u0000-\u001f]/.test(target)) throw new SandboxError('路径包含非法字符', 'INVALID_PATH')
-
-  const targetStr = String(target)
+  // 入口就清洗（1.0.69）：全角斜杠 / NBSP 会让 path.resolve 把整串当成**一个文件名**，
+  // 得到一条被污染的绝对路径 —— 之后再怎么在 finalize 里救都救不回来。
+  const targetStr = cleanPathString(String(target))
+  if (/[\u0000-\u001f]/.test(targetStr)) throw new SandboxError('路径包含非法字符', 'INVALID_PATH')
 
   // OpenCode 模式：不限制工作区，允许本机任意文件/目录
   if (!root) {
@@ -126,12 +127,110 @@ function resolveSafe(root, target, opts = {}) {
   )
 }
 
+// ── 路径容错（1.0.69）──────────────────────────────────────
+/**
+ * 清洗路径里的「看不见的字符」。
+ *
+ * 实测事故：用户报「路径读取 bug —— 明明存在的路径却说路径不存在」，
+ * 报错路径 `E:\Program Files\mc-material-query\resources\skills\ceiba2-api-qa\references\api_reference.md`
+ * 在磁盘上确实存在（手动核验通过），同一路径稍后又读取成功。
+ * 这类「时好时坏、路径看着完全一样」的失败，绝大多数是模型从网页/文档里抄路径时
+ * 混进了 NBSP(U+00A0)、零宽空格、全角斜杠/空格 —— 打印出来与正常路径一模一样。
+ * Windows 的文件名本身不允许尾随空格与点，所以去掉它们是安全的。
+ */
+function cleanPathString(p) {
+  let s = String(p || '')
+  s = s.replace(/[\u200B-\u200D\uFEFF\u00AD]/g, '')            // 零宽字符 / BOM / 软连字符
+  s = s.replace(/[\u00A0\u2007\u202F\u3000]/g, ' ')            // NBSP / 全角空格 → 普通空格
+  s = s.replace(/\uFF3C/g, '\\').replace(/\uFF0F/g, '/')       // 全角斜杠（只能当分隔符，不会出现在合法文件名里）
+  s = s.replace(/[ \t]+$/, '')                                  // 尾随空白
+  if (/^[a-zA-Z]:\\/.test(s)) s = s.replace(/\\{2,}/g, '\\')    // E:\\a → E:\a（不动 UNC 开头 \\\\）
+  return s
+}
+
+/**
+ * 激进清洗：把全角字母/数字/括号等一并转成半角。
+ * **只能用在「原样路径确实找不到」之后的救援阶段** —— 中文文件名大量使用全角括号
+ * （`报告（终版）.xlsx`），入口就无脑转换会把本来正确的路径改坏。
+ */
+function cleanPathFull(p) {
+  let s = cleanPathString(p)
+  s = s.replace(/[\uFF01-\uFF5E]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))
+  s = s.replace(/[ \t]+$/, '')
+  if (/^[a-zA-Z]:\\/.test(s)) s = s.replace(/\\{2,}/g, '\\')
+  return s
+}
+
+/**
+ * 存在性「救援」：直接 existsSync 失败后，再用清洗版 + 逐段大小写/空白模糊匹配找一次。
+ * 只在 mustExist 判定失败时调用，命中则返回磁盘上真实存在的路径（调用方后续读取用它）。
+ * 安全性：只在原路径的祖先目录内做归一化匹配，不会跑出原路径所在目录树。
+ */
+function rescueExisting(abs) {
+  // 先用「激进清洗」版本试一次：全角括号/字母/数字被写成半角（或反之）都在这里救回
+  const clean = cleanPathFull(abs)
+  if (clean && clean !== abs && fs.existsSync(clean)) return clean
+
+  // 归一化：忽略大小写、空白、下划线/连字符（模型常把 `api_reference` 写成 `api reference`），
+  // 两侧都做全角→半角，保证「全角括号」与「半角括号」互相可匹配
+  const norm = (s) => cleanPathFull(String(s)).toLowerCase().replace(/[\s_\-]/g, '')
+  const m = /^([a-zA-Z]:)([\\/][\s\S]*)$/.exec(clean || abs)
+  if (!m) return ''
+  const segs = m[2].split(/[\\/]+/).filter(Boolean)
+  let cur = m[1] + '\\'
+  for (const seg of segs) {
+    const direct = path.join(cur, seg)
+    if (fs.existsSync(direct)) { cur = direct; continue }
+    let hit = ''
+    try {
+      const entries = fs.readdirSync(cur)
+      const key = norm(seg)
+      const same = entries.filter(e => norm(e) === key)
+      if (same.length === 1) hit = same[0]
+      else if (!same.length) {
+        // 前后缀包含（容忍多/少一个字符）：同样只在**唯一命中**时采纳，绝不猜
+        const cands = entries.filter(e => norm(e).startsWith(key) || key.startsWith(norm(e)))
+        if (cands.length === 1) hit = cands[0]
+      }
+    } catch { return '' }
+    if (!hit) return ''
+    cur = path.join(cur, hit)
+  }
+  return fs.existsSync(cur) ? cur : ''
+}
+
+/** 找不到时的诊断：说清「实际解析成了什么」「最近哪个上级目录存在」「里面有啥」 */
+function missingHint(abs, targetStr) {
+  const clean = cleanPathString(abs)
+  const parts = []
+  if (clean !== abs) parts.push('路径里含不可见字符（NBSP / 零宽 / 全角），已清洗后仍未找到')
+  let dir = path.dirname(clean || abs)
+  for (let i = 0; i < 8; i++) {
+    const parent = path.dirname(dir)
+    if (!parent || parent === dir) break
+    if (fs.existsSync(dir)) {
+      let names = []
+      try { names = fs.readdirSync(dir).slice(0, 12) } catch { /* 无权限列举 */ }
+      parts.push(`最近存在的上级目录：${dir}`)
+      if (names.length) parts.push(`该目录下有：${names.join('、')}`)
+      else parts.push('（该目录为空或无权限列举）')
+      break
+    }
+    dir = parent
+  }
+  if (!parts.length) parts.push(`无法定位任何存在的上级目录，请确认盘符 ${clean.slice(0, 2)} 是否可用`)
+  return '。诊断：' + parts.join('；')
+}
+
 // 必须存在校验，统一收尾
 function finalize(abs, targetStr, opts) {
   if (opts.mustExist && !fs.existsSync(abs)) {
-    throw new SandboxError(`路径不存在：${targetStr}`, 'PATH_NOT_FOUND')
+    const rescued = rescueExisting(abs)
+    if (rescued) return rescued
+    const shown = abs !== targetStr ? `（实际解析为 ${abs}）` : ''
+    throw new SandboxError(`路径不存在：${targetStr}${shown}${missingHint(abs, targetStr)}`, 'PATH_NOT_FOUND')
   }
   return abs
 }
 
-module.exports = { SandboxError, resolveSafe, isInside }
+module.exports = { SandboxError, resolveSafe, isInside, cleanPathString, rescueExisting }

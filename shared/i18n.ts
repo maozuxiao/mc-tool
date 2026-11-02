@@ -87,6 +87,9 @@ export const I18N: Record<string, Record<string, string | string[]>> = {
     translating: '翻译中...',
     translatingN: '翻译中 {i}/{n}...',
     translateFail: '翻译失败：{m}',
+    // 失败时若已有部分批次译出，顺带告知进度：工具栏常驻提示用（1.0.67）
+    translateFailAt: '翻译失败：{m}（已译出 {d}/{n} 条，可再次点击继续）',
+    translateHintDismiss: '点击可关闭此提示',
     translateNeedAi: '请先在 AI 助手面板配置 API Key 后再使用翻译功能',
     // 翻译中再次点击 = 取消确认；取消后的反馈；原文/译文切换（1.0.54）
     translateCancelConfirm: '翻译正在进行（{done}/{total}），是否取消剩余翻译？',
@@ -556,6 +559,8 @@ aiImgLoadFail: '图片加载失败（链接可能已过期）',
     translating: 'Translating...',
     translatingN: 'Translating {i}/{n}...',
     translateFail: 'Translation failed: {m}',
+    translateFailAt: 'Translation failed: {m} ({d}/{n} translated, click again to continue)',
+    translateHintDismiss: 'Click to dismiss',
     translateNeedAi: 'Please configure an API Key in the AI assistant panel before using translation',
     // Cancel confirmation while translating; feedback after cancel; original/translation toggle (1.0.54)
     translateCancelConfirm: 'Translation in progress ({done}/{total}). Cancel the remaining translations?',

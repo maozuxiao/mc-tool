@@ -31,6 +31,50 @@ function aiLog(msg: string): void {
   console.log(line.trim())
 }
 
+/**
+ * 工具调用参数摘要（1.0.67，仅用于 debug-ai.log）。
+ *
+ * 起因：用户反馈「AI 写文件把文件写坏了」，但会话被删掉后，日志里连「调过哪个工具、
+ * 写了哪个文件、写了多少字符」都查不到（原先只记轮次），完全没法复盘。
+ * 这里只记路径 / 长度 / 关键开关 —— 日志是明文落盘的，绝不记文件正文、不记 API Key。
+ */
+function toolArgBrief(name: string, input: any): string {
+  const parts: string[] = []
+  const p = input?.path || input?.dir
+  if (p) parts.push(`path=${String(p)}`)
+  if (name === 'file_write') {
+    parts.push(`chars=${String(input?.content ?? '').length}`)
+    if (input?.append) parts.push('append=1')
+    if (input?.update) parts.push('update=1')
+    if (input?.newsheet) parts.push(`newsheet=${String(input.newsheet)}`)
+    if (input?.force) parts.push('force=1')
+  } else if (name === 'file_search') {
+    parts.push(`q=${String(input?.query ?? '').slice(0, 60)}`)
+  } else if (name === 'file_read_batch') {
+    parts.push(`files=${(input?.paths || []).length}`)
+  } else if (name === 'file_download') {
+    parts.push(`url=${String(input?.url ?? '').slice(0, 80)}`)
+  } else if (name === 'translate_docx') {
+    parts.push(`action=${String(input?.action ?? '')}`)
+  } else if (name === 'mc_query') {
+    parts.push(`action=${String(input?.action ?? '')}`)
+  }
+  return parts.join(' ')
+}
+
+/** 工具结果摘要（1.0.67）：只记 ok / 错误码 / 字节数 / 是否有备份，不记正文 */
+function toolResultBrief(result: any): string {
+  if (!result || typeof result !== 'object') return `result=${typeof result}`
+  const bits: string[] = []
+  if (result.ok !== undefined) bits.push(`ok=${result.ok}`)
+  if (result.error) bits.push(`error=${String(result.error).slice(0, 80)}`)
+  if (result.code) bits.push(`code=${result.code}`)
+  if (result.bytes !== undefined) bits.push(`bytes=${result.bytes}`)
+  if (result.size !== undefined) bits.push(`size=${result.size}`)
+  if (result.backup) bits.push('backup=1')
+  return bits.join(' ')
+}
+
 /** 统一的「已中止」错误：name 必须是 AbortError —— sendMessage 靠它区分「用户停止」与真错误 */
 function abortError(): Error {
   const e = new Error('Aborted')
@@ -496,7 +540,21 @@ async function streamOpenAICompatible(input: {
         // 工具是逐个执行的：每个之前查一次，停止后不再启动下一个工具
         throwIfAborted(controller.signal)
         let parsed: any
-        try { parsed = JSON.parse(call.function.arguments || '{}') } catch { parsed = {} }
+        try {
+          parsed = JSON.parse(call.function.arguments || '{}')
+        } catch {
+          // 1.0.69：以前这里静默吞成 {}，工具只能报「参数不能为空」之类，模型和日志都看不出
+          // 是我们没解析成功。现在把原文片段记进日志，并把真实原因回给模型让它重新生成。
+          const raw = String(call.function.arguments || '')
+          aiLog(`[AI] tool ${call.function.name} arguments 不是合法 JSON（${raw.length} chars）：${raw.slice(0, 300)}`)
+          const tip = {
+            ok: false,
+            error: `工具调用参数不是合法 JSON（收到 ${raw.length} 字符，解析失败）。` +
+              `请把参数重新生成为完整、合法的 JSON 对象后再次调用；不要留空或截断。`
+          }
+          conversation.push(openAIToolResponse(call.id, tip))
+          continue
+        }
         // MCP 工具单独归类（1.0.46），卡片上与 物料 / 文件 区分
         const runType = isMcpTool(call.function.name)
           ? 'mcp'
@@ -509,6 +567,8 @@ async function streamOpenAICompatible(input: {
           summary: `正在调用 ${call.function.name}`
         })
         send({ type: 'tool-start', conversationId, messageId: assistantMessageId, run: runningRun })
+        const startedAt = Date.now()
+        aiLog(`[AI] tool ${call.function.name} start ${toolArgBrief(call.function.name, parsed)}`)
         try {
           const result = await dispatchTool(call.function.name, parsed, {
             signal: toolController.signal,
@@ -532,10 +592,13 @@ async function streamOpenAICompatible(input: {
             }
           })
           conversation.push(openAIToolResponse(call.id, result))
+          aiLog(`[AI] tool ${call.function.name} end ${Date.now() - startedAt}ms ${toolResultBrief(result)}`)
         } catch (e: any) {
           if (e.name === 'AbortError' || /aborted/i.test(e.message)) {
+            aiLog(`[AI] tool ${call.function.name} aborted ${Date.now() - startedAt}ms`)
             throw e
           }
+          aiLog(`[AI] tool ${call.function.name} FAILED ${Date.now() - startedAt}ms: ${String(e?.message || e).slice(0, 200)}`)
           conversation.push(openAIToolResponse(call.id, { error: e.message }))
         }
       }

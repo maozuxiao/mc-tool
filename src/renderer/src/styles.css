@@ -1455,6 +1455,23 @@ thead th .col-resizer:hover { background: color-mix(in srgb, var(--mc-accent) 25
    库 Button 的 loading 样式把 pointer-events 置成了 none（该类是 CSS Module 哈希名，
    无法直接选中），这里用 !important 恢复；cursor 一并改回 pointer。 */
 .mq-translate-btn { pointer-events: auto !important; cursor: pointer !important; }
+/* 翻译失败 / 超时常驻提示（1.0.67）：显示在「翻译物料描述」左侧的空白处。
+   单行省略 + title 展示全文，避免长报错把导出按钮挤出统计行；点击即关闭。 */
+.mq-translate-hint {
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--mc-font-sm);
+  line-height: 1.4;
+  color: var(--mc-red-deep);
+  cursor: pointer;
+  /* 淡底色小胶囊：在浅色统计行里也能一眼看到，且不抢按钮的视觉重心 */
+  background: color-mix(in srgb, var(--mc-red) 12%, transparent);
+  border-radius: 999px;
+  padding: 3px 10px;
+}
+.mq-translate-hint:hover { background: color-mix(in srgb, var(--mc-red) 20%, transparent); }
 
 /* 批量未命中 Tag 列表（FR-2） */
 .not-found-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }

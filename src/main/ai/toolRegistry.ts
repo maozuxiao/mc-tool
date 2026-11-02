@@ -104,13 +104,21 @@ const REGISTRY: Record<string, ToolEntry> = {
       return runFileSkillCommand('search', args, ctx.allowedRoots, ctx.signal, 30000)
     }
   },
+  // 写文件（文本 / docx / xlsx）。正文走**临时文件**而不是命令行参数（1.0.67）：
+  // ① 正文曾经直接拼进 argv，Windows 命令行上限约 32K 字符，长文件会被截断、
+  //    甚至整个 spawn 失败，用户看到的就是「文件被写坏/写了一半」；
+  // ② 正文以 `--` 开头（典型：md 的 `---` frontmatter）时会被脚本的参数解析当成 flag，
+  //    `--content` 被解析成布尔 true，最终把原文件覆盖成字面量 "true"。
+  // 写临时文件后由脚本 `--content-file` 读取，上面两个坑都不存在。
+  // 超时也从 30s 放宽到 120s：xlsx/docx 大文件写盘超过 30s 会被 kill，正好kill在写盘中途。
   file_write: {
     definition: FILE_TOOL_DEFINITIONS[3],
     run: async (input, ctx) => {
       const p = String(input?.path || '').trim()
       if (!p) return { ok: false, error: 'MISSING_ARG', message: '缺少 path 参数' }
       const content = String(input?.content ?? '')
-      const args = [p, '--content', content]
+      const tmp = join(tmpdir(), `mc-write-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.txt`)
+      const args = [p, '--content-file', tmp]
       if (input?.append) args.push('--append')
       if (input?.update) args.push('--update')
       if (input?.newsheet && input.newsheet !== 'false' && input.newsheet !== 'False') {
@@ -120,7 +128,27 @@ const REGISTRY: Record<string, ToolEntry> = {
         if (ns) args.push('--newsheet', ns)
         else args.push('--newsheet')
       }
-      return runFileSkillCommand('write', args, ctx.allowedRoots, ctx.signal, 30000)
+      // startColumn / headerRow 以独立参数给出更不容易被模型写错位置（1.0.68），
+      // 这里把它们注入 update 的 JSON spec；模型直接写在 JSON 顶层时以 JSON 里的为准。
+      let payload = content
+      if (input?.update && (input?.startColumn || input?.headerRow)) {
+        try {
+          const spec: any = JSON.parse(String(content).replace(/^\uFEFF/, '').trim())
+          if (spec && typeof spec === 'object' && !Array.isArray(spec)) {
+            if (input.startColumn && spec.startColumn === undefined) spec.startColumn = String(input.startColumn)
+            if (input.headerRow && spec.headerRow === undefined) spec.headerRow = Number(input.headerRow)
+            payload = JSON.stringify(spec)
+          }
+        } catch {
+          // 不是合法 JSON 就原样交给脚本，由脚本照常报 BAD_JSON（错误信息更具体）
+        }
+      }
+      try {
+        writeFileSync(tmp, payload, 'utf8')
+        return await runFileSkillCommand('write', args, ctx.allowedRoots, ctx.signal, 120000)
+      } finally {
+        try { unlinkSync(tmp) } catch { /* 临时文件清理失败不影响结果 */ }
+      }
     }
   },
   // 保布局翻译 docx（1.0.46）：只替换 <w:t> 文字，样式/表格/图片/页眉页脚/编号原样保留。

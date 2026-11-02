@@ -44,6 +44,17 @@ export async function optimizePrompt(input: {
 const translateAborts = new Map<string, AbortController>()
 
 /**
+ * 单批翻译请求的硬超时（1.0.67）。
+ *
+ * 此前这条链路**完全没有超时**：`net.fetch` 在上游不响应（网络卡住 / 供应商排队 /
+ * 中转站挂起）时会一直挂着，渲染层的循环永远等不到 `res`，按钮就一直停在
+ * 「翻译中 x/y」上，既不报错也没有任何提示（用户反馈「翻译超时或失败时没有任何提示」）。
+ * 90 秒按「一批 15 条描述、最慢的推理模型」留了余量；超时后立刻中断在途请求并
+ * 返回可读文案，已在译出的批次仍保留，用户可直接再点一次续翻。
+ */
+const TRANSLATE_TIMEOUT_MS = 90_000
+
+/**
  * 把一批中文物料描述翻译成英文（1.0.54，「翻译物料描述」按钮用）。
  * 一次性请求、不落历史、不产生会话 —— 与 optimizePrompt 同一套 getProvider + requestJSON 模式。
  *
@@ -61,7 +72,7 @@ export async function translateDescriptions(input: {
   texts: string[]
   /** 本次翻译任务的标识（取消用）；不传则不参与取消登记 */
   taskId?: string
-}): Promise<{ ok: boolean; items?: string[]; message?: string; canceled?: boolean; error?: string }> {
+}): Promise<{ ok: boolean; items?: string[]; message?: string; canceled?: boolean; timeout?: boolean; error?: string }> {
   const texts = (input?.texts || []).map(t => String(t ?? '')).filter(t => t.trim())
   if (!texts.length) return { ok: false, message: '没有需要翻译的描述' }
   const { config, apiKey } = getProvider(input.providerId)
@@ -69,6 +80,20 @@ export async function translateDescriptions(input: {
   const taskId = String(input?.taskId || '').trim()
   const ac = taskId ? new AbortController() : null
   if (taskId && ac) translateAborts.set(taskId, ac)
+  // 超时与「用户取消」两个中断源汇流到一个内部 controller，同时用 timedOut 标记区分
+  // 是谁打断的：取消 → 安静收尾（canceled），超时 → 按失败提示（timeout）。
+  const ctl = new AbortController()
+  let timedOut = false
+  const timer = setTimeout(() => {
+    timedOut = true
+    try { ctl.abort() } catch { /* 已中止 */ }
+  }, TRANSLATE_TIMEOUT_MS)
+  const onCancel = () => { try { ctl.abort() } catch { /* 已中止 */ } }
+  ac?.signal.addEventListener('abort', onCancel, { once: true })
+  const cleanupAbortSources = () => {
+    clearTimeout(timer)
+    ac?.signal.removeEventListener('abort', onCancel)
+  }
   const sys = '你是物料描述翻译引擎，服务于硬件/电子制造行业。把用户给出的中文物料描述逐条翻译成英文。' +
     '要求：① 料号、型号、规格参数、单位、括号内容与缩写保持原样，不增删信息；' +
     '② 已是英文或纯数字/符号的片段原样保留；③ 只输出译文，不解释、不加引号、不用代码块。' +
@@ -87,7 +112,7 @@ export async function translateDescriptions(input: {
           { role: 'user', content: list }
         ]
       })
-    }, ac?.signal)
+    }, ctl.signal)
     const out = String(data?.choices?.[0]?.message?.content || '').trim()
     if (!out) return { ok: false, message: '模型没有返回内容' }
     // 按行首编号解析译文；模型偶尔会把多条并成一行或换行输出，按编号对齐后
@@ -100,12 +125,18 @@ export async function translateDescriptions(input: {
     const items = texts.map((t, i) => byIndex.get(i + 1) || t)
     return { ok: true, items }
   } catch (e: any) {
+    // 超时：上游迟迟不返回，net.fetch 本身没有超时，必须自己判（否则界面会一直「翻译中」）
+    if (timedOut) {
+      return { ok: false, timeout: true, error: 'TIMEOUT', message: `翻译超时（${Math.round(TRANSLATE_TIMEOUT_MS / 1000)} 秒内没有响应）` }
+    }
     // 被 cancelTranslate 中断：不算失败，返回 canceled 让调用方安静收尾
     if (ac?.signal.aborted || e?.name === 'AbortError') {
       return { ok: false, canceled: true, error: 'CANCELED', message: '已取消' }
     }
-    return { ok: false, message: `翻译失败：${e?.message || e}` }
+    // 文案不再自带「翻译失败：」前缀 —— 渲染层会按界面语言加，避免出现「翻译失败：翻译失败：…」
+    return { ok: false, message: e?.message || String(e) }
   } finally {
+    cleanupAbortSources()
     if (taskId) translateAborts.delete(taskId)
   }
 }

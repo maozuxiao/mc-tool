@@ -14,7 +14,7 @@
  *   search <词> [<dir>] [--name-only] [--regex] [--glob <文件名通配符>] [--ext <ext,...>] [--depth N] [--max-results N] [--index] [--rebuild-index]
  *                                       按文件名 / 内容搜索（内容覆盖 xlsx/xls/docx/pptx/pdf，xlsx 命中定位到 sheet+行号）。
  *                                       默认不使用缓存索引，每次直接读取文件；加 --index 启用索引缓存（按 hash+版本校验），命中缓存却零命中时自动全量兜底重扫防漏查；--rebuild-index 强制忽略旧缓存重建。
- *   write <path> [--content <文本>] [--append] [--update] [--newsheet [名称]]
+ *   write <path> [--content-file <临时文件> | --content <文本>] [--append] [--update] [--newsheet [名称]]
  *                                       写文本类文件（md/txt/csv/json...）；.docx 时 content 给 Markdown，生成真正的 Word 文档；
  *                                       电子表格 --update 时 content 为 JSON { key, rows } 原地按关键列回填；
  *                                       --newsheet 在已存在的工作簿里追加一个新工作表（与 Sheet1 并存、保留原表样式），省略名称则自动 Sheet2/Sheet3…
@@ -37,7 +37,7 @@
 const fs = require('fs')
 const path = require('path')
 const crypto = require('crypto')
-const { SandboxError, resolveSafe } = require('./lib/sandbox')
+const { SandboxError, resolveSafe, cleanPathString } = require('./lib/sandbox')
 const { readerFor, SUPPORTED_FORMATS } = require('./lib/readers')
 
 const DEFAULT_MAX_BYTES = 200 * 1024 // 单次读取上限，避免撑爆模型上下文
@@ -47,6 +47,9 @@ const BATCH_PER_FILE_BYTES = 120 * 1024
 // 这些二进制格式暂时只能「读」，write 还没实现生成，避免写出无效文件。
 // xlsx / xls 已支持生成（见 writeSpreadsheet），docx 已支持生成（见 writeDocx），故都不在其中。
 const WRITE_UNSUPPORTED = new Set(['.pptx', '.pdf', '.doc', '.ppt'])
+// 允许「字面量 \n 兜底还原成换行」的纯文本扩展名（1.0.67）。
+// 代码类（.js/.ts/.py/.json/.html…）绝不能做这个替换，否则会把代码里的 '\n' 字符串改坏。
+const PLAIN_TEXT_ESCAPE_EXTS = new Set(['.md', '.txt', '.csv', '.log', '.yml', '.yaml'])
 
 // ── 输出协议 ──────────────────────────────────────────────
 function printJson(obj) {
@@ -56,10 +59,13 @@ function printJson(obj) {
 }
 
 class CommandError extends Error {
-  constructor(message, code) {
+  constructor(message, code, details) {
     super(message)
     this.name = 'CommandError'
     this.code = code || 'COMMAND_FAILED'
+    // 结构化补充信息（1.0.68）：例如 KEY_NOT_FOUND 时回传真实表头行号与列名清单，
+    // 让模型一次改对，而不是换个列名再盲试一次。
+    this.details = details || null
   }
 }
 
@@ -100,10 +106,52 @@ function toInt(v, fallback) {
   return Number.isFinite(n) && n >= 0 ? n : fallback
 }
 
+// ── 写入安全网（1.0.67）────────────────────────────────────
+/**
+ * 覆盖已有文件前，先在同目录复制一份 `<文件名>.bak-YYYYMMDD-HHmmss`，返回备份绝对路径。
+ *
+ * 起因：用户反馈「AI 写入文件把文件写坏了」，而覆盖写是不可逆的（工作簿重建、文本整篇重写），
+ * 一旦内容不完整/被误改，原文件就没了。备份放在同目录而不是临时目录，用户能直接看到、
+ * 直接改名还原；失败（目标不存在 / 是空文件 / 无权限）时静默返回 ''，绝不影响正常写入。
+ */
+function backupFile(abs) {
+  try {
+    if (!fs.existsSync(abs)) return ''
+    const st = fs.statSync(abs)
+    if (!st.isFile() || st.size === 0) return ''
+    const d = new Date()
+    const p = (n) => String(n).padStart(2, '0')
+    const stamp = `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
+    const bak = `${abs}.bak-${stamp}`
+    fs.copyFileSync(abs, bak)
+    return bak
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * 文本类文件原子写入：先写同目录临时文件，再 rename 覆盖目标。
+ * 这样进程被杀（超时 kill、断电、异常退出）时目标文件要么是旧版、要么是新版，
+ * 不会出现「写了一半」的残缺文件（之前 writeFileSync 直接截断目标再写，中断即毁）。
+ */
+function writeFileAtomic(abs, buf) {
+  const tmp = `${abs}.tmp-${process.pid}-${Date.now()}`
+  try {
+    fs.writeFileSync(tmp, buf)
+    fs.renameSync(tmp, abs)
+  } catch (e) {
+    try { fs.unlinkSync(tmp) } catch { /* 忽略清理失败 */ }
+    throw e
+  }
+}
+
 // ── 多根解析 ──────────────────────────────────────────────
 // 把「别名/子路径」解析成 { root, rest }；无别名前缀时回退主根（alias=''）或唯一根。
 function pickRoot(target, roots) {
-  const raw = String(target || '')
+  // 先清洗不可见/全角字符（1.0.69）：路径里混了 NBSP 或全角斜杠时，连「是不是绝对路径」
+  // 都判断不对（会掉进别名解析 → AMBIGUOUS_ROOT），所以必须在最前面洗一遍。
+  const raw = cleanPathString(String(target || ''))
   // 显式绝对路径（含盘符，如 C:/Users/.../报告.xlsx；或 Unix 风格以 / 开头）一律按 OpenCode 模式处理：
   // 直接放行给 resolveSafe 做最终校验（仅拦截受保护系统目录），由它决定是否落在已授权目录内。
   // 这样即使会话内已 open_folder 多个别名目录、导致「多根且无主根」，用户给的完整绝对路径也不会被
@@ -764,6 +812,8 @@ function writeSpreadsheet(target, content, opts) {
   const { root, rest } = pickRoot(target, opts.roots)
   const abs = resolveSafe(root, rest)
   const { values, fills, rowFills, fillWarnings } = buildSheetGrid(content)
+  // 覆盖重建工作簿是不可逆的（原表名 / 样式 / 内容全部重来），先留一份备份
+  const backup = opts.append ? '' : backupFile(abs)
   if (opts.append && fs.existsSync(abs)) {
     const wb = XLSX.readFile(abs, { cellDates: true })
     const first = wb.SheetNames[0]
@@ -791,6 +841,7 @@ function writeSpreadsheet(target, content, opts) {
     append: !!opts.append,
     size: after.size
   }
+  if (backup) out.backup = backup
   if (fillWarnings.length) {
     out.unsupportedFills = fillWarnings
     out.supportedFills = Object.keys(FILL_PALETTE)
@@ -884,6 +935,8 @@ async function writeSpreadsheetAddSheet(target, content, opts, sheetName) {
   const { root, rest } = pickRoot(target, opts.roots)
   const abs = resolveSafe(root, rest, { mustExist: true }) // 必须已存在：是往里加 Sheet，不是新建文件
   const grid = buildSheetGrid(content)
+  // 整个工作簿会被读出来重写一遍，先备份
+  const backup = backupFile(abs)
   let name
   let sheets
   if (ext === '.xls') {
@@ -929,6 +982,7 @@ async function writeSpreadsheetAddSheet(target, content, opts, sheetName) {
     bytes: after.size,
     size: after.size
   }
+  if (backup) out.backup = backup
   if (grid.fillWarnings.length) {
     out.unsupportedFills = grid.fillWarnings
     out.supportedFills = Object.keys(FILL_PALETTE)
@@ -1023,6 +1077,46 @@ function cellValueAsString(cell) {
   return t != null ? String(t) : ''
 }
 
+/**
+ * 列字母 ↔ 下标（1.0.68）。用户/模型按 Excel 习惯说「O 列」「AA 列」，
+ * 而内部一律用 0-based 下标；支持 "O" / "o" / 15（1-based 数字）三种写法。
+ */
+function colLetterToIndex(v) {
+  const s = String(v ?? '').trim()
+  if (!s) return -1
+  if (/^\d+$/.test(s)) {
+    const n = Number(s)
+    return n > 0 ? n - 1 : -1
+  }
+  const letters = s.toUpperCase().replace(/[^A-Z]/g, '')
+  if (!letters) return -1
+  let n = 0
+  for (const ch of letters) n = n * 26 + (ch.charCodeAt(0) - 64)
+  return n - 1
+}
+
+/** 0-based 下标 → 列字母（1 → A，15 → O） */
+function indexToColLetter(i) {
+  let n = Number(i) + 1
+  if (!Number.isFinite(n) || n <= 0) return ''
+  let s = ''
+  while (n > 0) {
+    const rem = (n - 1) % 26
+    s = String.fromCharCode(65 + rem) + s
+    n = Math.floor((n - 1) / 26)
+  }
+  return s
+}
+
+/**
+ * 宽松 JSON 解析：容忍 UTF-8 BOM 与首尾空白。
+ * 调用方（toolRegistry）写临时文件不带 BOM，但用户/脚本手工生成的 --content-file
+ * 常带 BOM（Windows 记事本、PowerShell Set-Content 默认就带），JSON.parse 直接失败。
+ */
+function parseJsonLoose(text) {
+  return JSON.parse(String(text ?? '').replace(/^\uFEFF/, '').trim())
+}
+
 function loadExcelJs() {
   try { return require('exceljs') } catch {
     throw new CommandError(
@@ -1030,6 +1124,133 @@ function loadExcelJs() {
       'MISSING_DEP'
     )
   }
+}
+
+// ── 表头行定位（1.0.68）────────────────────────────────────
+// 起因：`--update` 原先把**第 1 行**当表头。可 PI / 报价单 / 对账单 / 出库单这类表格，
+// 上方常年压着 5~15 行抬头（公司名、PI No、客户地址、Attn/Tel/E-mail），真实表头往往
+// 在第 13 行左右。于是模型把 key 换成 "Streamax Code"→料号→"Item"→"Product"→"QTY"
+// 一路盲试，每次都是 KEY_NOT_FOUND（用户截图里连报十几条红色失败）。
+// 现在：在指定工作表内扫描前 HEADER_SCAN_ROWS 行，取「含关键列名」的那一行作表头；
+// 若一行都没命中，则挑「最像表头的一行」，并把该行真实列名回给模型（KEY_NOT_FOUND.details），
+// 让它一次改对而不是继续猜。
+const HEADER_SCAN_ROWS = 50
+
+/** 表头名归一化：忽略空格/全角空格/换行、全角括号、全角冒号与大小写差异 */
+function normHeader(s) {
+  return String(s ?? '')
+    .replace(/[\s\u3000]+/g, '')
+    .replace(/（/g, '(')
+    .replace(/）/g, ')')
+    .replace(/：/g, ':')
+    .replace(/[|｜]/g, '|')
+    .toLowerCase()
+}
+
+/**
+ * 关键值归一化（料号 / 型号 / 单号）。
+ * 单元格里常带尾随空格、全角数字（中文输入法下粘贴料号）、不可见空格；
+ * 精确比较会「明明存在却匹配不上」，然后把数据追加成一条重复行。1.0.68 起统一归一化。
+ */
+function normKeyValue(v) {
+  return String(v ?? '')
+    .replace(/[\s\u3000\u00a0]+/g, '')
+    .replace(/[\uff10-\uff19]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xfee0)) // 全角数字 → 半角
+    .replace(/[．。]/g, '.')
+}
+
+/**
+ * 合并区域里的「影子单元格」判定。
+ *
+ * ExcelJS 对合并区域的每个格都返回 master 的值，于是 PI 表头（"Description" 横跨 E..I）
+ * 会被读成 5 个同名表头；按列名回填时 ensureCol 取到第一个（E 列），值就写进了错误的列。
+ * 这里把非首格视为空，保证「一个列名只对应一列」。
+ */
+function isMergedShadow(cell) {
+  try {
+    return !!(cell && cell.isMerged && cell.master && cell.master.address !== cell.address)
+  } catch { return false }
+}
+
+/** 读一行表头文本（跳过合并影子格） */
+function headerTextsOfRow(ws, rowNumber, maxCol) {
+  const row = ws.getRow(rowNumber)
+  const out = []
+  for (let c = 1; c <= maxCol; c++) {
+    const cell = row.getCell(c)
+    out.push(isMergedShadow(cell) ? '' : cellValueAsString(cell))
+  }
+  return out
+}
+
+/**
+ * 在 ExcelJS 工作表里定位表头行。
+ * @param ws ExcelJS worksheet
+ * @param keyCol 关键列名（模型给的 key）
+ * @param wantedCols 本次要写入的列名（用于在找不到 key 时判断「哪一行最像表头」）
+ * @returns { row, columns, matched } | null
+ */
+function locateHeaderRowExcel(ws, keyCol, wantedCols) {
+  const scanTo = Math.min(ws.rowCount || 0, HEADER_SCAN_ROWS)
+  const maxCol = Math.max(ws.columnCount || 0, 1)
+  const nk = normHeader(keyCol)
+  const wanted = new Set((wantedCols || []).map(normHeader).filter(Boolean))
+  let best = null
+  for (let r = 1; r <= scanTo; r++) {
+    const row = ws.getRow(r)
+    const texts = headerTextsOfRow(ws, r, maxCol)
+    let filled = 0
+    let overlap = 0
+    for (const t of texts) {
+      const n = normHeader(t)
+      if (n) {
+        filled++
+        if (wanted.has(n)) overlap++
+      }
+    }
+    if (!filled) continue
+    // 命中 key：直接认定这一行是表头（最可靠信号）
+    if (texts.some(t => normHeader(t) === nk)) return { row: r, columns: texts, matched: true }
+    // 没命中：按「与待写列名重合数 → 非空单元格数」打分，留一个最佳候选
+    const score = overlap * 1000 + filled
+    if (!best || score > best.score) best = { row: r, score, columns: texts }
+  }
+  return best ? { row: best.row, columns: best.columns, matched: false } : null
+}
+
+/** 在二维数组表格里定位表头行（.xls 旧格式兜底用，逻辑同上，只是数据源是数组） */
+function locateHeaderRowGrid(grid, keyCol, wantedCols) {
+  const scanTo = Math.min(grid.length, HEADER_SCAN_ROWS)
+  const nk = normHeader(keyCol)
+  const wanted = new Set((wantedCols || []).map(normHeader).filter(Boolean))
+  let best = null
+  for (let r = 0; r < scanTo; r++) {
+    const cells = (grid[r] || []).map(c => String(c ?? ''))
+    if (!cells.some(c => c.trim())) continue
+    if (cells.some(c => normHeader(c) === nk)) return { index: r, columns: cells, matched: true }
+    const overlap = cells.filter(c => wanted.has(normHeader(c))).length
+    const filled = cells.filter(c => c.trim()).length
+    const score = overlap * 1000 + filled
+    if (!best || score > best.score) best = { index: r, score, columns: cells }
+  }
+  return best ? { index: best.index, columns: best.columns, matched: false } : null
+}
+
+/** 拼装 KEY_NOT_FOUND 的结构化提示（行号 + 真实列名 + 怎么改），两个模式的报错共用 */
+function keyNotFoundError(keyCol, sheetName, headerRow, columns) {
+  const cols = (columns || []).map(c => String(c ?? '').trim()).filter(Boolean)
+  const preview = cols.slice(0, 40).join(' | ')
+  const err = new CommandError(
+    `关键列「${keyCol}」在原表中不存在（已自动扫描前 ${HEADER_SCAN_ROWS} 行，最像表头的是第 ${headerRow} 行：${preview || '(空)'}）`,
+    'KEY_NOT_FOUND'
+  )
+  err.details = {
+    sheet: sheetName,
+    headerRow,
+    availableColumns: cols,
+    hint: '请从 availableColumns 里挑真实列名作为 key（不要换个名字反复盲试）；列名匹配忽略空格/全角/大小写差异。'
+  }
+  return err
 }
 
 // ── 原地按关键列回填 / 追加列：旧实现（SheetJS，不保留样式，仅作为 .xls 兜底） ──
@@ -1040,7 +1261,7 @@ function updateSpreadsheetLegacy(target, content, opts) {
   const { root, rest } = pickRoot(target, opts.roots)
   const abs = resolveSafe(root, rest, { mustExist: true }) // 必须已存在
   let spec
-  try { spec = JSON.parse(String(content)) } catch {
+  try { spec = parseJsonLoose(content) } catch {
     throw new CommandError('update 模式 content 必须是 JSON：{ key, rows:[{关键列:值, 列名:值,...}] }', 'BAD_JSON')
   }
   if (!spec || !Array.isArray(spec.rows)) {
@@ -1055,19 +1276,43 @@ function updateSpreadsheetLegacy(target, content, opts) {
   const ws = wb.Sheets[sheetName]
   const grid = ws['!ref'] ? XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' }) : []
   if (!grid.length) grid.push([])
-  const header = grid[0].map(h => String(h))
-  const keyIdx = header.indexOf(String(keyCol))
-  if (keyIdx < 0) throw new CommandError(`关键列「${keyCol}」在原表中不存在`, 'KEY_NOT_FOUND')
+  // 表头行不一定在第 1 行（PI / 报价单上方常有抬头），先定位（1.0.68）
+  const located = locateHeaderRowGrid(grid, keyCol, Object.keys((spec.rows[0] || {})))
+  if (!located) throw new CommandError(`工作表「${sheetName}」前 ${HEADER_SCAN_ROWS} 行全是空的，找不到表头`, 'HEADER_NOT_FOUND')
+  const headerRow = located.index
+  const header = located.columns.map(h => String(h))
+  const keyIdx = header.findIndex(h => normHeader(h) === normHeader(keyCol))
+  if (keyIdx < 0) throw keyNotFoundError(keyCol, sheetName, headerRow + 1, header)
 
   let updated = 0
   const appended = []
   const newCols = []
 
+  // 起始列（1.0.68）：与 xlsx 路径同一语义，从 startColumn 起找第一个空列落位
+  const startIdx = spec.startColumn ? colLetterToIndex(spec.startColumn) : -1
+  let placedStart = -1
   const ensureCol = (k) => {
-    let ci = header.indexOf(String(k))
+    // 列名匹配同样走归一化：模型写「Unit Cost (US$)」而表头是「Unit Cost」+ 下一行「(US$)」时
+    // 不该被当成新列而追加到最右侧
+    let ci = header.findIndex(h => normHeader(h) === normHeader(k))
     if (ci < 0) {
-      header.push(String(k)); ci = header.length - 1; newCols.push(String(k))
-      grid.forEach(r => { while (r.length < header.length) r.push('') })
+      const write = (c) => {
+        while (header.length <= c) header.push('')
+        header[c] = String(k)
+        newCols.push(String(k))
+        grid.forEach(r => { while (r.length <= c) r.push('') })
+        if (placedStart < 0) placedStart = c
+        return c
+      }
+      if (startIdx >= 0) {
+        for (let c = startIdx; c < Math.max(header.length, startIdx + 1); c++) {
+          if (String(header[c] ?? '').trim()) continue
+          const hasData = grid.some((r, i) => i > headerRow && String((r || [])[c] ?? '').trim())
+          if (hasData) continue
+          return write(c)
+        }
+      }
+      return write(header.length)
     }
     return ci
   }
@@ -1077,8 +1322,8 @@ function updateSpreadsheetLegacy(target, content, opts) {
     const kv = String(row[keyCol] ?? '')
     if (!kv) continue
     let hit = -1
-    for (let i = 1; i < grid.length; i++) {
-      if (String(grid[i][keyIdx] ?? '') === kv) { hit = i; break }
+    for (let i = headerRow + 1; i < grid.length; i++) {
+      if (normKeyValue(grid[i][keyIdx] ?? '') === normKeyValue(kv)) { hit = i; break }
     }
     const cols = {}
     for (const k of Object.keys(row)) {
@@ -1096,11 +1341,12 @@ function updateSpreadsheetLegacy(target, content, opts) {
       appended.push(kv)
     }
   }
-  grid[0] = header
+  grid[headerRow] = header
   wb.Sheets[sheetName] = XLSX.utils.aoa_to_sheet(grid)
+  const backup = backupFile(abs) // 回填会重写整本工作簿（旧格式 .xls 不保样式），先备份
   XLSX.writeFile(wb, abs, { bookType })
   const after = fs.statSync(abs)
-  return {
+  const out = {
     ok: true,
     command: 'write',
     mode: 'update',
@@ -1108,6 +1354,7 @@ function updateSpreadsheetLegacy(target, content, opts) {
     relative: displayRel(aliasOf(opts.roots, root), root, abs),
     sheet: sheetName,
     key: String(keyCol),
+    headerRow: headerRow + 1,
     updated,
     appended: appended.length,
     appendedKeys: appended,
@@ -1115,6 +1362,12 @@ function updateSpreadsheetLegacy(target, content, opts) {
     format: bookType,
     size: after.size
   }
+  if (spec.startColumn !== undefined) {
+    out.startColumnRequested = String(spec.startColumn)
+    out.startColumn = placedStart >= 0 ? indexToColLetter(placedStart) : ''
+  }
+  if (backup) out.backup = backup
+  return out
 }
 
 // ── 原地按关键列回填 / 追加列（xlsx，保留原样式） ──
@@ -1123,7 +1376,7 @@ async function updateSpreadsheetXlsx(target, content, opts) {
   const { root, rest } = pickRoot(target, opts.roots)
   const abs = resolveSafe(root, rest, { mustExist: true }) // 必须已存在
   let spec
-  try { spec = JSON.parse(String(content)) } catch {
+  try { spec = parseJsonLoose(content) } catch {
     throw new CommandError('update 模式 content 必须是 JSON：{ key, rows:[{关键列:值, 列名:值,...}] }', 'BAD_JSON')
   }
   if (!spec || !Array.isArray(spec.rows)) {
@@ -1142,13 +1395,24 @@ async function updateSpreadsheetXlsx(target, content, opts) {
   }
   const ws = wb.getWorksheet(sheetName)
 
-  // 读取表头（第 1 行）
-  const header = []
-  ws.getRow(1).eachCell({ includeEmpty: true }, (cell, colNumber) => {
-    header[colNumber - 1] = cellValueAsString(cell)
-  })
-  const keyIdx = header.indexOf(String(keyCol))
-  if (keyIdx < 0) throw new CommandError(`关键列「${keyCol}」在原表中不存在`, 'KEY_NOT_FOUND')
+  // 读取表头行 —— 不再假定是第 1 行（1.0.68）。
+  // 显式传 spec.headerRow 时直接用它；否则自动扫描定位（见 locateHeaderRowExcel）。
+  const wantedCols = Object.keys(spec.rows[0] || {})
+  let headerRow = 0
+  let header = []
+  if (spec.headerRow && Number(spec.headerRow) > 0) {
+    headerRow = Number(spec.headerRow)
+    header = headerTextsOfRow(ws, headerRow, Math.max(ws.columnCount || 0, 1))
+  } else {
+    const located = locateHeaderRowExcel(ws, keyCol, wantedCols)
+    if (!located) {
+      throw new CommandError(`工作表「${sheetName}」前 ${HEADER_SCAN_ROWS} 行全是空的，找不到表头`, 'HEADER_NOT_FOUND')
+    }
+    headerRow = located.row
+    header = located.columns
+  }
+  const keyIdx = header.findIndex(h => normHeader(h) === normHeader(keyCol))
+  if (keyIdx < 0) throw keyNotFoundError(keyCol, sheetName, headerRow, header)
 
   let updated = 0
   const appended = []
@@ -1156,24 +1420,54 @@ async function updateSpreadsheetXlsx(target, content, opts) {
   const fillWarnings = []
   let rowFillAutoPromoted = false // 是否因模型未用 __rowFill 而自动扩展为整行填充
 
+  const lastRow = ws.rowCount // 含表头
+  // 起始列（1.0.68）：用户说「写到 O 列及之后」时由模型传 startColumn: "O"。
+  // 直接新建列追加到最右会把用户的列位诉求当耳旁风（O 列往往已被 SUB-TOTAL / 备注占用），
+  // 所以这里从 startColumn 开始找「表头为空且该列无数据」的第一列落位，
+  // 并在结果里回传实际起始列（startColumn）与请求列（startColumnRequested），模型可如实解释。
+  const startIdx = spec.startColumn ? colLetterToIndex(spec.startColumn) : -1
+  let placedStart = -1
+  const colHasData = (c) => {
+    for (let r = headerRow + 1; r <= lastRow; r++) {
+      const v = ws.getRow(r).getCell(c + 1).value
+      if (v !== null && v !== undefined && v !== '' && String(v).trim() !== '') return true
+    }
+    return false
+  }
+
   const ensureCol = (k) => {
-    let ci = header.indexOf(String(k))
+    // 归一化匹配列名：模型常把两行表头合并成一个名字（如 "Unit Cost (US$)"），
+    // 而原表是「Unit Cost」+ 下行「(US$)」；精确匹配会误判成新列并追加到最右侧。
+    let ci = header.findIndex(h => normHeader(h) === normHeader(k))
     if (ci < 0) {
-      header.push(String(k)); ci = header.length - 1; newColumns.push(String(k))
-      // 在最右列补上表头名
-      ws.getRow(1).getCell(ci + 1).value = String(k)
+      const write = (c) => {
+        while (header.length <= c) header.push('')
+        header[c] = String(k)
+        newColumns.push(String(k))
+        // 表头名写在**真实表头行**，不是第 1 行
+        ws.getRow(headerRow).getCell(c + 1).value = String(k)
+        if (placedStart < 0) placedStart = c
+        return c
+      }
+      if (startIdx >= 0) {
+        for (let c = startIdx; c < Math.max(header.length, startIdx + 1); c++) {
+          if (String(header[c] ?? '').trim()) continue // 该列表头已被占用（如 SUB-TOTAL）
+          if (colHasData(c)) continue                // 表头空但下面有数据，不能覆盖
+          return write(c)
+        }
+      }
+      return write(header.length)
     }
     return ci
   }
 
-  const lastRow = ws.rowCount // 含表头
   for (const row of spec.rows) {
     if (!row || typeof row !== 'object') continue
     const kv = String(row[keyCol] ?? '')
     if (!kv) continue
     let hitRow = null
-    for (let r = 2; r <= lastRow; r++) {
-      if (String(cellValueAsString(ws.getRow(r).getCell(keyIdx + 1))) === kv) { hitRow = ws.getRow(r); break }
+    for (let r = headerRow + 1; r <= lastRow; r++) {
+      if (normKeyValue(cellValueAsString(ws.getRow(r).getCell(keyIdx + 1))) === normKeyValue(kv)) { hitRow = ws.getRow(r); break }
     }
     const cols = {}
     let rowFill = null
@@ -1233,7 +1527,8 @@ async function updateSpreadsheetXlsx(target, content, opts) {
       appended.push(kv)
     }
   }
-  // 原地写回，保留原样式
+  // 原地写回，保留原样式；写盘前留备份（写盘途中被 kill 会留下损坏的 xlsx）
+  const backup = backupFile(abs)
   await wb.xlsx.writeFile(abs)
   const after = fs.statSync(abs)
   const out = {
@@ -1244,13 +1539,22 @@ async function updateSpreadsheetXlsx(target, content, opts) {
     relative: displayRel(aliasOf(opts.roots, root), root, abs),
     sheet: sheetName,
     key: String(keyCol),
+    headerRow,
     updated,
     appended: appended.length,
     appendedKeys: appended,
     newColumns: newColumns,
+    columns: header.map(h => String(h ?? '').trim()).filter(Boolean),
     format: path.extname(abs).toLowerCase() === '.xls' ? 'xls' : 'xlsx',
     size: after.size
   }
+  // 起始列对齐结果：新列实际落在哪一列（用户说「写到 O 列」而 O 列已被占用时，
+  // 这里会明确回报跳到 P 列，模型据此如实告知用户，而不是含糊地说「已填好」）
+  if (spec.startColumn !== undefined) {
+    out.startColumnRequested = String(spec.startColumn)
+    out.startColumn = placedStart >= 0 ? indexToColLetter(placedStart) : ''
+  }
+  if (backup) out.backup = backup
   if (fillWarnings.length) {
     out.unsupportedFills = fillWarnings
     out.supportedFills = Object.keys(FILL_PALETTE)
@@ -1288,15 +1592,60 @@ function cmdWrite(positional, flags, roots) {
       'UNSUPPORTED_FLAG'
     )
   }
-  // 内容来源：优先 --content，其次路径后的位置参数（write file.txt "内容"）
-  let content = flags.content
-  if (content === undefined) content = positional.slice(1).join(' ')
-  if (content === undefined) throw new CommandError('缺少写入内容（--content 或路径后位置参数）', 'MISSING_ARG')
+  // 内容来源（优先级）：--content-file（推荐）→ --content → 路径后的位置参数。
+  //
+  // 1.0.67 新增 --content-file：调用方（toolRegistry）把正文写进临时文件再传路径。
+  // 之前正文直接拼在命令行里有两个致命问题：
+  //   ① Windows 命令行上限约 32K 字符，长正文会被截断；
+  //   ② 正文以 `--` 开头时（md 的 `---` frontmatter 最典型）会被本文件的参数解析
+  //      当成 flag，`--content` 拿到 true，于是把原文件覆盖成字面量 "true"。
+  let content
+  if (typeof flags['content-file'] === 'string') {
+    try {
+      content = fs.readFileSync(flags['content-file'], 'utf8')
+    } catch (e) {
+      throw new CommandError(`读取 --content-file 失败：${e.message}`, 'BAD_CONTENT_FILE')
+    }
+  } else if (flags.content !== undefined) {
+    // --content 后面没跟值（或被当成 flag 吞掉）时拿到的是布尔 true：宁可报错也不能把 "true" 写进文件
+    if (typeof flags.content !== 'string') {
+      throw new CommandError('--content 缺少内容（或内容以 -- 开头被误解析）；请改用 --content-file <文件>', 'MISSING_ARG')
+    }
+    content = flags.content
+  } else {
+    content = positional.slice(1).join(' ')
+  }
+  if (content === undefined) {
+    throw new CommandError('缺少写入内容（--content / --content-file / 路径后位置参数）', 'MISSING_ARG')
+  }
+  // 空正文 + 覆盖已有文件 = 变相清空目标文件，几乎都是调用方把正文弄丢了（参数被吞 / 转义出错）。
+  // 这种情况直接拒绝：一次误判就会让用户的文件变成空文件。
+  if (content === '' && !flags.append) {
+    try {
+      const { root: er, rest: es } = pickRoot(target, roots)
+      if (fs.existsSync(resolveSafe(er, es))) {
+        throw new CommandError('写入内容为空，已拒绝覆盖已有文件；确实要清空请显式删除该文件后再写入', 'EMPTY_CONTENT')
+      }
+    } catch (e) {
+      if (e instanceof CommandError) throw e // 路径非法：交给下面正式流程报错
+    }
+  }
 
   const doUpdate = isSheet && !!flags.update
-  // 还原模型常用的字面转义（update 模式给的是 JSON，不做转义以免破坏）
+  const fromContentFile = typeof flags['content-file'] === 'string'
+  // 还原模型常用的字面转义（update 模式给的是 JSON，不做转义以免破坏）。
+  //
+  // 1.0.67 收紧：这条 unescape 对**代码文件是有损的** —— 写 .js/.py/.ts 时正文里的
+  // `split('\n')`、正则 `/\d/` 会被换成真正的换行/制表符，文件当场就「写坏了」。
+  // 因此：
+  //   · 正文来自 --content-file（正常 JSON 传参，换行本来就是真换行）→ 不再整篇替换；
+  //   · 只在「纯文本类扩展名 + 全文没有任何真换行 + 含字面 \n」时兜底还原（模型二次转义的常见情形）。
   if (!doUpdate) {
-    content = String(content).replace(/\\n/g, '\n').replace(/\\t/g, '\t')
+    if (!fromContentFile) {
+      content = String(content).replace(/\\n/g, '\n').replace(/\\t/g, '\t')
+    } else if (PLAIN_TEXT_ESCAPE_EXTS.has(ext) && !/[\r\n]/.test(content) && /\\[nt]/.test(content)) {
+      content = String(content).replace(/\\n/g, '\n').replace(/\\t/g, '\t')
+    }
   }
   // docx（1.0.46）：content 给 Markdown → 生成真正的 .docx（不再是「挂名 docx 的 HTML」）
   if (ext === '.docx') {
@@ -1339,10 +1688,12 @@ function cmdWrite(positional, flags, roots) {
   }
 
   const buf = Buffer.from(content, 'utf8')
+  // 追加不改原文，直接 append；覆盖则「先备份 + 原子替换」，中途被杀也不会留下半截文件
+  const backup = flags.append ? '' : backupFile(abs)
   if (flags.append) fs.appendFileSync(abs, buf)
-  else fs.writeFileSync(abs, buf)
+  else writeFileAtomic(abs, buf)
   const after = fs.statSync(abs)
-  return {
+  const out = {
     ok: true,
     command: 'write',
     path: abs,
@@ -1351,6 +1702,8 @@ function cmdWrite(positional, flags, roots) {
     append: !!flags.append,
     size: after.size
   }
+  if (backup) out.backup = backup
+  return out
 }
 
 // ── 生成 docx（Markdown → 真 .docx）────────────────────────
@@ -1446,8 +1799,9 @@ async function writeDocx(target, content, opts) {
   if (fs.existsSync(abs) && !opts.force) {
     throw new CommandError(`目标已存在：${target}。覆盖请加 --force（docx 是整体生成，无法像表格那样原地改）。`, 'EXISTS_NO_FORCE')
   }
+  const backup = backupFile(abs) // --force 覆盖会丢掉原文档，先留一份
   fs.writeFileSync(abs, buf)
-  return {
+  const out = {
     ok: true,
     command: 'write',
     path: abs,
@@ -1457,6 +1811,8 @@ async function writeDocx(target, content, opts) {
     format: 'docx',
     hint: '已生成真正的 .docx（Word/WPS 可直接打开）'
   }
+  if (backup) out.backup = backup
+  return out
 }
 
 // ── 保布局翻译 docx（只替换 <w:t> 文本，其余 XML 一字不动）──
@@ -1711,6 +2067,9 @@ main().catch((e) => {
     error: e && e.message ? e.message : String(e),
     code: e && e.code ? e.code : undefined
   }
+  // 结构化 details 平铺进 payload（如 headerRow / availableColumns / sheet），
+  // 上层解析器会原样透传给模型，比只有一句中文错误有用得多。
+  if (e && e.details && typeof e.details === 'object') Object.assign(payload, e.details)
   if (e instanceof SandboxError) {
     payload.code = e.code || 'PATH_OUTSIDE_ROOT'
     printJson(payload)

@@ -1,14 +1,20 @@
 import { runSkill, SKILL_FILE, skillExists } from './skillRuntime'
 import { downloadToDir } from './fileDownload'
-import { matchSkillDocByRelative } from './skillRegistry'
+import { matchSkillDocByRelative, matchSkillDocByPathHint } from './skillRegistry'
 import type { AIExtraRoot } from '@shared/ai-types'
 
 const SCRIPT = 'file_office.js'
 
 /**
- * PATH_NOT_FOUND 兜底（1.0.48）：技能自带的参考文档不在工作区里，而模型常按 SKILL.md 里的
- * **相对路径**去读（`references/xxx.md`）—— 相对路径是按工作区根解析的，必然找不到。
- * 这里在技能目录里找到同名文件的绝对路径，作为 `hint` 一并回给模型，模型改用绝对路径重试即可。
+ * PATH_NOT_FOUND 兜底：技能自带的参考文档读不到时，直接告诉模型该用哪个绝对路径。
+ *
+ * 两种翻车方式（都实测过）：
+ * ① 1.0.48：模型按 SKILL.md 里的**相对路径**读（`references/xxx.md`），相对路径是按
+ *    工作区根解析的，必然找不到；
+ * ② 1.0.69：模型给的是**绝对路径**，但那是旧安装目录 / 别的机器上的路径
+ *    （用户看到的就是「路径不存在：E:\Program Files\…\api_reference.md」，而文档其实在
+ *    当前的 resources\skills 下）。
+ * 这里两条都兜：先按相对路径在技能目录里找同名文件，再按 `skills/<id>/<剩余路径>` 重定位。
  * （系统提示里已经注入了技能目录的绝对路径，这里是第二道保险：模型忽略提示时也能自我纠正。）
  */
 function withSkillDocHint(res: any, target: string): any {
@@ -16,11 +22,11 @@ function withSkillDocHint(res: any, target: string): any {
   const code = String(res.code || '')
   const msg = String(res.error || '')
   if (code !== 'PATH_NOT_FOUND' && !/路径不存在/.test(msg)) return res
-  const hits = matchSkillDocByRelative(target)
+  const hits = [...new Set([...matchSkillDocByRelative(target), ...matchSkillDocByPathHint(target)])]
   if (!hits.length) return res
   return {
     ...res,
-    hint: '技能自带的参考文档不在工作区里，请改用**绝对路径**重试：'
+    hint: '该文档在当前机器的技能目录里，请直接用**下面的绝对路径**重新读取（不要再用原路径重试）：'
       + hits.slice(0, 8).map(h => '`' + h + '`').join('、')
   }
 }
@@ -44,13 +50,14 @@ export const FILE_READ_TOOL_DEFINITION = {
   type: 'function',
   function: {
     name: 'file_read',
-    description: '读取文件。支持：① 文本类（md/txt/csv/tsv/json/log/yml/xml/html/sql 以及 vue/kt/kts/swift/dart/toml/proto 等源码与配置，扩展名不认识时会嗅探内容，无扩展名文件按文本读）；② Office：docx/docm/dotx、xlsx/xlsm/xltx、xls、pptx/pptm/ppsx、doc、ppt（老版 .doc/.ppt 会先判断真实容器 —— 实为 docx/rtf/html 的精确读取，真正的 OLE 二进制则按 UTF-16 尽力抽取并在 note 里说明）；③ OpenDocument 与电子书：odt/ods/odp/epub；④ rtf；⑤ pdf。pdf 与中文文档已自动处理编码。单次最多返回约 200KB，返回里 truncated 为 true 表示被截断，需更多时用 offset/limit 分段读取。路径直接用本机绝对路径（如 C:/Users/张三/文档/报告.xlsx、D:/共享/出货记录.xls），也可用 open_folder 打开目录后返回的「别名/路径」前缀；不传别名时按绝对/相对路径直接访问本机文件。若返回 EBUSY/文件被占用，说明该文件正被其他程序（如 Excel）打开，提示用户关闭后再重试即可。',
+    description: '读取文件。支持：① 文本类（md/txt/csv/tsv/json/log/yml/xml/html/sql 以及 vue/kt/kts/swift/dart/toml/proto 等源码与配置，扩展名不认识时会嗅探内容，无扩展名文件按文本读）；② Office：docx/docm/dotx、xlsx/xlsm/xltx、xls、pptx/pptm/ppsx、doc、ppt（老版 .doc/.ppt 会先判断真实容器 —— 实为 docx/rtf/html 的精确读取，真正的 OLE 二进制则按 UTF-16 尽力抽取并在 note 里说明）；③ OpenDocument 与电子书：odt/ods/odp/epub；④ rtf；⑤ pdf。pdf 与中文文档已自动处理编码。**表格（xlsx/xls）读出来是 Markdown 表格：首行给出列字母（A/B/…/O），首列为 R 开头的 Excel 真实行号，连续空行压成「(连续空行 ×N)」——据此可直接判断「表头在第几行」「O 列是哪一格」，不要自己猜行号**；单元格内的 `|` 已转义为 `\\|`、换行转为 `<br>`。单次最多返回约 200KB，返回里 truncated 为 true 表示被截断，需更多时用 offset/limit 分段读取。路径直接用本机绝对路径（如 C:/Users/张三/文档/报告.xlsx、D:/共享/出货记录.xls），也可用 open_folder 打开目录后返回的「别名/路径」前缀；不传别名时按绝对/相对路径直接访问本机文件。若返回 EBUSY/文件被占用，说明该文件正被其他程序（如 Excel）打开，提示用户关闭后再重试即可。',
     parameters: {
       type: 'object',
       properties: {
         path: {
           type: 'string',
-          description: '文件路径。若用户已给出完整绝对路径（含盘符，如 E:/销售相关/PI/Murat/某文件.xlsx），必须原样完整传入，禁止截断成别名；否则可用 open_folder 返回的「别名/路径」'
+          description: '文件路径。若用户已给出完整绝对路径（含盘符，如 E:/销售相关/PI/Murat/某文件.xlsx），必须原样完整传入，禁止截断成别名；否则可用 open_folder 返回的「别名/路径」。' +
+            '路径请尽量**复制**（系统提示里注入的技能目录、open_folder 返回值），不要手打、也不要从历史对话里抄 —— 手打容易混入全角斜杠/NBSP 等不可见字符，从旧对话里抄则可能指向已变更的旧安装目录，两者都会表现为「路径不存在」'
         },
         offset: {
           type: 'number',
@@ -138,7 +145,7 @@ export const FILE_WRITE_TOOL_DEFINITION = {
   type: 'function',
   function: {
     name: 'file_write',
-    description: '写入文件。文本类（md/txt/csv/json/log/yml 等）直接给文本内容；**.docx 直接给 Markdown 内容，工具会生成真正的 Word 文档**（1.0.46：标题/列表/粗体/表格都在，任意语言可用，Word/WPS 可直接打开，不要再让用户拿 HTML 去 Word 另存为）；电子表格（xlsx / xls）把内容以 CSV/TSV（首行表头）或 JSON（二维数组 / 对象数组）形式给出，工具会生成真正的二进制工作簿（支持 --append 分段追加）。要「把一份中文 docx 翻成别的语言且保持原格式」请改用 translate_docx 工具，不要用本工具重写 docx。回填/修复已有电子表格时设 update=true，content 给 JSON：{ "key": "关键列名", "rows": [ { "关键列": "值", "要填的列": "值", ... } ] }，工具按关键列匹配原表行、把其余列写回（原表没有的列自动追加到最右），原地保存不另存新文件。要在已存在的工作簿里新增一个 Sheet（与 Sheet1 等原表并存、保留原表样式）则传 newsheet：可传具体名称（如 "汇总"）或 true 表示自动命名 Sheet2/Sheet3…；newsheet 与 update 互斥，且目标文件必须已存在。用户要求「新建子表/新工作表/Sheet2」时必须用 newsheet，不要用 update 在原表上追加列。【重要】已存在的表格做任何改动（新增行/列、写回数据、标记颜色、新建子表）都必须用 update=true 或 newsheet 在原工作簿上原地处理，禁止用无 update/newsheet 的 write 重建文件（会丢失原工作表名与样式）。单元格背景色：任意单元格值可写成 { "value": "文本", "fill": "green" }；整行上色加 "__rowFill": "yellow"（用户说「当前行」/「这一行」标色时必须用整行填充，会填满从 A 列到最右列，不要只给单个单元格上色；多路径判断时按「任一命中即绿，全部未命中才黄」统一整行颜色：例如「Murat记录」和「Order summary记录」两列，只要任一列不是「无」/「无记录」（如有具体记录），该行 __rowFill 就必须为 green；只有当两列都是「无」/「无记录」时才为 yellow；禁止把一行拆成 A-D 绿、E-J 黄几段分别上色）。fill 支持 green/yellow/red/blue/gray/orange（及 light 前缀变体）或 #RRGGBB。修改已有文件前必须先读取确认现有内容，不要凭空覆盖。写入前若目标列在原表已有内容（非空白），应先向用户确认是否覆盖，待用户明确确认后再写入；用户明确指定写入某列时，必须严格写到该列，禁止因为原表存在同名的其他列就改写到别处。路径用法同 file_read（可直接绝对路径或「别名/路径」）。',
+    description: '写入文件。文本类（md/txt/csv/json/log/yml 等）直接给文本内容；**.docx 直接给 Markdown 内容，工具会生成真正的 Word 文档**（1.0.46：标题/列表/粗体/表格都在，任意语言可用，Word/WPS 可直接打开，不要再让用户拿 HTML 去 Word 另存为）；电子表格（xlsx / xls）把内容以 CSV/TSV（首行表头）或 JSON（二维数组 / 对象数组）形式给出，工具会生成真正的二进制工作簿（支持 --append 分段追加）。要「把一份中文 docx 翻成别的语言且保持原格式」请改用 translate_docx 工具，不要用本工具重写 docx。回填/修复已有电子表格时设 update=true，content 给 JSON：{ "key": "关键列名", "rows": [ { "关键列": "值", "要填的列": "值", ... } ] }，工具按关键列匹配原表行、把其余列写回（原表没有的列自动追加到最右），原地保存不另存新文件。**表头行不必在第 1 行**：PI/报价单/对账单这类表格上方常有抬头（公司名、PI No、客户地址），工具会自动扫描前 50 行定位真正含关键列的那一行（也可显式传 "headerRow": 13 指定）；列名比对忽略空格、全角括号、大小写，关键值比对忽略尾随空格与全角数字。**若返回 code=KEY_NOT_FOUND，说明关键列名不对 —— 此时不要再换一个名字重试，直接读返回里的 availableColumns（该表头行的真实列名）和 headerRow，从中挑正确的列名重新调用一次即可**；返回的 headerRow/columns 也会告诉你实际写到了哪一行、哪些列。要在已存在的工作簿里新增一个 Sheet（与 Sheet1 等原表并存、保留原表样式）则传 newsheet：可传具体名称（如 "汇总"）或 true 表示自动命名 Sheet2/Sheet3…；newsheet 与 update 互斥，且目标文件必须已存在。用户要求「新建子表/新工作表/Sheet2」时必须用 newsheet，不要用 update 在原表上追加列。【重要】已存在的表格做任何改动（新增行/列、写回数据、标记颜色、新建子表）都必须用 update=true 或 newsheet 在原工作簿上原地处理，禁止用无 update/newsheet 的 write 重建文件（会丢失原工作表名与样式）。单元格背景色：任意单元格值可写成 { "value": "文本", "fill": "green" }；整行上色加 "__rowFill": "yellow"（用户说「当前行」/「这一行」标色时必须用整行填充，会填满从 A 列到最右列，不要只给单个单元格上色；多路径判断时按「任一命中即绿，全部未命中才黄」统一整行颜色：例如「Murat记录」和「Order summary记录」两列，只要任一列不是「无」/「无记录」（如有具体记录），该行 __rowFill 就必须为 green；只有当两列都是「无」/「无记录」时才为 yellow；禁止把一行拆成 A-D 绿、E-J 黄几段分别上色）。fill 支持 green/yellow/red/blue/gray/orange（及 light 前缀变体）或 #RRGGBB。修改已有文件前必须先读取确认现有内容，不要凭空覆盖。写入前若目标列在原表已有内容（非空白），应先向用户确认是否覆盖，待用户明确确认后再写入；用户明确指定写入某列时，必须严格写到该列，禁止因为原表存在同名的其他列就改写到别处。路径用法同 file_read（可直接绝对路径或「别名/路径」）。',
     parameters: {
       type: 'object',
       properties: {
@@ -148,7 +155,7 @@ export const FILE_WRITE_TOOL_DEFINITION = {
         },
         content: {
           type: 'string',
-          description: '要写入的文本，\\n 表示换行；update=true 时改为 JSON：{ key, rows }'
+          description: '要写入的文本（换行就用真实换行，不需要写成 \\n）；update=true 时改为 JSON：{ "key": "关键列名", "rows": [ {...} ] }，可在顶层附加 "headerRow"/"startColumn"，但优先用独立参数'
         },
         append: {
           type: 'boolean',
@@ -165,6 +172,19 @@ export const FILE_WRITE_TOOL_DEFINITION = {
         force: {
           type: 'boolean',
           description: '仅对 docx 生效（1.0.46）：目标已存在时允许覆盖。docx 是整体生成的，无法像表格那样原地改。'
+        },
+        startColumn: {
+          type: 'string',
+          description: '仅 update 生效（1.0.68）：新列从哪一列开始排，传列字母如 "O"（也接受 "O:O"、"15"）。' +
+            '用户说「填到 O 列及之后」时必须传，否则新列会被追加到整张表最右侧。' +
+            '若该列已被别的表头（如 SUB-TOTAL）或数据占用，工具会自动右移到下一个空列，' +
+            '并在返回里用 startColumn 告知实际落位（与 startColumnRequested 对比即可）。'
+        },
+        headerRow: {
+          type: 'number',
+          description: '仅 update 生效（1.0.68）：显式指定表头在第几行（1-based）。' +
+            '默认会自动扫描前 50 行定位真正含关键列的那一行，通常不用传；' +
+            '只有自动定位不准（如上方抬头里也出现了同名列）时才用。'
         }
       },
       required: ['path', 'content']

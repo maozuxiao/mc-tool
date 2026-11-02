@@ -54,6 +54,7 @@ export const MaterialTable = memo(function MaterialTable() {
   const descState = useStore(s => s.descTrans.mat)
   const translateDescs = useStore(s => s.translateDescs)
   const toggleDescVisible = useStore(s => s.toggleDescVisible)
+  const clearDescError = useStore(s => s.clearDescError)
   // 行展开状态持久化到 store：切换 tab 后仍能保留展开行与按钮点击事件
   const expandedKeys = useStore(s => s.matExpandedKeys)
   const toggleExpand = useStore(s => s.toggleMatExpanded)
@@ -118,6 +119,18 @@ export const MaterialTable = memo(function MaterialTable() {
           {t('countMat', { f: matFiltered.length, s: matData.length, h: useStore.getState().dedup ? t('countMatDedup') : '' })}
         </span>
         <div className="count-actions">
+          {/* 翻译失败 / 超时常驻提示（1.0.67）：失败原来只弹一次原生对话框，超时更是永远卡在
+              「翻译中」上，用户观感就是「没有任何提示」；现在把原因留在按钮左侧的空白处，
+              点一下可关闭，下一次发起翻译会自动清掉。 */}
+          {descState.lastError && (
+            <span
+              className="mq-translate-hint"
+              title={`${descState.lastError}（${t('translateHintDismiss')}）`}
+              onClick={() => clearDescError('mat')}
+            >
+              {descState.lastError}
+            </span>
+          )}
           {/* 翻译物料描述（1.0.54）：调用 AI 助手里配置的供应商把中文描述译成英文。
               loading 用库 Button 的甜甜圈动画，文案显示「翻译中 {i}/{n}」。
               loading 期间按钮仍可点击（.mq-translate-btn 覆盖了库的 pointer-events:none，

@@ -31,10 +31,16 @@ export interface DescTransState {
   cancelRequested: boolean
   /** 本次翻译任务 id：取消时凭它让主进程中断在途的那一批 HTTP 请求 */
   taskId: string
+  /**
+   * 上一次翻译失败/超时的提示文案（1.0.67）。
+   * 之前失败只弹一次原生对话框，用户点掉或对话框被主窗口挡住后就再没有任何痕迹；
+   * 超时更是直接卡在「翻译中」上。现在把文案留在工具栏空白处常驻，直到下一次点击翻译才清掉。
+   */
+  lastError: string
 }
 
 function emptyDescTrans(): DescTransState {
-  return { map: {}, visible: true, translating: false, progress: null, cancelRequested: false, taskId: '' }
+  return { map: {}, visible: true, translating: false, progress: null, cancelRequested: false, taskId: '', lastError: '' }
 }
 
 interface State {
@@ -177,6 +183,8 @@ interface State {
   translateDescs: (kind: DescTransKind) => Promise<void>
   /** 「显示原文 / 显示译文」切换（导出 CSV 跟随显隐） */
   toggleDescVisible: (kind: DescTransKind) => void
+  /** 关闭工具栏上常驻的翻译失败提示（1.0.67） */
+  clearDescError: (kind: DescTransKind) => void
 
   clearLogin: () => void
   checkUpdate: () => Promise<void>
@@ -616,12 +624,14 @@ export const useStore = create<State>((set, get) => ({
       modelId = prefs.lastModelId || target?.defaultModel || undefined
       // 没配 Key（且不是本地 Ollama）时不发请求：直接引导去 AI 助手配置
       if (providerId && !target?.hasApiKey && providerId !== 'ollama') {
+        patchKind({ lastError: s.t('translateNeedAi') })
         void window.mcApi.showMessage({ type: 'warning', message: s.t('translateNeedAi'), lang: s.lang })
         return
       }
     } catch { /* 拿不到供应商列表：providerId 为空，主进程会给出明确报错 */ }
     const taskId = `tr-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
-    patchKind({ translating: true, taskId, progress: { done: 0, total: todo.length }, cancelRequested: false })
+    // 新一轮开始就清掉上一次的失败提示，避免旧提示和新进度同时出现
+    patchKind({ translating: true, taskId, progress: { done: 0, total: todo.length }, cancelRequested: false, lastError: '' })
     set({ error: '' })
     const BATCH = 15
     const merged = { ...st.map }
@@ -648,7 +658,15 @@ export const useStore = create<State>((set, get) => ({
         patchKind({ map: { ...merged }, progress: { done: doneCount, total: todo.length } })
       }
     } catch (e: any) {
-      void window.mcApi.showMessage({ type: 'error', message: s.t('translateFail', { m: e?.message || String(e) }), lang: s.lang })
+      // 失败/超时：除了原生对话框，还写进 lastError 常驻在工具栏按钮旁
+      // （对话框容易点掉、或被主窗口挡住，用户观感就是「什么都没提示」）
+      const why = e?.message || String(e)
+      patchKind({
+        lastError: doneCount > 0
+          ? s.t('translateFailAt', { m: why, d: doneCount, n: todo.length })
+          : s.t('translateFail', { m: why })
+      })
+      void window.mcApi.showMessage({ type: 'error', message: s.t('translateFail', { m: why }), lang: s.lang })
     } finally {
       // 收尾：清 translating / progress / cancelRequested / taskId；正常完成则切回「显示译文」，
       // 让用户直接看到成果；取消时维持当前显隐，不强行切换
@@ -669,6 +687,11 @@ export const useStore = create<State>((set, get) => ({
   toggleDescVisible: (kind) => set(s => ({
     descTrans: { ...s.descTrans, [kind]: { ...s.descTrans[kind], visible: !s.descTrans[kind].visible } }
   })),
+
+  clearDescError: (kind) => set(s => ({
+    descTrans: { ...s.descTrans, [kind]: { ...s.descTrans[kind], lastError: '' } }
+  })),
+
   exportBomCSV: async () => {
     flushPendingFilter() // 同 exportMatCSV：导出前先把防抖中的过滤跑完
     const s = get()

@@ -22,16 +22,42 @@ async function readXlsx(abs) {
   const blocks = []
   for (const name of wb.SheetNames) {
     const ws = wb.Sheets[name]
-    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, defval: '' })
+    // 1.0.68：blankrows 改为 true 并输出**真实 Excel 行号**。
+    // 原先 blankrows:false 会把空行整行丢掉，于是「输出里的第 3 行」实际可能是第 13 行，
+    // 模型据此算 O 列 / 表头行必然算错（PI 类表格上方有 12 行抬头就是典型）。
+    // 连续空行压成一行「（空行）×N」，既保留行号的准确性，也不让长表被空行撑爆。
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: true, defval: '' })
     const maxCols = rows.reduce((m, r) => Math.max(m, r.length), 0)
+    const firstRow = ws['!ref'] ? XLSX.utils.decode_range(ws['!ref']).s.r + 1 : 1
+    // 单元格文本里的 `|` 与换行必须转义，否则会把 Markdown 表格的列边界冲掉：
+    // PI / BOM 的描述列几乎全是 "DS100|V1.0|One|..." 这种竖线分隔，不转义时模型
+    // 数不出真实列数，也就无从判断「O 列」到底是哪一格。
     const cells = rows.map(r => r.map((c) => {
       if (c == null) return ''
       if (c instanceof Date) return c.toISOString().slice(0, 10)
-      if (typeof c === 'object') return JSON.stringify(c)
-      return String(c)
+      if (typeof c === 'object') return JSON.stringify(c).replace(/\|/g, '\\|').replace(/\r?\n/g, '<br>')
+      return String(c).replace(/\|/g, '\\|').replace(/\r?\n/g, '<br>')
     }))
-    const md = cells.map(r => '| ' + r.join(' | ') + ' |').join('\n')
-    blocks.push(`# 工作表：${name}（${cells.length} 行 × ${maxCols} 列）\n` + md)
+    const lines = []
+    if (maxCols > 0) {
+      const letters = []
+      for (let c = 0; c < maxCols; c++) letters.push(XLSX.utils.encode_col(c))
+      lines.push('| 行 | ' + letters.join(' | ') + ' |')
+    }
+    let blankRun = 0
+    const flushBlank = () => {
+      if (!blankRun) return
+      lines.push(`| … | (连续空行 ×${blankRun}) |`)
+      blankRun = 0
+    }
+    for (let i = 0; i < cells.length; i++) {
+      const r = cells[i]
+      if (!r.some(c => String(c).trim())) { blankRun++; continue }
+      flushBlank()
+      lines.push(`| R${firstRow + i} | ` + r.join(' | ') + ' |')
+    }
+    flushBlank()
+    blocks.push(`# 工作表：${name}（${cells.length} 行 × ${maxCols} 列；行号 R* 为 Excel 真实行号，列字母见首行）\n` + lines.join('\n'))
   }
   return { text: blocks.join('\n\n'), format: 'xlsx' }
 }
