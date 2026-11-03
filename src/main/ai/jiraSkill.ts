@@ -1078,14 +1078,18 @@ export const JIRA_CREATE_TICKET_TOOL_DEFINITION = {
       '并等待用户明确确认；未确认不得调用。**' +
       'serviceDeskId / requestTypeId 必须来自 jira_service_desks / jira_request_types；' +
       '不确定必填项时先调 jira_request_type_fields。描述用 Markdown 写，服务端会转成 Jira Wiki；' +
-      '长文档可传 descriptionFile（本机文本文件绝对路径）避免占用上下文。',
+      '长文档可传 descriptionFile（本机文本文件绝对路径）避免占用上下文。' +
+      '**描述内容按用户原话提交：用户给的成稿逐字照抄，不改写、不润色、不翻译、不补寒暄；只有用户明确要求时才改写或翻译。**',
     parameters: {
       type: 'object',
       properties: {
         serviceDeskId: { type: 'string', description: '服务台 id' },
         requestTypeId: { type: 'string', description: 'Request Type id' },
-        summary: { type: 'string', description: '工单标题' },
-        description: { type: 'string', description: '工单描述，Markdown 格式' },
+        summary: { type: 'string', description: '工单标题（可概括，但要含客户/现象/型号）' },
+        description: {
+          type: 'string',
+          description: '工单描述，Markdown 格式。**按用户原话提交，不要翻译、不要润色、不要补寒暄**'
+        },
         descriptionFile: { type: 'string', description: '（可选）本机 Markdown/文本文件绝对路径，作为描述正文；描述为空时才读取' },
         priority: { type: 'string', description: '（可选）优先级，可给名称（High/高）或 id' },
         organization: { type: 'string', description: '（可选）组织名称或 id' },
@@ -1102,7 +1106,8 @@ export const JIRA_CREATE_TICKET_TOOL_DEFINITION = {
         },
         attachments: {
           type: 'array', items: { type: 'string' },
-          description: '（可选）随工单上传的本机文件绝对路径列表'
+          description: '（可选）随工单上传的本机文件绝对路径列表。'
+            + '用户贴进输入框的图片/文件直接用【本条消息附件的本机路径】里的路径，不要向用户索要路径'
         }
       },
       required: ['serviceDeskId', 'requestTypeId', 'summary']
@@ -1118,12 +1123,19 @@ export const JIRA_ADD_COMMENT_TOOL_DEFINITION = {
       '给工单加评论，可同时附带本机文件作为附件（写操作）。**执行前必须先复述评论正文、公开/内部、附件路径并等待用户确认。**' +
       '评论用 Markdown 写，服务端转 Jira Wiki；图片附件会自动用 !文件名! 内嵌到正文，不需要你手写引用语法；' +
       'PDF/日志等作为普通附件。要 @人 时正文正常写 @姓名，同时把姓名放进 mentions，' +
-      '服务端会换成 Jira 认可的提及语法并通知对方（不要自己手写 [~accountid:...]）。',
+      '服务端会换成 Jira 认可的提及语法并通知对方（不要自己手写 [~accountid:...]）。' +
+      '**附件路径一律取消息里的【本条消息附件的本机路径】/【上一轮附件的本机路径】提示：用户贴在输入框里的图片已由系统落盘，' +
+      '直接用那个路径，绝对不要再向用户索要「图片的完整路径」；只有两处提示都没有、用户也没贴文件时，才问他文件在哪。**' +
+      '**正文按用户原话提交：用户给的成稿逐字照抄，不改写、不润色、不翻译、不补「您好 / Hello」寒暄、不扩写成邮件体；' +
+      '只有用户明确说了「帮我润色 / 翻译成英文」才改，改了什么必须在确认话术里单列说明。**',
     parameters: {
       type: 'object',
       properties: {
         issueKey: ISSUE_KEY_SCHEMA,
-        comment: { type: 'string', description: '评论正文，Markdown' },
+        comment: {
+          type: 'string',
+          description: '评论正文，Markdown。**内容按用户原话提交，不要翻译、不要润色、不要补寒暄**'
+        },
         isPublic: { type: 'boolean', description: '是否对客户公开，默认 true' },
         mentions: {
           type: 'array', items: { type: 'string' },
@@ -1131,7 +1143,8 @@ export const JIRA_ADD_COMMENT_TOOL_DEFINITION = {
         },
         attachments: {
           type: 'array', items: { type: 'string' },
-          description: '（可选）随评论上传的本机文件绝对路径（图片会内嵌进正文）'
+          description: '（可选）随评论上传的本机文件绝对路径（图片会内嵌进正文）。'
+            + '用户贴进输入框的图片直接用【本条消息附件的本机路径】里给出的路径，不要向用户索要路径'
         }
       },
       required: ['issueKey', 'comment']

@@ -9,6 +9,8 @@ import { opencodeSessionHeaders } from './providerApi'
 import { mcSkillSystemPrompt } from './mcSkill'
 import { skillsPromptBlock } from './skillRegistry'
 import { dispatchTool, toolsForMode, type OpenFolderResult } from './toolRegistry'
+import { currentAttachNote, previousAttachNote, type SavedAttachment } from './attachPaths'
+import { persistAttachments, recallAttachments, rememberAttachments } from './attachStore'
 import { cachedToolNames as mcpCachedToolNames, isMcpTool, prepareForSkills as mcpPrepare } from './mcpClient'
 import { isInside, dirBlockReason, makeAlias, systemRoots } from './rootGuard'
 import {
@@ -274,10 +276,12 @@ function buildUserContent(input: {
   content: string
   attachments?: AIAttachment[]
   inlineMarks?: AIInlineMark[]
+  /** 上一轮附件的路径提示（只有用户这轮是「确认」类短句时才由调用方拼好传进来） */
+  prevAttachNote?: string
 }): any {
   const atts = (input.attachments || []).filter(Boolean)
   const text = inlineMarksText(input.content, input.inlineMarks)
-  if (!atts.length) return text
+  if (!atts.length && !input.prevAttachNote) return text
   const parts: any[] = [{ type: 'text', text }]
 
   const texts = atts.filter(a => a.kind === 'text' && a.text)
@@ -288,13 +292,13 @@ function buildUserContent(input: {
     parts.push({ type: 'text', text: `\n\n${block}` })
   }
 
-  const files = atts.filter(a => a.kind === 'file' && a.path)
-  if (files.length) {
-    parts.push({
-      type: 'text',
-      text: `\n\n【随消息提供的本机文件（请用 file_read 读取后再回答）】\n${files.map(f => `- ${f.name} → ${f.path}`).join('\n')}`
-    })
-  }
+  // 附件本机路径（1.0.71）：粘贴进来的图片原本只有 dataUrl，主进程落盘后把 path 写回了附件对象。
+  // 这里必须点名「直接传路径、不要再向用户索要」——否则模型会回头问「请提供图片的完整路径」。
+  const withPath: SavedAttachment[] = atts
+    .filter(a => a.path)
+    .map(a => ({ name: a.name, path: String(a.path) }))
+  if (withPath.length) parts.push({ type: 'text', text: '\n\n' + currentAttachNote(withPath) })
+  if (input.prevAttachNote) parts.push({ type: 'text', text: '\n\n' + input.prevAttachNote })
 
   for (const img of atts.filter(a => a.kind === 'image' && a.dataUrl)) {
     parts.push({ type: 'image_url', image_url: { url: img.dataUrl } })
@@ -627,6 +631,13 @@ export async function sendMessage(payload: AISendPayload): Promise<void> {
   const existing = getConversation(conversationId)
   // 用 UI 选择的工作区 / 额外目录初始化本会话白名单（运行时 open_folder 可再追加）
   sessionRoots.set(conversationId, mergeRoots(sessionRoots.get(conversationId) || [], payload))
+  // 1.0.71：粘贴的图片只有 dataUrl、没有本机路径，工单 / 评论的 attachments 就无从填起。
+  // 先把附件落盘并把 path 写回附件对象（随历史持久化），再决定要不要回退用上一轮的附件：
+  // 本轮有附件 → 用本轮；本轮没附件但用户只说「确认」→ 复用上一轮（1 小时内）。
+  const prevSaved = recallAttachments(conversationId)
+  const savedNow = persistAttachments(payload.attachments)
+  if (savedNow.length) rememberAttachments(conversationId, savedNow)
+  const prevAttachNote = savedNow.length ? '' : previousAttachNote(prevSaved, payload.content)
   appendMessage({
     conversationId,
     role: 'user',
@@ -656,7 +667,7 @@ export async function sendMessage(payload: AISendPayload): Promise<void> {
     if (provider.config.protocol === 'openai-compatible') {
       await streamOpenAICompatible({
         payload, conversationId,
-        messages: [...messages, { role: 'user', content: buildUserContent(payload) }],
+        messages: [...messages, { role: 'user', content: buildUserContent({ ...payload, prevAttachNote }) }],
         assistantMessageId: assistant.id,
         controller
       })

@@ -149,7 +149,11 @@ export interface AIAttachment {
   dataUrl?: string
   /** kind=text：文件文本内容（可能被截断） */
   text?: string
-  /** kind=file：本机绝对路径 */
+  /**
+   * 本机绝对路径。
+   * kind=file 时由渲染层给出；kind=image 时由主进程落盘补齐（1.0.71）——
+   * 粘贴的截图只有 dataUrl，落盘后才能作为工单 / 评论附件传给工具。
+   */
   path?: string
   /** 文本附件是否被截断（UI 提示用） */
   truncated?: boolean
