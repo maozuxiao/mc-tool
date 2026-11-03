@@ -759,6 +759,96 @@
   padding: 0;
 }
 
+/* ── Mermaid 图（1.0.71）────────────────────────────────────────────────
+   由 MermaidBlock 渲染。mermaid 输出的是**自带内联 <style> 的 SVG**，所以这里的
+   CSS 只负责外面那层卡片（边框/圆角/居中/限宽），不要试图改 svg 内部颜色 ——
+   配色由 mermaid 的 theme（default / dark）决定，跟着 <html data-mode> 走。
+
+   两个易踩的点：
+   1) svg 的宽高是 mermaid 按内容算出来的（useMaxWidth 会塞 max-width:100%），
+      但外层 flex 容器仍需 `min-width: 0`，否则超宽流程图会把气泡撑破；
+   2) 图内部横向溢出时必须由容器滚，而不是让整个气泡横向滚动。 */
+.ai-mermaid {
+  position: relative;
+  margin: 10px 0;
+  padding: 12px 12px 8px;
+  border: 1px solid var(--mc-line);
+  border-radius: 10px;
+  background: var(--mc-surface);
+  min-width: 0;
+}
+/* 源码回退态（流式中 / 语法错误）：不要卡片外壳，直接沿用 .ai-bubble pre 的深底代码块 */
+.ai-mermaid--src {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.ai-mermaid__note {
+  padding: 4px 2px 6px;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--mc-ink-soft);
+}
+.ai-mermaid__note.is-error { color: #c2603a; }
+.ai-mermaid__canvas {
+  display: flex;
+  justify-content: center;
+  min-width: 0;
+  overflow-x: auto;
+  cursor: zoom-in;
+}
+.ai-mermaid__svg { max-width: 100%; min-width: 0; }
+.ai-mermaid__svg svg { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+.ai-mermaid__acts {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 6px;
+}
+.ai-mermaid__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  background: transparent;
+  color: var(--mc-ink-soft);
+  font-size: 11.5px;
+  padding: 2px 6px;
+  border-radius: 8px;
+  cursor: pointer;
+  opacity: .8;
+  transition: opacity .12s, background .12s;
+}
+.ai-mermaid__btn:hover { background: var(--mc-surface-2); opacity: 1; }
+
+/* 放大查看：全屏遮罩 + 可滚动的白底画布（portal 到 body，避开气泡的层叠上下文） */
+.ai-mermaid-zoom {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 20px 24px 24px;
+  background: color-mix(in srgb, var(--mc-page) 88%, transparent);
+  backdrop-filter: blur(3px);
+}
+.ai-mermaid-zoom__bar { display: flex; justify-content: flex-end; gap: 8px; }
+.ai-mermaid-zoom__inner {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  border: 1px solid var(--mc-line);
+  border-radius: 14px;
+  background: var(--mc-surface);
+}
+/* 放大态不缩到容器宽度，允许超出后滚动（大图看细节才需要真实尺寸） */
+.ai-mermaid-zoom__inner svg { max-width: none; height: auto; }
+
 /* AI 消息里的链接：下载中时显示禁用态，避免用户重复点击 */
 .ai-bubble a.ai-md-link { text-decoration: underline; cursor: pointer; }
 .ai-bubble a.ai-md-link.busy {

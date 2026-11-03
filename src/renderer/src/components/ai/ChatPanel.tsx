@@ -9,6 +9,7 @@ import { OA_ORIGIN } from '@shared/constants'
 import { useStore } from '../../store'
 import { Button, CodeBlock, Collapse, Icon, Modal, Tooltip } from 'animal-island-ui'
 import ImagePreviewModal from './ImagePreviewModal'
+import MermaidBlock, { MermaidLiveContext } from './MermaidBlock'
 // naive-icons（手绘 naive 风，MIT，1.1.0）：AI 面板里这几枚「操作类」图标改用它 ——
 // 库内置图标是**固定 9 色填充**的手绘风，塞进主题色药丸/小按钮里会显得花。
 // 封装见 components/NaiveIcon.tsx（按需引原始 SVG 资源 + 改色跟随主题，见该文件顶部说明）。
@@ -376,7 +377,7 @@ export function ChatPanel({ disabled }: Props) {
   // 生成态的镜像 ref（供滚动跟随的 effect 读取，理由见该 effect 的注释）
   streamingIdsRef.current = streamingIds
   pendingNewStreamRef.current = pendingNewStream
-  // 运行模式：ask 纯对话 / mc 物料查询 / build 文件读写与命令。
+  // 运行模式：ask 纯对话 / mc 物料查询（1.0.71 起含本地文件读写）/ build 全量文件与命令 + 技能工具。
   //
   // 1.0.51 起**按会话持久化**（此前是纯 useState、从不落盘）。原注释写的是
   // 「刻意不做持久化：Build 是高风险模式，每次启动都回到 mc」—— 但在「按会话恢复」的
@@ -782,7 +783,7 @@ export function ChatPanel({ disabled }: Props) {
             }
             // 恢复该会话上次用的模式（1.0.51）：必须与上面技能恢复**成对存在** ——
           // 此前只恢复技能、不恢复模式，于是「重启后打开历史会话」看到的是「技能勾还在、
-            // 工具栏却显示物料」，而物料模式不下发文件工具，下一轮必然白跑（用户反馈）。
+            // 工具栏却显示物料」，而物料模式下不发技能提供的工具，下一轮必然白跑（用户反馈）。
             // 用 setModeRaw 而非 setMode：这是**读回**而不是用户切换，落盘没有意义。
             const savedMode = data?.conversation?.mode
             if (savedMode === 'ask' || savedMode === 'mc' || savedMode === 'build') {
@@ -2046,6 +2047,9 @@ export function ChatPanel({ disabled }: Props) {
               message={m}
               // 最后一条助手消息还没收到任何内容时，显示「思考中…」而不是一个空气泡
               thinking={streaming && i === messages.length - 1 && m.role === 'assistant'}
+              // 正在增长的这一条要标记出来：Mermaid 代码块在流式期间只显示源码，
+              // 否则每个 delta 都会拿半截语法去渲染，必然报错且白白重排（见 MermaidBlock）
+              streaming={streaming && i === messages.length - 1 && m.role === 'assistant'}
               emptyHint={emptyMsgHints[m.id]}
               onContinue={onContinue}
             />
@@ -2996,7 +3000,21 @@ function fmtDate(ts?: number): string {
   return `${yyyy}/${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
 }
 
-const MessageItem = memo(function MessageItem({ message, thinking, emptyHint, onContinue }: { message: AIMessage; thinking?: boolean; emptyHint?: 'stopped' | 'timeout'; onContinue?: () => void }) {
+/** 取 react-markdown 交给 code 组件的纯文本（children 可能是 string、number 或它们的数组） */
+function plainTextOf(children: any): string {
+  if (Array.isArray(children)) return children.map(plainTextOf).join('')
+  if (typeof children === 'string' || typeof children === 'number') return String(children)
+  return ''
+}
+
+const MessageItem = memo(function MessageItem({ message, thinking, streaming, emptyHint, onContinue }: {
+  message: AIMessage
+  thinking?: boolean
+  /** 本条消息还在流式增长（只有最后一条会为 true）；Mermaid 图据此推迟渲染 */
+  streaming?: boolean
+  emptyHint?: 'stopped' | 'timeout'
+  onContinue?: () => void
+}) {
   const t = useStore(s => s.t)
   const [copied, setCopied] = useState(false)
   const copyTimer = useRef<number | null>(null)
@@ -3013,7 +3031,10 @@ const MessageItem = memo(function MessageItem({ message, thinking, emptyHint, on
     () => (
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
-        rehypePlugins={[rehypeSanitize, rehypeHighlight]}
+        // ignoreMissing：```mermaid 不是 highlight.js 的已注册语言（hljs 没有 mermaid），
+        // 默认行为是「未知语言直接抛错」，整个气泡都会渲染失败。跳过即可，代码原样保留
+        // 给下面的 code 组件去画图。
+        rehypePlugins={[rehypeSanitize, [rehypeHighlight, { ignoreMissing: true }]]}
         components={{
           a: MarkdownLink,
           img: (props: { src?: string; alt?: string }) => (
@@ -3022,7 +3043,22 @@ const MessageItem = memo(function MessageItem({ message, thinking, emptyHint, on
               srcs={images}
               index={Math.max(0, images.indexOf(String(props?.src || '').trim()))}
             />
-          )
+          ),
+          // ```mermaid → 交给 MermaidBlock 渲染成 SVG（其余代码块保持默认的 pre>code）
+          code: (props: any) => {
+            const cls = String(props?.className || '')
+            if (/language-mermaid/.test(cls)) return <MermaidBlock code={plainTextOf(props.children)} />
+            return <code className={props.className}>{props.children}</code>
+          },
+          // MermaidBlock 自己就是块级容器，不能再被 <pre> 包一层（会被 pre 的深底与
+          // overflow-x 框住，还会带出一层多余滚动条）
+          pre: (props: any) => {
+            const kids: any[] = Array.isArray(props?.children) ? props.children : [props?.children]
+            if (kids.some((k: any) => /language-mermaid/.test(String(k?.props?.className || '')))) {
+              return <>{props.children}</>
+            }
+            return <pre>{props.children}</pre>
+          }
         }}
       >
         {message.content}
@@ -3071,7 +3107,12 @@ const MessageItem = memo(function MessageItem({ message, thinking, emptyHint, on
           {message.role === 'assistant'
             ? (
               <>
-                {rendered}
+                {/* 流式标记走 context 而不是塞进 useMemo 依赖：渲染树按 content 记忆化，
+                    若把它写进依赖表，每个 delta 都会重建整棵 markdown 树（正是 memo 想避免的）。
+                    消费 context 的只有 MermaidBlock，更新成本可以忽略。 */}
+                <MermaidLiveContext.Provider value={!!streaming}>
+                  {rendered}
+                </MermaidLiveContext.Provider>
                 {thinking && (
                   <div className="ai-thinking">
                     <span className="ai-thinking-dots"><i /><i /><i /></span>

@@ -239,7 +239,7 @@
 ### 10.1 Realtime Data Subscription (Based onsocket.io)
 
 - **路径**：`http://{HOST}:{PORT}`
-- **方式**：`websocket`
+- **方式**：`WEBSOCKET`
 - **请求参数**：key:[string]verify key；didArray:[]A null terminal array is a full subscription；alarmType:[]Array of alarm type ID
 - **返回字段**：deviceno:terminal ID；state:Online 1, offline 0, alarm 2；carlicence:[int]License plate number；groupName:Organizational structure；gpslat:[string] latitude；gpslng:[string] longitude；speed:[int] speed；direction:[int] directi；dataTime:Report the time；type:[int] Alarm type；content:Alarm content；mileage:[string]mileage；acc:Switch state
 - **原文位置**：`api_full.md` L1376

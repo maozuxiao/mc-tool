@@ -6,6 +6,8 @@ import type { AIAgentMode, AIExtraRoot } from '@shared/ai-types'
 import { MC_QUERY_TOOL_DEFINITION, runMcQuery, type McRunSink } from './mcSkill'
 import {
   FILE_TOOL_DEFINITIONS, fileSkillRead, runFileSkillCommand,
+  FILE_READ_TOOL_DEFINITION, FILE_LIST_TOOL_DEFINITION, FILE_SEARCH_TOOL_DEFINITION,
+  FILE_WRITE_TOOL_DEFINITION,
   FILE_READ_BATCH_TOOL_DEFINITION, FILE_OPEN_FOLDER_TOOL_DEFINITION,
   FILE_DOWNLOAD_TOOL_DEFINITION, FILE_TRANSLATE_DOCX_TOOL_DEFINITION, fileSkillDownload
 } from './fileSkill'
@@ -15,6 +17,7 @@ import {
 } from './wjxtSkill'
 import { cachedToolDefinitions, cachedToolNames, callTool as mcpCallTool, getMcpToolRoute, isMcpTool, setReservedNames } from './mcpClient'
 import { MAIL_TOOL_ENTRIES } from './emailSkill'
+import { JIRA_TOOL_ENTRIES } from './jiraSkill'
 
 export interface OpenFolderResult {
   ok: boolean
@@ -212,7 +215,9 @@ const REGISTRY: Record<string, ToolEntry> = {
     })
   },
   // Outlook 工作邮箱助手（1.0.61）：执行层在主进程，不随包分发脚本/运行时
-  ...MAIL_TOOL_ENTRIES
+  ...MAIL_TOOL_ENTRIES,
+  // Jira/JSM 工单助手（1.0.71）：14 个 jira_* 工具，凭据落 userData/jira-jsm
+  ...JIRA_TOOL_ENTRIES
 }
 
 /**
@@ -226,7 +231,15 @@ setReservedNames(Object.keys(REGISTRY))
 const SKILL_TOOLS: Record<string, string[]> = {
   'wjxt-file-download': ['wjxt_search', 'wjxt_download'],
   // Outlook 工作邮箱助手（1.0.61）：授权 / 配置 / 检索 / 读取 / 写草稿 / 回读草稿
-  'email-auto': ['mail_auth', 'mail_config', 'mail_search', 'mail_read', 'mail_draft_save', 'mail_drafts_list']
+  'email-auto': ['mail_auth', 'mail_config', 'mail_search', 'mail_read', 'mail_draft_save', 'mail_drafts_list'],
+  // Jira/JSM 工单助手（1.0.71）：配置 3 + 只读 8 + 写入 3。
+  // 只在 build 模式且勾选该技能时下发 —— 写操作（建单/评论/流转）不能被物料或对话模式误触。
+  'jira-jsm': [
+    'jira_config', 'jira_panel_status', 'jira_save_panel_curl',
+    'jira_current_user', 'jira_service_desks', 'jira_request_types', 'jira_request_type_fields',
+    'jira_search_issues', 'jira_get_issue', 'jira_request_status', 'jira_panel_rdms',
+    'jira_create_ticket', 'jira_add_comment', 'jira_transition_issue'
+  ]
 }
 
 /**
@@ -252,14 +265,29 @@ function skillToolDefinitions(enabledSkills?: string[]): any[] {
     .filter(Boolean)
 }
 
+/**
+ * 物料模式下发的文件工具（1.0.71）：只读四件套 + 写入，**不含 open_folder / 命令执行**。
+ * 物料模式没有工作区，rootArgs() 不传 --root，脚本侧 resolveSafe('' , target) 走全盘模式
+ * （只拦受保护系统目录），因此绝对路径可直接读写；不给 open_folder 是为了少一步授权弹窗。
+ */
+const MC_MODE_FILE_TOOL_DEFINITIONS = [
+  FILE_READ_TOOL_DEFINITION,
+  FILE_LIST_TOOL_DEFINITION,
+  FILE_SEARCH_TOOL_DEFINITION,
+  FILE_WRITE_TOOL_DEFINITION,
+  FILE_READ_BATCH_TOOL_DEFINITION,
+  FILE_DOWNLOAD_TOOL_DEFINITION
+]
+
 /** 该模式下允许调用的工具名，用于兜底拦截模型臆造的工具调用 */
 export function toolNamesForMode(mode: AIAgentMode, hasWorkspace: boolean, enabledSkills?: string[]): string[] {
   if (mode === 'ask') return []
-  // mc：mc_query + file_download。物料模式下用户常直接说「把 DS100 的规格书下到桌面」——
-  // 只给 mc_query 时模型只能列清单、让用户自己点链接（1.0.54 起放开下载）。
-  // file_download 只往磁盘写文件、不把内容读进上下文，边界由 downloadToDir 的
-  // 「受保护目录」闸门把守；本地读写工具仍不下发。
-  if (mode === 'mc') return ['mc_query', 'file_download']
+  // mc：mc_query + 本地文件读写（1.0.71）。物料模式下用户的真实诉求常是
+  // 「把这个目录下的 Excel 筛一遍」「把 DS100 的规格书下到桌面」——只给 mc_query 时模型
+  // 只能列清单、让用户自己点链接，或回「请切换到 Build 模式」（用户反馈的核心痛点）。
+  // 1.0.54 先放开了 file_download；1.0.71 起再放开只读四件套 + file_write，
+  // 边界仍由「受保护系统目录」闸门把守，且不开放 open_folder 与命令执行。
+  if (mode === 'mc') return [...MC_MODE_FILE_TOOL_DEFINITIONS.map(t => t.function.name), 'mc_query']
   // build：文件工具 + 打开目录 + mc_query 全量下发；未授权目录时文件工具会引导用 open_folder
   void hasWorkspace
   return [...FILE_TOOL_DEFINITIONS.map(t => t.function.name), 'mc_query', ...skillToolNames(enabledSkills)]
@@ -271,7 +299,7 @@ export function toolNamesForMode(mode: AIAgentMode, hasWorkspace: boolean, enabl
  */
 export function toolsForMode(mode: AIAgentMode, hasWorkspace: boolean, enabledSkills?: string[]): any[] {
   if (mode === 'ask') return []
-  if (mode === 'mc') return [MC_QUERY_TOOL_DEFINITION, FILE_DOWNLOAD_TOOL_DEFINITION]
+  if (mode === 'mc') return [...MC_MODE_FILE_TOOL_DEFINITIONS, MC_QUERY_TOOL_DEFINITION]
   // build：文件工具 + 打开目录 + mc_query 全量下发（不再强制先选工作区）+ 已启用技能带来的工具
   void hasWorkspace
   return [...FILE_TOOL_DEFINITIONS, MC_QUERY_TOOL_DEFINITION, ...skillToolDefinitions(enabledSkills)]
@@ -287,7 +315,10 @@ function buildFileSummary(name: string, result: any): string {
     case 'file_read': return `已读取 ${result.relative || result.path}`
     case 'file_list': return `已列出 ${result.count ?? 0} 项`
     case 'file_search': return `找到 ${result.count ?? 0} 个匹配`
-    case 'file_write': return `已写入 ${result.relative || result.path}`
+    case 'file_write':
+      return result?.ok === false
+        ? `失败：${result?.error || '未知错误'}`
+        : `已写入 ${result.relative || result.path}`
     case 'file_download': return `已下载 ${result.relative || result.savedPath || ''}（${result.size ?? 0} 字节）`
     case 'file_read_batch': return `已批量读取 ${result.count ?? 0} 个文件`
     case 'translate_docx':
@@ -315,6 +346,41 @@ function buildFileSummary(name: string, result: any): string {
         : `草稿已写入但结构存疑（${result.paragraphs ?? 0} 段）`
     case 'mail_drafts_list':
       return `草稿箱最近 ${result?.total ?? 0} 封`
+    // ── Jira/JSM 工单助手（1.0.71）───────────────────────
+    case 'jira_config':
+      if (result?.ready) return 'JSM 凭据已配置'
+      return result?.templateCreated ? '已生成配置模板并打开目录' : '凭据未配置完成'
+    case 'jira_panel_status':
+      return result?.configured
+        ? (result?.expired ? '面板凭据已过期' : `面板凭据可用（约 ${Math.round((result?.expiresInSec || 0) / 60)} 分钟）`)
+        : '还没有面板凭据'
+    case 'jira_save_panel_curl':
+      return `面板凭据已保存（约 ${Math.round((result?.expiresInSec || 0) / 60)} 分钟）`
+    case 'jira_current_user':
+      return `当前账号：${result?.displayName || ''}`
+    case 'jira_service_desks':
+      return `找到 ${result?.serviceDesks?.length ?? 0} 个服务台`
+    case 'jira_request_types':
+      return `找到 ${result?.requestTypes?.length ?? 0} 个工单类型`
+    case 'jira_request_type_fields':
+      return `必填 ${result?.requiredFields?.length ?? 0} 项${result?.organizations ? '／含组织字段' : ''}`
+    case 'jira_search_issues':
+      return `找到 ${result?.total ?? 0} 个工单`
+    case 'jira_get_issue':
+      return `已读取 ${result?.issueKey || ''}（${result?.status || ''}）`
+    case 'jira_request_status':
+      return `${result?.issueKey || ''}：${result?.status || ''}`
+    case 'jira_panel_rdms': {
+      const list = Array.isArray(result?.results) ? result.results : []
+      const hit = list.filter((r: any) => r.rmId).length
+      return `查到 ${hit}/${list.length} 个工单的 RDMS 关联`
+    }
+    case 'jira_create_ticket':
+      return `已创建 ${result?.issueKey || ''}`
+    case 'jira_add_comment':
+      return `已评论 ${result?.issueKey || ''}${result?.attachments?.length ? `（附件 ${result.attachments.length} 个）` : ''}`
+    case 'jira_transition_issue':
+      return `已流转到「${result?.to || result?.transitionName || ''}」`
     default:
       // MCP 工具：摘要带上返回体量，便于一眼看出「调用成功但内容为空」
       if (result?.source === 'mcp') {

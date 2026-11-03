@@ -2,7 +2,7 @@ appId: com.streamax.mcquery
 productName: MC物料查询
 copyright: Copyright © 2026 Sean Mao
 # 应用/文件版本号（四位，区别于 package.json 三段产品版本）
-buildVersion: 1.0.70.0
+buildVersion: 1.0.71.0
 
 directories:
   output: dist
@@ -75,6 +75,12 @@ extraResources:
   # 该技能的可写状态（配置/令牌/日志）落在 userData/email-auto/，不写安装目录。
   - from: resources/skills/email-auto
     to: skills/email-auto
+  # 内置技能：Jira / JSM 工单助手（1.0.71）。只有 SKILL.md，**执行层在主进程**
+  # （src/main/ai/jiraSkill.ts + src/main/ai/jira/，14 个 jira_* 工具），
+  # 不随包分发任何浏览器前端或脚本。可写状态（config.json / 面板凭据 / 缓存 / 日志）
+  # 落在 userData/jira-jsm/，不写安装目录（安装目录会随更新被覆盖）。
+  - from: resources/skills/jira-jsm
+    to: skills/jira-jsm
 
 # 启用 asar 打包（减小体积 + 加快加载）
 asar: true

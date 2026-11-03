@@ -7,8 +7,9 @@
 | 产品版本 / 自动更新识别 | `package.json` | `version` | SemVer 三段，如 `1.0.1` | `app.getVersion()`、`latest.yml` 均使用此值 |
 | Windows 文件版本 / exe 属性 | `electron-builder.yml` | `buildVersion` | 四位，如 `1.0.1.0` | 写入 exe 的「文件版本」属性 |
 | 界面显示版本 | `src/renderer/src/store.ts` | `appVersion` | 自动读取 | 启动时从 `window.mcApi.appVersion()` 读取，**无需手动修改** |
+| 文档版本标注 | `README.md` / `MC Tool Release Notes.md` / `PUBLISH.md` / 本文件的「当前基线版本」 | 文本 | 三段 + 四段 | 版本表、产物名示例（`mc-material-query-setup-1.0.x.exe`）、冒烟清单里的产物名都要跟着改；漏改会让人照着旧名字找产物 |
 
-> 原则：日常发布只需改 `package.json` 和 `electron-builder.yml` 两处，界面会自动跟随 `package.json`。
+> 原则：**能跑起来**只需改 `package.json` 和 `electron-builder.yml` 两处（界面会自动跟随 `package.json`）；**发布前**还要把上表最后一行提到的文档版本标注一起改，否则 README / 发布清单里引用的仍是上一版的 exe 文件名。
 
 ## 2. 修改版本号步骤
 
@@ -91,8 +92,8 @@ Windows 任务栏右键菜单第一项（窗口名称）由主窗口 `title` 与
 ### 当前基线版本
 
 ```text
-package.json version:          1.0.70
-electron-builder buildVersion: 1.0.70.0
+package.json version:          1.0.71
+electron-builder buildVersion: 1.0.71.0
 ```
 
 打包命令：

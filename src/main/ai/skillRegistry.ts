@@ -272,14 +272,31 @@ function routeHint(key: string): string {
   const dir = skillDirOf(key)
   if (dir) {
     const refDir = join(dir, 'references')
-    let files: string[] = []
-    try {
-      files = readdirSync(refDir, { withFileTypes: true }).filter(f => f.isFile()).map(f => f.name).sort()
-    } catch { /* 没有 references 目录就不用管 */ }
+    // 1.0.71：references 可能按版本分子目录（ceiba2-api-qa 的 2.6.3/ 与 2.6.8/），
+    // 只列一级文件会让子目录里的文档**拿不到绝对路径**，模型只能按相对路径试，
+    // 先撞一次 PATH_NOT_FOUND 再走兜底 —— 白丢一轮往返。这里递归两层。
+    const files: string[] = []
+    const walk = (abs: string, rel: string, depth: number): void => {
+      let entries: import('fs').Dirent[] = []
+      try {
+        entries = readdirSync(abs, { withFileTypes: true })
+      } catch {
+        return
+      }
+      for (const e of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+        const childRel = rel ? `${rel}/${e.name}` : e.name
+        if (e.isDirectory()) {
+          if (depth < 2) walk(join(abs, e.name), childRel, depth + 1)
+        } else if (/\.md$/i.test(e.name)) {
+          files.push(childRel)
+        }
+      }
+    }
+    walk(refDir, '', 1)
     if (files.length) {
       return `【技能目录】${dir}\n`
         + '该技能自带参考文档，读取时**必须用下面的绝对路径**（写相对路径如 `references/xxx.md` 会被当成工作区里的文件，报 `PATH_NOT_FOUND`）：'
-        + files.slice(0, 8).map(f => '`' + join(refDir, f) + '`').join('、') + '\n\n'
+        + files.slice(0, 12).map(f => '`' + join(refDir, f.split('/').join('\\')) + '`').join('、') + '\n\n'
     }
   }
   return ''

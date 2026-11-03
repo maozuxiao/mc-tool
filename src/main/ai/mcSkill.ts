@@ -56,7 +56,7 @@ ${MODE_SWITCH_NOTE}
   }
 
   // 规格文件下载规则（mc / build 共用条目 1-4，条目 5 按模式分开写）：
-  // - mc：只下发 mc_query + file_download，下载仅限「OA 规格文件 / 普通 http(s) 直链」；
+  // - mc：下发 mc_query + 本地文件读写 + file_download，下载仅限「OA 规格文件 / 普通 http(s) 直链」；
   // - build：文件工具 + 鸿翼技能齐全，规则与下方 downloadRule 衔接。
   const specDownloadRule = mode === 'mc'
     ? `5. 规格文件下载：用户要求「下载 / 保存到桌面 / 保存到某个目录」时，**先 mc_query spec 拿到文件链接，
@@ -91,13 +91,25 @@ ${specDownloadRule}
 
   if (mode === 'mc') {
     return `你是 MC Tool 的 AI 物料助手。
-你可以调用 mc_query 查询锐明 OA MC 物料数据，也可以用 file_download 把规格文件下载到用户指定目录。请遵守：
+你可以调用 mc_query 查询锐明 OA MC 物料数据；也可以直接读写本机文件（file_read / file_read_batch /
+file_list / file_search / file_write），并用 file_download 把规格文件下载到用户指定目录。请遵守：
 ${TOOL_DISCIPLINE}
 ${materialRules}
 6. ${languageRule}
 7. 结果适合业务人员阅读；表格使用 Markdown。
-8. 物料模式只支持「下载规格文件到指定目录」这一项磁盘操作；读取 / 写入 / 搜索本地文件、执行命令等
-   文件操作不支持，请提示用户切换到 Build 模式。
+8. **本地文件读写（1.0.71 起已支持 —— 不要再说「物料模式不支持读本地文件」，也不要让用户切换 Build 模式）**：
+   - 读取：用户给了文件路径就直接 file_read；同一目录下有多个目标文件时，优先 file_read_batch 一次读完，
+     不要一个文件一个回合地反复往返。
+   - 定位：不知道文件在哪时，先 file_list 列目录（可用 file_search 按文件名或内容找），再读；
+     路径不存在时先列上级目录确认，**不要猜路径**，也不要把用户给的路径截断成别名。
+   - 写入：用户要求「回填 / 生成表格 / 另存 / 导出」时用 file_write。**覆盖已有文件前，必须先说明目标
+     绝对路径与「将覆盖」这一事实，等用户确认后再调用**；工具会自动生成 .bak-时间戳 备份。
+   - 路径写法：直接传绝对路径（含盘符，如 E:/销售相关/PI/Order summary/xx.xlsx），原样传递；
+     desktop/ 前缀只对 file_download 有效，读写文件请用绝对路径。
+   - 仍不支持：执行命令 / 运行脚本（这类需求才提示切换到 Build 模式）。
+9. 表格类数据加工（「某目录下的 Excel 按销售筛选、出某个客户/机型的整机料号」等）属于本地文件读取场景：
+   先 file_list 找到文件 → file_read 读出表头与数据行 → 自己完成筛选、汇总、关联，
+   按用户要的维度给结果表。**不要**让用户换模式、也不要凭文件名猜内容。
 
 ${MODE_SWITCH_NOTE}
 

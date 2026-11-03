@@ -2,6 +2,8 @@
 
 > 用法：先按客户描述找到对应场景 → 按「要问什么」补齐信息 → 用「判定」给出结论 → 用「模板」回信（中英各一份可改直接用）。
 > 所有判定都要回到文档依据（接口章节号 / 错误码 / 字段名），不要只给感觉。
+> **版本口径**：本文件覆盖 2.6.3 与 2.6.8。回信模板里的 `{版本}` 请填客户实际版本；涉及取 key、远程控制、证据中心章节号时，先确认版本再填
+> （2.6.3：GET 取 key、证据中心 15.x；2.6.8：POST 取 key、证据中心 14.x、远程控制 `/remote/control`）。
 
 ---
 
@@ -9,7 +11,7 @@
 
 **中文**
 ```
-您好，关于您反馈的「{一句话现象}」，根据 Ceiba2 API 文档（v2.6.3）与您提供的返回信息，初步判断为：{结论：可能原因}。
+您好，关于您反馈的「{一句话现象}」，根据 Ceiba2 API 文档（{版本，例 v2.6.8}）与您提供的返回信息，初步判断为：{结论：可能原因}。
 依据：{错误码/接口章节/字段}。
 麻烦您按下面步骤确认，并把结果回复给我：
 1) {动作1：可复制的请求或核对点}
@@ -18,7 +20,7 @@
 ```
 **English**
 ```
-Hi, regarding "{issue}", based on the Ceiba2 API document (v2.6.3) and the response you provided, our initial finding is: {root cause}.
+Hi, regarding "{issue}", based on the Ceiba2 API document ({version, e.g. v2.6.8}) and the response you provided, our initial finding is: {root cause}.
 Reference: {error code / API section / field}.
 Could you please check the following and send us the results?
 1) {action 1}
@@ -32,19 +34,23 @@ If the issue persists, please provide the full request URL (with HOST:PORT), the
 
 **客户典型描述**：「调 /api/v1/basic/key 报错，拿不到 key」。
 
-**要问**：完整 URL（含 HOST:PORT）、账号密码是否含特殊字符、网页端能否登录、返回原文。
+**要问**：完整 URL（含 HOST:PORT）、账号密码是否含特殊字符、网页端能否登录、返回原文、**CMS 版本（2.6.3 / 2.6.8）**。
 
 **判定**
+- **先分辨方法**：2.6.3 是 `GET` + query；**2.6.8 是 `POST` + JSON body**。客户用 GET 调 2.6.8 会得到 `201 非法请求` / `207 参数数量异常` / `405`，这类「报错但不是账号问题」的情况约占新版客诉的一半。
 - `404` → 地址/端口/版本错（路径必须 `/api/v1/basic/key`）。
-- `206` → 账号密码不符（特殊字符未 URL encode 最常见）。
+- `206` → 账号密码不符（特殊字符未 URL encode 最常见）。2.6.8 若用了 `rsapublickey`，密码必须是按该公钥加密后的密文，明文会走 206。
 - `205` → 账号过期/停用。
 - `217` → 并发登录限制（集成程序与网页端抢同一账号）。
 - HTTP 200 但 `data.key` 为空 → 看 body 里的 `errorcode`，按上面对应处理。
 
 **English（给海外客户）**
 ```
-The login endpoint is GET http://{HOST}:{PORT}/api/v1/basic/key?username=xxx&password=xxx .
-An error code 206 means the account or password is incorrect - please make sure special characters in the password are URL-encoded.
+Please note the login endpoint differs by version:
+- v2.6.3: GET  http://{HOST}:{PORT}/api/v1/basic/key?username=xxx&password=xxx
+- v2.6.8: POST http://{HOST}:{PORT}/api/v1/basic/key  with JSON body {"username":"xxx","password":"xxx"} and Content-Type: application/json
+Using the GET form against a v2.6.8 server returns 201/207/405 rather than a key.
+An error code 206 means the account or password is incorrect - please make sure special characters in the password are properly encoded.
 An error code 205 means the account has expired; please contact your administrator to renew it.
 An error code 217 means the same account is already logged in elsewhere (concurrent login limit).
 A 404 usually means the host/port or the path is wrong; please confirm the CMS server address and that the path is exactly /api/v1/basic/key .
@@ -154,19 +160,29 @@ If the API returns a stream URL but playback fails, please check whether the vid
 
 ---
 
-## 场景 8：证据中心（15.x）
+## 场景 8：证据中心（2.6.3 是 15.x / 2.6.8 是 14.x）
+
+**先对编号**（路径两版一致，只是章节号变了）：
+
+| 功能 | 2.6.3 | 2.6.8 |
+|---|---|---|
+| 数量 / 明细 | 15.1 / 15.2 | 14.1 / 14.2 |
+| 图片 / 详情 / 视频 / 打包 / 服务器 / 关联轨迹 | 15.3 / 15.4 / 15.5 / 15.6 / 15.7 / 15.8 | 14.3 / 14.4 / 14.5 / 14.6 / 14.7 / 14.8 |
 
 **排查顺序**
-1. `15.1 evidence-center/count` / `15.2 evidence-center/list`：`type` 传 `[]` 查全部告警类型；**分页 `page`/`count`**；`15.2` **必须带上一轮返回的 `context`**。
-2. 拿到 `eid` 后再调 `15.3`（图片）/`15.4`（详情）/`15.5`（视频列表）/`15.8`（关联轨迹）。
-3. `15.6 filepack` 打包**需要 `serverip`**（可用 `15.7 evidenceserverinfo` 查证据存储服务器别名与 IP）。
+1. `evidence-center/count` / `evidence-center/list`：`type` 传 `[]` 查全部告警类型；**分页 `page`/`count`**；`list` **必须带上一轮返回的 `context`**。
+2. 拿到 `eid` 后再调图片 / 详情 / 视频列表 / 关联轨迹。
+3. `filepack` 打包**需要 `serverip`**（可用 `evidenceserverinfo` 查证据存储服务器别名与 IP）。
 4. 查不到证据时先确认：该时间段**是否真有告警**；告警类型是否被 `type` 过滤掉；证据是否已被清理。
+5. 2.6.8 另有 **18.x 证据策略**（查询 / 保存 / 删除），策略没配会导致某些告警不产生证据 —— 新版客诉「为什么没有证据」要先看这里。
 
 **English**
 ```
 For the Evidence Center, please query with /api/v1/basic/evidence-center/count or /list first (use type: [] to include all alarm types).
+Note: in v2.6.3 the Evidence Center chapter is 15.x, in v2.6.8 it is 14.x (paths are unchanged).
 For /list, page and count control paging, and the context value returned by the previous response MUST be passed in the next request.
 Images/details/videos require an eid obtained from the search results, and file packaging (/filepack) also needs the evidence server IP (see /evidenceserverinfo).
+On v2.6.8, please also check the evidence strategy (chapter 18.x) - if no strategy is configured, some alarms will not generate evidence at all.
 ```
 
 ---
@@ -194,5 +210,26 @@ If the API is called directly from a browser page, the same-origin policy may bl
 
 ## 场景 11：升级/换服务器后突然不好用
 
-**要问**：CMS 服务器版本号（本技能依据 **2.6.3**）、是否迁移过服务器或数据库、是否改过账号权限。
-**判定**：接口路径/字段在不同版本可能存在差异 → 以现场服务器的 `help/api` 文档为准；账号迁移后常见 `203`（权限）/`205`（账号过期）/`213`（设备不在该账号范围）。
+**要问**：升级**前**与**后**的 CMS 版本号（本技能覆盖 **2.6.3 / 2.6.8**）、是否迁移过服务器或数据库、是否改过账号权限。
+**判定**：先比版本，再看权限。从 2.6.3 升到 2.6.8 时，下面这几处**必然要改客户端代码**（详见 `version_diff.md`）：
+
+| 变化 | 老代码（2.6.3） | 新版要改成 |
+|---|---|---|
+| 取 key | `GET /api/v1/basic/key?username=&password=` | `POST /api/v1/basic/key` + JSON body（否则 201/207/405） |
+| 远程控制 | `/api/v1/basic/device/protocol` + `content` | `/api/v1/basic/remote/control` + `channel`/`type`/`speed`/`psp`（旧路径 404） |
+| 设备列表通道数 | 返回 `channel` | 返回 `channelcount`（另加 `cname`） |
+| 证据中心章节 | 15.x | 14.x（路径不变，文档编号变） |
+| User Log | `12.1/12.2` | 新版**整章删除**，调用会 404 |
+
+其他仍以现场服务器的 `help/api` 文档为准；账号/数据迁移后常见 `203`（权限）/`205`（账号过期）/`213`（设备不在该账号范围）。
+
+**English**
+```
+When the CMS server is upgraded from v2.6.3 to v2.6.8, please review these breaking changes on the client side:
+1) Login/key: the endpoint changed from GET with query parameters to POST with a JSON body {"username","password"}.
+2) Remote control: /api/v1/basic/device/protocol + content was replaced by /api/v1/basic/remote/control with channel/type/speed/psp.
+3) Device list: the returned channel count field was renamed from "channel" to "channelcount" (and "cname" was added).
+4) Evidence Center: chapter numbers moved from 15.x to 14.x (paths are unchanged).
+5) User Log interfaces (old 12.1/12.2) were removed in v2.6.8.
+After an account/data migration, 203 (no permission), 205 (account expired) and 213 (device out of account scope) are common.
+```
