@@ -4,7 +4,7 @@
 
 - 仓库：https://github.com/maozuxiao/mc-tool
 - 技术栈：Electron 33 + electron-vite + React 18 + TypeScript + Zustand，UI 组件库 [`animal-island-ui`](https://www.npmjs.com/package/animal-island-ui)；AI 面板里的操作类小图标用 [`naive-icons`](https://www.npmjs.com/package/naive-icons)（同为手绘 naive 风，按需引 `svg/*.svg?raw` 并改色跟随主题，见 `src/renderer/src/components/NaiveIcon.tsx`）
-- 当前版本：`1.0.71`（`package.json` 的 `version` 为准）
+- 当前版本：`1.0.72`（`package.json` 的 `version` 为准）
 
 ---
 
@@ -238,8 +238,8 @@
 - **第一次用要填一次凭据**：首次调用会自动生成配置模板并打开目录 —— 打开 `%APPDATA%\mc-material-query\jira-jsm\config.json`，把 `email` 填成工作邮箱、`apiToken` 填成自己在 [Atlassian API Token](https://id.atlassian.com/manage-profile/security/api-tokens) 生成的令牌，保存即可，不用重启。**AI 不会向你索要 token**，返回里也只显示掩码（`se***@streamax.com` / `****ab12`）。
 - **只读能力**：当前登录人、服务台列表、工单类型与字段定义、JQL 检索、工单详情（含可用流转动作）、请求状态。
 - **写入能力**：创建工单、加评论（可带本机附件；图片自动内嵌进正文，支持 @提及）、流转状态。三者执行前 AI **必须**先复述服务台/类型/标题/评论正文/目标状态并等你确认，不会先斩后奏。
-- **正文照抄，不翻译不改写**：你给的评论正文 / 工单描述会**原样提交** —— 不补「您好 / Hello」寒暄、不润色、不附英文译文；只给一句话要点时，它只做最小连接（不增删事实、不换语言）。想让英文版存在，就说「加一版英文译文」，否则它最多问一句要不要，不会自己动笔。确认话术里复述的必须是将要提交的逐字文本，改过哪个词要单列说明原因。
-- **附件直接贴，不用给路径**：截图用 `Ctrl + V` 粘进输入框、文件拖进来即可 —— 主进程会把附件落盘到 `userData/attachments/`，把真实路径随消息告诉模型，所以它不会再回头问「请提供图片的完整路径」。你贴完说「把这张图加到 ETESC-133 的评论里」就会直接生效；下一轮只说「确认」时，1 小时内会复用上一轮的附件（只有开新话题才不继承，避免把旧图误传上去）。
+- **正文照抄，不翻译不改写（1.0.72）**：你给的评论正文 / 工单描述会**原样提交** —— 不补「您好 / Hello」寒暄、不润色、不附英文译文；只给一句话要点时，它只做最小连接（不增删事实、不换语言）。想让英文版存在，就说「加一版英文译文」，否则它最多问一句要不要，不会自己动笔。确认话术里复述的必须是将要提交的逐字文本，改过哪个词要单列说明原因。
+- **附件直接贴，不用给路径（1.0.72）**：截图用 `Ctrl + V` 粘进输入框、文件拖进来即可 —— 主进程会把附件落盘到 `userData/attachments/`，把真实路径随消息告诉模型，所以它不会再回头问「请提供图片的完整路径」。你贴完说「把这张图加到 ETESC-133 的评论里」就会直接生效；下一轮只说「确认」时，1 小时内会复用上一轮的附件（只有开新话题才不继承，避免把旧图误传上去）。
 - **面板 RDMS 查询**：工单页里的 RDMS 关联是第三方面板数据，不在 Jira REST 里 —— 在任意工单页按 `F12` → Network → 筛 `useInvokeExtensionRelayMutation` → 右键 **Copy as cURL**，把整段发给 AI，它会校验后存为本机凭据（15 分钟有效，过期再抄一条即可），之后按工单号批量返回 `rmId` 与可点击链接（自动区分 Bug / Story）。
 - **检索规则**：该站点不允许无条件 JQL，AI 会强制带上 `project` / `statusCategory` / 时间等条件；要自定义字段（如 RDMS ID）时一次带出，不会对结果逐条补查。
 
@@ -439,9 +439,9 @@ npm run pack:all   # 全平台
 ```
 dist/
 ├─ latest.yml                            # 自动更新元数据
-├─ mc-material-query-setup-1.0.71.exe            # NSIS 安装包
-├─ mc-material-query-setup-1.0.71.exe.blockmap  # 增量更新块映射
-└─ mc-material-query-1.0.71.exe   # 便携版
+├─ mc-material-query-setup-1.0.72.exe            # NSIS 安装包
+├─ mc-material-query-setup-1.0.72.exe.blockmap  # 增量更新块映射
+└─ mc-material-query-1.0.72.exe   # 便携版
 ```
 
 > macOS 交叉编译在 Windows 上不可靠，DMG 请在 macOS 上打包。
