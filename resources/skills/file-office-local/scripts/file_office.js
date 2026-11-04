@@ -928,14 +928,481 @@ function pickSheetName(existing, requested) {
   return `Sheet${i}`
 }
 
-// 在「已存在」的工作簿中追加一个新工作表，与 Sheet1 等原有工作表并存、保留其样式。
-// xlsx 用 ExcelJS 读写，完整保留字体/列宽/合并单元格/数字格式；xls 走 SheetJS 尽力保留。
+// ── 无损 xlsx 打补丁（1.0.73）────────────────────────────────
+/**
+ * 背景（用户 2026-11-04 实测）：给 PI 模板新增一张「MC料号查询」表，原表上 **17 个形状
+ * （DrawingML 的 `<xdr:sp>`，即文本框 / 标注 / 箭头）全部消失**，打印设置、`Print_Area`
+ * 里的绝对引用 `$A$1` 也一起被改写。
+ *
+ * 根因不是某个字段写错，而是**整本重写**：ExcelJS 是不完整的 OOXML 实现 —— 图片 `<xdr:pic>` 认，
+ * 形状 `<xdr:sp>` 不认，保存时静默丢弃；顺带丢掉 `calcChain.xml`、`printerSettings*.bin`、
+ * `docProps/custom.xml`，`definedName` 的 `$A$1` 被写成 `$A1`。一个 PI 模板 30+ 个部件，
+ * 只为加一张表就被全部重写一遍，必然出事。
+ *
+ * 现在的做法：只改必需的那几个部件，其余字节原样搬过去。
+ *   - 加工作表：新增 1 个 sheet 部件 + workbook.xml / workbook.xml.rels / [Content_Types].xml 各一行；
+ *   - 改单元格：只替换目标 sheet 里受影响的 `<c>`，`s`（样式索引）沿用原值。
+ * 写完立刻回读校验：绘图 / 媒体 / 图表 / 打印设置等部件必须与写前逐字节一致，否则自动还原。
+ */
+
+const XLSX_WS_NS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
+const XML_ILLEGAL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/g
+
+/** XML 文本转义：顺手剔除 XML 1.0 不允许的控制字符（混进去会让 Excel 报「发现不可读取的内容」） */
+function xmlEsc(s) {
+  return String(s == null ? '' : s)
+    .replace(XML_ILLEGAL, '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+function xmlUnesc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCharCode(Number.parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (_, d) => String.fromCharCode(Number(d)))
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, '&')
+}
+
+/** 取 XML 标签属性（属性名可能带命名空间前缀，如 r:id） */
+function attrOf(attrs, name) {
+  const m = new RegExp(`(?:^|\\s)${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}="([^"]*)"`).exec(attrs || '')
+  return m ? m[1] : ''
+}
+
+/** 解析 workbook.xml.rels + workbook.xml 的 sheets（只读需要的部分，不引第三方 XML 库） */
+function xlsxIndex(workbookXml, relsXml) {
+  const rels = new Map()
+  for (const m of relsXml.matchAll(/<Relationship\b([^>]*?)\/?>/g)) {
+    const id = attrOf(m[1], 'Id')
+    if (!id) continue
+    rels.set(id, { type: attrOf(m[1], 'Type'), target: attrOf(m[1], 'Target') })
+  }
+  const sheets = []
+  for (const m of workbookXml.matchAll(/<sheet\b([^>]*?)\/?>/g)) {
+    const rid = attrOf(m[1], 'r:id')
+    const target = (rels.get(rid) || {}).target || ''
+    sheets.push({
+      name: xmlUnesc(attrOf(m[1], 'name')),
+      sheetId: Number(attrOf(m[1], 'sheetId')) || 0,
+      state: attrOf(m[1], 'state'),
+      rid,
+      // Target 可能是 "worksheets/sheet1.xml" 或 "/xl/worksheets/sheet1.xml"，统一成包内路径
+      part: target.replace(/^\/?xl\//, '').replace(/^\//, '')
+    })
+  }
+  return { rels, sheets }
+}
+
+function nextSheetId(sheets) {
+  return sheets.reduce((n, s) => Math.max(n, s.sheetId || 0), 0) + 1
+}
+
+function nextRelId(relsXml) {
+  let max = 0
+  for (const m of relsXml.matchAll(/Id="rId(\d+)"/g)) max = Math.max(max, Number(m[1]))
+  return `rId${max + 1}`
+}
+
+/** 新工作表的部件文件名：按现有 sheetN.xml 的最大编号 +1，避免与物理文件名撞车 */
+function nextSheetPart(zip) {
+  let max = 0
+  for (const name of Object.keys(zip.files)) {
+    const m = /^xl\/worksheets\/sheet(\d+)\.xml$/i.exec(name)
+    if (m) max = Math.max(max, Number(m[1]))
+  }
+  return `xl/worksheets/sheet${max + 1}.xml`
+}
+
+/**
+ * styles.xml 的最小编辑器：只**追加** <fill> / <xf>，从不改动已有索引 ——
+ * 原表所有单元格的 `s` 仍然指向它们原来的字体 / 边框 / 数字格式。
+ *
+ * `styleFor(argb, baseS)` 会以 baseS 那条 xf 为模板克隆一条，只把 fillId 换掉，
+ * 所以「给已有行上色」不会把原有的字体、边框、数字格式吃掉（ExcelJS 时代正是整体重排样式）。
+ */
+function xlsxStyles(stylesXml) {
+  const state = { xml: stylesXml || '', dirty: false }
+  if (!stylesXml) {
+    return { styleFor: (argb, baseS) => (argb ? 0 : baseS), toXml: () => state.xml, get dirty() { return false } }
+  }
+  const fillsM = /<fills\b([^>]*)>([\s\S]*?)<\/fills>/.exec(stylesXml)
+  const xfsM = /<cellXfs\b([^>]*)>([\s\S]*?)<\/cellXfs>/.exec(stylesXml)
+  if (!fillsM || !xfsM) {
+    return { styleFor: (argb, baseS) => (argb ? 0 : baseS), toXml: () => state.xml, get dirty() { return false } }
+  }
+  const fillsHead = fillsM[1]
+  const fillsBody = fillsM[2]
+  const xfsHead = xfsM[1]
+  const xfsBody = xfsM[2]
+  const fillItems = fillsBody.match(/<fill\b[^>]*\/>|<fill\b[\s\S]*?<\/fill>/g) || []
+  const xfItems = xfsBody.match(/<xf\b[^>]*\/>|<xf\b[\s\S]*?<\/xf>/g) || []
+  const fillIdx = new Map()
+  fillItems.forEach((f, i) => {
+    const c = /\brgb="([0-9A-Fa-f]{8})"/.exec(f)
+    if (c && !fillIdx.has(c[1].toUpperCase())) fillIdx.set(c[1].toUpperCase(), i)
+  })
+  const added = { fills: [], xfs: [] }
+  const cache = new Map()
+
+  const ensureFill = (argb) => {
+    let fi = fillIdx.get(argb)
+    if (fi == null) {
+      fi = fillItems.length + added.fills.length
+      added.fills.push(
+        `<fill><patternFill patternType="solid"><fgColor rgb="${argb}"/><bgColor indexed="64"/></patternFill></fill>`
+      )
+      fillIdx.set(argb, fi)
+    }
+    return fi
+  }
+
+  const withFill = (attrs, fi) => {
+    const a = String(attrs)
+      .replace(/\s(fillId|applyFill)="[^"]*"/g, '')
+      // 自带 xfId 时保留，否则补一个（Excel 对 xfId 敏感度不高，但补上更规范）
+      .replace(/\s*$/, '')
+    return `${a} fillId="${fi}" applyFill="1"`
+  }
+
+  return {
+    styleFor(argb, baseS) {
+      const color = String(argb || '').toUpperCase()
+      const base = Number.isFinite(Number(baseS)) ? Number(baseS) : 0
+      if (!/^[0-9A-F]{8}$/.test(color)) return base
+      const key = `${color}|${base}`
+      if (cache.has(key)) return cache.get(key)
+      const fi = ensureFill(color)
+      const baseRaw = xfItems[base]
+      let xf
+      if (baseRaw) {
+        // 以原 xf 为模板，只换填充 —— 字体 / 边框 / 数字格式原封不动
+        const m = /^<xf\b([^>]*?)(\/>|>([\s\S]*?)<\/xf>)$/.exec(baseRaw.trim())
+        xf = m
+          ? `<xf${withFill(m[1], fi)}${m[2] === '/>' ? '/>' : `>${m[3]}</xf>`}`
+          : `<xf numFmtId="0" fontId="0" fillId="${fi}" borderId="0" xfId="0" applyFill="1"/>`
+      } else {
+        xf = `<xf numFmtId="0" fontId="0" fillId="${fi}" borderId="0" xfId="0" applyFill="1"/>`
+      }
+      const idx = xfItems.length + added.xfs.length
+      added.xfs.push(xf)
+      cache.set(key, idx)
+      return idx
+    },
+    toXml() {
+      if (!added.fills.length && !added.xfs.length) return stylesXml
+      const countAttr = (head, n) => head.replace(/\scount="\d+"/, '').replace(/\s*$/, '') + ` count="${n}"`
+      let xml = stylesXml.replace(
+        fillsM[0],
+        `<fills${countAttr(fillsHead, fillItems.length + added.fills.length)}>${fillsBody}${added.fills.join('')}</fills>`
+      )
+      xml = xml.replace(
+        xfsM[0],
+        `<cellXfs${countAttr(xfsHead, xfItems.length + added.xfs.length)}>${xfsBody}${added.xfs.join('')}</cellXfs>`
+      )
+      return xml
+    },
+    get dirty() {
+      return !!(added.fills.length || added.xfs.length)
+    }
+  }
+}
+
+/** 单元格对象：文本一律 inlineStr，这样完全不用动 sharedStrings.xml */
+function xlsxMakeCell(addr, value, sIdx) {
+  const s = sIdx ? ` s="${sIdx}"` : ''
+  if (value === '' || value == null) return { addr, attrs: ` r="${addr}"${s}`, selfClose: true, inner: '' }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return { addr, attrs: ` r="${addr}"${s}`, selfClose: false, inner: `<v>${value}</v>` }
+  }
+  if (typeof value === 'boolean') {
+    return { addr, attrs: ` r="${addr}"${s} t="b"`, selfClose: false, inner: `<v>${value ? 1 : 0}</v>` }
+  }
+  return {
+    addr,
+    attrs: ` r="${addr}"${s} t="inlineStr"`,
+    selfClose: false,
+    inner: `<is><t xml:space="preserve">${xmlEsc(value)}</t></is>`
+  }
+}
+
+function xlsxCellXml(addr, value, sIdx) {
+  return xlsxCellXmlOf(xlsxMakeCell(addr, value, sIdx))
+}
+
+/** 生成一个全新的 sheet 部件（只有值 + 填充色，不引 drawing / 打印设置） */
+function xlsxBuildSheetPart(grid, styles) {
+  const values = grid.values || []
+  const cellFill = new Map()
+  for (const f of grid.fills || []) cellFill.set(`${f.r}:${f.c}`, f.argb)
+  let maxC = 0
+  const rows = []
+  for (let r = 0; r < values.length; r++) {
+    const vals = values[r] || []
+    const cells = []
+    for (let c = 0; c < vals.length; c++) {
+      const v = fmtCell(vals[c])
+      if (v === '' || v == null) continue
+      const argb = grid.rowFills[r] || cellFill.get(`${r}:${c}`) || ''
+      cells.push(xlsxCellXml(indexToColLetter(c) + (r + 1), v, styles.styleFor(argb, 0)))
+      maxC = Math.max(maxC, c)
+    }
+    if (!cells.length) continue
+    rows.push(`<row r="${r + 1}">${cells.join('')}</row>`)
+  }
+  const lastRow = values.length || 1
+  const dim = `A1:${indexToColLetter(Math.max(maxC, 0))}${lastRow}`
+  return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n' +
+    `<worksheet xmlns="${XLSX_WS_NS}"><dimension ref="${dim}"/><sheetViews><sheetView workbookViewId="0"/></sheetViews>` +
+    `<sheetFormatPr defaultRowHeight="15"/><sheetData>${rows.join('')}</sheetData>` +
+    '<pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/></worksheet>'
+}
+
+/** 这些部件是「原表观感」的载体，写完必须逐字节没变，否则算写坏 */
+const XLSX_GUARD_PREFIX = [
+  'xl/drawings/', 'xl/media/', 'xl/charts/', 'xl/printerSettings/', 'xl/embeddings/',
+  'xl/ctrlProps/', 'xl/drawings/vmlDrawing'
+]
+const XLSX_GUARD_FILES = ['docProps/custom.xml', 'xl/calcChain.xml', 'docProps/core.xml', 'docProps/app.xml']
+
+async function xlsxGuardSnapshot(zip) {
+  const crypto = require('crypto')
+  const snap = new Map()
+  for (const [name, entry] of Object.entries(zip.files)) {
+    if (entry.dir) continue
+    const hit = XLSX_GUARD_FILES.includes(name) || XLSX_GUARD_PREFIX.some(p => name.startsWith(p))
+    if (!hit) continue
+    const buf = await entry.async('nodebuffer')
+    snap.set(name, crypto.createHash('sha1').update(buf).digest('hex'))
+  }
+  return snap
+}
+
+const REL_WORKSHEET = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet'
+const CT_WORKSHEET = 'application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml'
+
+function xlsxUsedArgbs(grid) {
+  const set = new Set()
+  for (const f of grid.fills || []) if (f.argb) set.add(String(f.argb).toUpperCase())
+  for (const rf of grid.rowFills || []) if (rf) set.add(String(rf).toUpperCase())
+  return [...set]
+}
+
+/**
+ * 无损新增工作表：只加 1 个 sheet 部件 + 三处索引各一行，原表其它部件字节不变。
+ * 写完回读校验（形状 / 媒体 / 图表 / 打印设置必须与写前一致），不一致立刻还原原文件。
+ */
+async function xlsxAddSheetLossless(abs, grid, requestedName) {
+  const JSZip = require('jszip')
+  const origBuf = fs.readFileSync(abs)
+  const zip = await JSZip.loadAsync(origBuf)
+  for (const p of ['xl/workbook.xml', 'xl/_rels/workbook.xml.rels', '[Content_Types].xml']) {
+    if (!zip.file(p)) throw new Error(`不是标准 xlsx：缺少 ${p}，无法无损写入`)
+  }
+  const workbookXml = await zip.file('xl/workbook.xml').async('string')
+  const relsXml = await zip.file('xl/_rels/workbook.xml.rels').async('string')
+  const ctXml = await zip.file('[Content_Types].xml').async('string')
+  const stylesEntry = zip.file('xl/styles.xml')
+  const stylesXml = stylesEntry ? await stylesEntry.async('string') : ''
+  const { sheets } = xlsxIndex(workbookXml, relsXml)
+  const name = pickSheetName(sheets.map(s => s.name), requestedName)
+  const styles = xlsxStyles(stylesXml)
+  const part = nextSheetPart(zip)
+  const sheetId = nextSheetId(sheets)
+  const rid = nextRelId(relsXml)
+  const guard = await xlsxGuardSnapshot(zip)
+
+  zip.file(part, xlsxBuildSheetPart(grid, styles))
+  if (styles.dirty) zip.file('xl/styles.xml', styles.toXml())
+  zip.file(
+    'xl/workbook.xml',
+    workbookXml.replace('</sheets>', `<sheet name="${xmlEsc(name)}" sheetId="${sheetId}" r:id="${rid}"/></sheets>`)
+  )
+  zip.file(
+    'xl/_rels/workbook.xml.rels',
+    relsXml.replace(
+      '</Relationships>',
+      `<Relationship Id="${rid}" Type="${REL_WORKSHEET}" Target="${part.replace(/^xl\//, '')}"/></Relationships>`
+    )
+  )
+  zip.file(
+    '[Content_Types].xml',
+    ctXml.replace('</Types>', `<Override PartName="/${part}" ContentType="${CT_WORKSHEET}"/></Types>`)
+  )
+
+  const outBuf = await zip.generateAsync({
+    type: 'nodebuffer',
+    compression: 'DEFLATE',
+    compressionOptions: { level: 6 }
+  })
+  const after = await JSZip.loadAsync(outBuf)
+  const afterGuard = await xlsxGuardSnapshot(after)
+  for (const [p, h] of guard) {
+    if (afterGuard.get(p) !== h) {
+      writeFileAtomic(abs, origBuf)
+      throw new Error(`写入会损坏原文件（${p} 与写前不一致），已自动还原，未做任何改动`)
+    }
+  }
+  writeFileAtomic(abs, outBuf)
+  const afterSheets = xlsxIndex(
+    await after.file('xl/workbook.xml').async('string'),
+    await after.file('xl/_rels/workbook.xml.rels').async('string')
+  ).sheets.map(s => s.name)
+  return { name, sheets: afterSheets }
+}
+
+// ── 单元格级补丁（update 模式）──────────────────────────────
+// 只替换目标 sheet 里受影响的 <c>：值 → inlineStr，样式 → 以原 xf 为模板克隆。
+// 原表的图表 / 形状 / 打印设置 / 其它工作表一律不碰。
+function xlsxParseCells(inner) {
+  const out = []
+  for (const m of inner.matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
+    const a = /\br="([A-Z]+\d+)"/i.exec(m[1])
+    out.push({ attrs: m[1], addr: a ? a[1].toUpperCase() : '', selfClose: m[1] != null && m[2] == null, inner: m[2] || '' })
+  }
+  return out
+}
+
+function xlsxParseRows(inner) {
+  const rows = []
+  for (const m of inner.matchAll(/<row\b([^>]*?)(?:\/>|>([\s\S]*?)<\/row>)/g)) {
+    const rn = /\br="(\d+)"/.exec(m[1])
+    rows.push({
+      num: rn ? Number(rn[1]) : rows.length + 1,
+      attrs: m[1],
+      cells: m[2] == null ? [] : xlsxParseCells(m[2])
+    })
+  }
+  return rows
+}
+
+function xlsxCellXmlOf(cell) {
+  if (cell.xml != null) return cell.xml
+  return cell.selfClose ? `<c${cell.attrs}/>` : `<c${cell.attrs}>${cell.inner}</c>`
+}
+
+function xlsxSerializeRows(rows) {
+  return rows
+    .map(row => (row.cells.length ? `<row${row.attrs}>${row.cells.map(xlsxCellXmlOf).join('')}</row>` : `<row${row.attrs}/>`))
+    .join('')
+}
+
+/** 把一条 edit 落到 rows 上：值 → 新 <c>；fillOnly → 只换 s，原有值与公式原封不动 */
+function xlsxApplyEdit(rows, rowMap, edit, styleFor) {
+  const addr = indexToColLetter(edit.c - 1) + edit.r
+  let row = rowMap.get(edit.r)
+  if (!row) {
+    row = { num: edit.r, attrs: ` r="${edit.r}"`, cells: [] }
+    const at = rows.findIndex(x => x.num > edit.r)
+    if (at < 0) rows.push(row)
+    else rows.splice(at, 0, row)
+    rowMap.set(edit.r, row)
+  }
+  const ci = row.cells.findIndex(c => c.addr === addr)
+  const cur = ci >= 0 ? row.cells[ci] : null
+  const baseS = cur ? Number(/\bs="(\d+)"/.exec(cur.attrs)?.[1] || 0) : 0
+  const sIdx = styleFor(edit.fill, baseS)
+  const sAttr = sIdx ? ` s="${sIdx}"` : ''
+  let next
+  if (edit.fillOnly) {
+    // 只调样式：保留原单元格里的 <v>/<f>/<is>，尤其不能让公式变成死值
+    if (!cur) next = { addr, attrs: ` r="${addr}"${sAttr}`, selfClose: true, inner: '' }
+    else {
+      const attrs = String(cur.attrs).replace(/\s+s="\d+"/, '') + sAttr
+      next = { addr, attrs, selfClose: cur.selfClose, inner: cur.inner || '', xml: null }
+    }
+  } else {
+    next = xlsxMakeCell(addr, fmtCell(edit.value), sIdx)
+  }
+  if (ci >= 0) row.cells[ci] = next
+  else {
+    const at = row.cells.findIndex(c => colLetterToIndex((c.addr || '').replace(/\d+/g, '')) > edit.c - 1)
+    if (at < 0) row.cells.push(next)
+    else row.cells.splice(at, 0, next)
+  }
+}
+
+function xlsxPatchSheetXml(xml, edits, styleFor) {
+  const m = /<sheetData\s*\/>|<sheetData>([\s\S]*?)<\/sheetData>/.exec(xml)
+  if (!m) return xml
+  const rows = m[1] == null ? [] : xlsxParseRows(m[1])
+  const rowMap = new Map(rows.map(r => [r.num, r]))
+  for (const e of edits) xlsxApplyEdit(rows, rowMap, e, styleFor)
+  let maxR = 0
+  let maxC = 0
+  for (const row of rows) {
+    maxR = Math.max(maxR, row.num)
+    for (const c of row.cells) {
+      const letters = (c.addr || '').replace(/\d+/g, '')
+      if (letters) maxC = Math.max(maxC, colLetterToIndex(letters) + 1)
+    }
+  }
+  const dimPrev = /<dimension ref="([^"]*)"/.exec(xml)
+  const dimStart = dimPrev && dimPrev[1].includes(':') ? dimPrev[1].split(':')[0] : 'A1'
+  let out = xml.replace(m[0], `<sheetData>${xlsxSerializeRows(rows)}</sheetData>`)
+  if (maxR > 0) {
+    const dim = `${dimStart}:${indexToColLetter(Math.max(maxC, 1) - 1)}${maxR}`
+    out = /<dimension ref="[^"]*"\s*\/>/.test(out)
+      ? out.replace(/<dimension ref="[^"]*"\s*\/>/, `<dimension ref="${dim}"/>`)
+      : out.replace(/(<sheetData)/, `<dimension ref="${dim}"/>$1`)
+  }
+  return out
+}
+
+/** 无损写回若干单元格；受保护部件（绘图/媒体/图表/打印设置）必须与写前一致 */
+async function xlsxPatchCellsLossless(abs, sheetName, edits) {
+  if (!edits.length) return
+  const JSZip = require('jszip')
+  const origBuf = fs.readFileSync(abs)
+  const zip = await JSZip.loadAsync(origBuf)
+  const workbookXml = await zip.file('xl/workbook.xml').async('string')
+  const relsXml = await zip.file('xl/_rels/workbook.xml.rels').async('string')
+  const { sheets } = xlsxIndex(workbookXml, relsXml)
+  const target = sheets.find(s => s.name === sheetName)
+  if (!target) throw new Error(`工作表不存在：${sheetName}`)
+  const partPath = target.part.startsWith('xl/') ? target.part : `xl/${target.part}`
+  if (!zip.file(partPath)) throw new Error(`工作表部件缺失：${partPath}`)
+  const sheetXml = await zip.file(partPath).async('string')
+  const stylesEntry = zip.file('xl/styles.xml')
+  const stylesXml = stylesEntry ? await stylesEntry.async('string') : ''
+  const styles = xlsxStyles(stylesXml)
+  const guard = await xlsxGuardSnapshot(zip)
+
+  zip.file(partPath, xlsxPatchSheetXml(sheetXml, edits, (argb, baseS) => styles.styleFor(argb, baseS)))
+  if (styles.dirty) zip.file('xl/styles.xml', styles.toXml())
+
+  const outBuf = await zip.generateAsync({
+    type: 'nodebuffer',
+    compression: 'DEFLATE',
+    compressionOptions: { level: 6 }
+  })
+  const after = await JSZip.loadAsync(outBuf)
+  const afterGuard = await xlsxGuardSnapshot(after)
+  for (const [p, h] of guard) {
+    if (afterGuard.get(p) !== h) {
+      writeFileAtomic(abs, origBuf)
+      throw new Error(`写入会损坏原文件（${p} 与写前不一致），已自动还原，未做任何改动`)
+    }
+  }
+  writeFileAtomic(abs, outBuf)
+}
+
+/**
+ * 在「已存在」的工作簿中追加一个新工作表，与原有工作表并存、保留原表观感。
+ * xlsx 走无损补丁：只加 1 个 sheet 部件 + 三处索引各一行，原表的绘图 / 打印设置一个字节不动；
+ * xls 是二进制老格式，只能整本重写，走 SheetJS 尽力保留。
+ */
 async function writeSpreadsheetAddSheet(target, content, opts, sheetName) {
   const ext = path.extname(target).toLowerCase()
   const { root, rest } = pickRoot(target, opts.roots)
   const abs = resolveSafe(root, rest, { mustExist: true }) // 必须已存在：是往里加 Sheet，不是新建文件
   const grid = buildSheetGrid(content)
-  // 整个工作簿会被读出来重写一遍，先备份
+  // 写入前先备份，出问题可一键还原
   const backup = backupFile(abs)
   let name
   let sheets
@@ -949,25 +1416,9 @@ async function writeSpreadsheetAddSheet(target, content, opts, sheetName) {
     XLSX.writeFile(wb, abs, { bookType: 'xls' })
     sheets = wb.SheetNames
   } else {
-    const ExcelJS = loadExcelJs()
-    const wb = new ExcelJS.Workbook()
-    await wb.xlsx.readFile(abs) // 保留原有全部工作表与样式
-    name = pickSheetName(wb.worksheets.map(w => w.name), sheetName)
-    const ws = wb.addWorksheet(name)
-    for (let r = 0; r < grid.values.length; r++) {
-      const row = ws.getRow(r + 1)
-      const vals = grid.values[r]
-      for (let c = 0; c < vals.length; c++) row.getCell(c + 1).value = fmtCell(vals[c])
-    }
-    for (const f of grid.fills) applyExcelFill(ws.getCell(f.r + 1, f.c + 1), f.argb)
-    for (let r = 0; r < grid.rowFills.length; r++) {
-      const rf = grid.rowFills[r]
-      if (!rf) continue
-      const outRow = grid.values[r] || []
-      for (let c = 0; c < outRow.length; c++) applyExcelFill(ws.getCell(r + 1, c + 1), rf)
-    }
-    await wb.xlsx.writeFile(abs)
-    sheets = wb.worksheets.map(w => w.name)
+    const added = await xlsxAddSheetLossless(abs, grid, sheetName)
+    name = added.name
+    sheets = added.sheets
   }
   const after = fs.statSync(abs)
   const out = {
@@ -1371,7 +1822,8 @@ function updateSpreadsheetLegacy(target, content, opts) {
 }
 
 // ── 原地按关键列回填 / 追加列（xlsx，保留原样式） ──
-// 用 ExcelJS 读写：保留原字体 / 列宽 / 合并单元格 / 数字格式等，仅改写指定单元格的值。
+// ExcelJS 只用来「读 + 定位」（表头行、列号、行匹配），真正写盘走 xlsxPatchCellsLossless：
+// 只替换目标 sheet 里受影响的 <c>，原表其余部件（形状 / 图表 / 打印设置 / 其它工作表）原样保留。
 async function updateSpreadsheetXlsx(target, content, opts) {
   const { root, rest } = pickRoot(target, opts.roots)
   const abs = resolveSafe(root, rest, { mustExist: true }) // 必须已存在
@@ -1419,6 +1871,8 @@ async function updateSpreadsheetXlsx(target, content, opts) {
   const newColumns = []
   const fillWarnings = []
   let rowFillAutoPromoted = false // 是否因模型未用 __rowFill 而自动扩展为整行填充
+  // 真正的写盘动作集中在这里：ExcelJS 只负责读和定位，最后按单元格打补丁（无损）
+  const edits = []
 
   const lastRow = ws.rowCount // 含表头
   // 起始列（1.0.68）：用户说「写到 O 列及之后」时由模型传 startColumn: "O"。
@@ -1446,6 +1900,7 @@ async function updateSpreadsheetXlsx(target, content, opts) {
         newColumns.push(String(k))
         // 表头名写在**真实表头行**，不是第 1 行
         ws.getRow(headerRow).getCell(c + 1).value = String(k)
+        edits.push({ r: headerRow, c: c + 1, value: String(k), fill: null })
         if (placedStart < 0) placedStart = c
         return c
       }
@@ -1488,6 +1943,7 @@ async function updateSpreadsheetXlsx(target, content, opts) {
         const cell = hitRow.getCell(ci + 1)
         cell.value = value
         applyExcelFill(cell, fill)
+        edits.push({ r: hitRow.number, c: ci + 1, value, fill })
         if (fill) {
           cellFills.add(fill)
           lastFill = fill
@@ -1497,13 +1953,18 @@ async function updateSpreadsheetXlsx(target, content, opts) {
       const appliedRowFill = rowFill || lastFill
       if (appliedRowFill) {
         const w = Math.max(header.length, ws.columnCount || 0, hitRow.cellCount || 0)
-        for (let c = 1; c <= w; c++) applyExcelFill(hitRow.getCell(c), appliedRowFill)
+        for (let c = 1; c <= w; c++) {
+          applyExcelFill(hitRow.getCell(c), appliedRowFill)
+          // fillOnly：只换样式索引，绝不动单元格里的值 / 公式
+          edits.push({ r: hitRow.number, c, fillOnly: true, fill: appliedRowFill })
+        }
         if (!rowFill && lastFill) rowFillAutoPromoted = true
       }
       updated++
     } else {
       const newRow = ws.addRow(new Array(header.length).fill(''))
       newRow.getCell(keyIdx + 1).value = fmtCell(kv)
+      edits.push({ r: newRow.number, c: keyIdx + 1, value: kv, fill: null })
       let lastFill = null
       const cellFills = new Set()
       for (const k of Object.keys(cols)) {
@@ -1512,6 +1973,7 @@ async function updateSpreadsheetXlsx(target, content, opts) {
         const cell = newRow.getCell(ci + 1)
         cell.value = value
         applyExcelFill(cell, fill)
+        edits.push({ r: newRow.number, c: ci + 1, value, fill })
         if (fill) {
           cellFills.add(fill)
           lastFill = fill
@@ -1521,15 +1983,19 @@ async function updateSpreadsheetXlsx(target, content, opts) {
       const appliedRowFill = rowFill || lastFill
       if (appliedRowFill) {
         const w = Math.max(header.length, ws.columnCount || 0, newRow.cellCount || 0)
-        for (let c = 1; c <= w; c++) applyExcelFill(newRow.getCell(c), appliedRowFill)
+        for (let c = 1; c <= w; c++) {
+          applyExcelFill(newRow.getCell(c), appliedRowFill)
+          edits.push({ r: newRow.number, c, fillOnly: true, fill: appliedRowFill })
+        }
         if (!rowFill && lastFill) rowFillAutoPromoted = true
       }
       appended.push(kv)
     }
   }
-  // 原地写回，保留原样式；写盘前留备份（写盘途中被 kill 会留下损坏的 xlsx）
+  // 原地写回：只给目标 sheet 打单元格补丁，原表的图表 / 形状 / 打印设置一个字节不动。
+  // 写盘前留备份；写完校验受保护部件（不一致会自动还原）。
   const backup = backupFile(abs)
-  await wb.xlsx.writeFile(abs)
+  await xlsxPatchCellsLossless(abs, sheetName, edits)
   const after = fs.statSync(abs)
   const out = {
     ok: true,
@@ -2061,7 +2527,21 @@ async function main() {
   else console.log(typeof result === 'string' ? result : JSON.stringify(result, null, 2))
 }
 
-main().catch((e) => {
+// 只作为 CLI 执行时才跑 main：被单测 require 时导出纯函数，不触发命令行解析
+if (require.main === module) main().catch(handleFatal)
+
+module.exports = {
+  xlsxIndex,
+  xlsxStyles,
+  xlsxMakeCell,
+  xlsxCellXmlOf,
+  xlsxParseRows,
+  xlsxPatchSheetXml,
+  xmlEsc,
+  xmlUnesc
+}
+
+function handleFatal(e) {
   const payload = {
     ok: false,
     error: e && e.message ? e.message : String(e),
@@ -2078,4 +2558,4 @@ main().catch((e) => {
   }
   printJson(payload)
   process.exitCode = 1
-})
+}

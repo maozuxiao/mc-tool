@@ -205,6 +205,13 @@ dist/
 >    b) **要点润色（本版新口径）**：输入「给 ETESC-133 加评论，说客户那边 VPN 失效了，让我们看附件里的 config 配置，不然人脸比对上报记录查不了」→ 复述的正文应是**通顺的书面语**（例如「客户侧 VPN 已失效，需核对附件中 ConfigTool 的配置，以便继续排查人脸比对上报记录无法查看的问题」），而不是把口语原样贴上去；读起来生硬、口语词（「那边 / 让我们 / 不然」）原封不动即算回归。**同时守三条线**：① 不得出现「您好 / 如有疑问请随时联系」这类客套头尾；② 不得附英文译文（用户没提翻译时出现任何英文段落即算回归）；③ 型号 / 版本 / 单号 / 报错码 / 数量等具体信息一个字都不能变，也不能编出排查结论或承诺。说「翻译成英文再加评论」→ 才只提交英文版。约束已写进 SKILL.md 硬规则 9 / frontmatter / 两个工具的参数描述，`jiraPrompt.test.ts` 会拦住误删。
 >    **③ 输入框退格不误删附件（本版回归修复）**：在输入框里 `Ctrl + V` 粘一张截图（或拖一个 xlsx 进来），正文写「帮我review下这个表格」→ 把光标移到该句**中间**（例如「表格」两个字之间）按退格 → **只能删文字，附件 chip 必须还在**；句尾连删几个字同样不能连带删附件。反向验：把光标移到**句首**（紧贴 chip 右侧）按退格 → 此时才应该删掉 chip（附件一并从待发列表移除），这正是「贴着 chip 退格」的预期行为。再验中间状态：chip 后先打几个字再全删掉，继续按退格 → 应先删 chip 而不是卡住。
 >    **④ 自检**：`npx tsc --noEmit` 0 错误、`npm test` 47 passed（新增 `attachPaths.test.ts` 11 例、`jiraPrompt.test.ts` 5 例、`inlineAttach.test.ts` 退格用例 7 例）、`npm run build` 通过；产物应为 `mc-material-query-setup-1.0.72.exe`；`%APPDATA%\mc-material-query\attachments\` 下应出现粘贴过的图片（文件名已清洗），**重启应用后**在历史会话里再回「确认」仍能复用（路径随历史持久化）。
+> 47. **改 Excel 不再把原表写坏（1.0.73，用户实测：「使用 AI Build 模式写入文件时，又把文件写坏了」）**：
+>    **① 复现素材**：一张带大量文本框 / 图片的 PI（`OR-Moges _Q4_2026_Order_PI_…xlsx`，`Truck` 表 sheet1 里有 17 个 `<xdr:sp>` 形状 + 18 个 `<xdr:pic>` 图片，还带 `Print_Area` 与 154 个合并单元格）。先把原文件复制一份留底。
+>    **② `--update` 只改两行值 + 整行上色**：Build 模式让它把某个料号的 `Unit Cost` 改成 145.5 并把该行「整行标绿」→ 用 `unzip -l` / 脚本对比两份 xlsx：**丢部件数必须为 0**，内容变化的旧部件只允许 `xl/styles.xml` + `xl/worksheets/sheet1.xml`；`xl/drawings/drawing1.xml` 里 `<xdr:sp>` 仍是 17、`<xdr:pic>` 仍是 18；`<mergeCell>` 仍是 154；`Print_Area` 仍是 `Truck!$A$1:$O$67`（**不能**变成 `$A1`）；值变化的行数 = 2，目标单元格应写成数值型 `<v>145.5</v>` 而不是字符串。回归判定：任一形状消失、出现「发现不可读取的内容」修复提示、或打印区域丢 `$`，即算失败。
+>    **③ `--newsheet` 追加一张查询表**：`write <原文件> --newsheet MC料号查询 --content "<TSV>"` → 原表 `xl/worksheets/sheet1.xml` 必须与写前**逐字节一致**（`sha1` 相同），包内只允许**新增** `xl/worksheets/sheet2.xml` 一个部件，`workbook.xml` / rels / `[Content_Types].xml` 三处各加一行登记；用 Excel 打开应看到两张表且原表文本框、图片、打印预览全部正常。
+>    **④ 追加行 + 新列**：让它「再加一行料号，并新增一列『全新列』」→ 行数 +1、`<dimension>` 扩到新末列，形状/图片计数不变；原表其余行不得发生任何值变化。
+>    **⑤ 写坏兜底**：写盘后会回读校验受保护部件（绘图 / 媒体 / 图表 / 打印设置 / `docProps`）的 SHA1，与写前不一致时**自动把原文件还原**并返回错误，不会留下半坏的文件。
+>    **⑥ 自检**：`npx tsc --noEmit` 0 错误、`npm test` 63 passed（新增 `fileOfficeLossless.test.ts` 16 例，覆盖 `xmlEsc` / `xlsxIndex` / `xlsxStyles.styleFor` / `xlsxPatchSheetXml`）、`npm run build` 通过；产物应为 `mc-material-query-setup-1.0.73.exe`。注意 `.xls` 老格式仍走 SheetJS 整本重写（OOXML 之外无法无损），要精确保样式必须用 `.xlsx`。
 
 ### 6. 发布到 GitHub Release
 
