@@ -179,3 +179,92 @@ describe('xlsxPatchSheetXml 单元格级补丁', () => {
     expect(rows[0].cells.map((c: { addr: string }) => c.addr)).toEqual(['A1', 'B1'])
   })
 })
+
+/** 最小 zip 替身：只需 files / file() / entry.async()，够 xlsxEnsureLossless 用 */
+function fakeZip(map: Record<string, string>) {
+  const files: Record<string, { dir: boolean; async: () => Promise<Buffer> }> = {}
+  for (const [name, content] of Object.entries(map)) {
+    files[name] = { dir: false, async: async () => Buffer.from(content, 'utf8') }
+  }
+  return { files, file: (n: string) => files[n] ?? null }
+}
+
+const BASE_PKG = {
+  '[Content_Types].xml': '<Types/>',
+  'xl/workbook.xml': '<workbook/>',
+  'xl/_rels/workbook.xml.rels': '<Relationships/>',
+  'xl/styles.xml': '<styleSheet/>',
+  'xl/sharedStrings.xml': '<sst><si><t>料号</t></si></sst>',
+  'xl/calcChain.xml': '<calcChain/>',
+  'xl/worksheets/sheet1.xml': '<worksheet/>',
+  'xl/drawings/drawing1.xml': '<wsDr><xdr:sp/><xdr:pic/></wsDr>',
+  'docProps/custom.xml': '<Properties/>'
+}
+
+describe('xlsxEnsureLossless 白名单校验', () => {
+  const { xlsxEnsureLossless } = fo
+
+  it('除白名单外完全没动 → 放行', async () => {
+    await expect(
+      xlsxEnsureLossless(fakeZip(BASE_PKG), fakeZip(BASE_PKG), {
+        allowParts: ['xl/worksheets/sheet1.xml', 'xl/styles.xml']
+      })
+    ).resolves.toBeUndefined()
+  })
+
+  it('白名单内的目标 sheet 变化 → 放行', async () => {
+    const after = { ...BASE_PKG, 'xl/worksheets/sheet1.xml': '<worksheet><sheetData/></worksheet>' }
+    await expect(
+      xlsxEnsureLossless(fakeZip(BASE_PKG), fakeZip(after), {
+        allowParts: ['xl/worksheets/sheet1.xml', 'xl/styles.xml']
+      })
+    ).resolves.toBeUndefined()
+  })
+
+  it('漏网部件被改（calcChain / sharedStrings）→ 拦下并说明部件名', async () => {
+    const after = { ...BASE_PKG, 'xl/calcChain.xml': '<calcChain x="1"/>' }
+    await expect(
+      xlsxEnsureLossless(fakeZip(BASE_PKG), fakeZip(after), { allowParts: ['xl/worksheets/sheet1.xml'] })
+    ).rejects.toThrow(/calcChain\.xml 与写前不一致/)
+
+    const after2 = { ...BASE_PKG, 'xl/sharedStrings.xml': '<sst/>' }
+    await expect(
+      xlsxEnsureLossless(fakeZip(BASE_PKG), fakeZip(after2), { allowParts: ['xl/worksheets/sheet1.xml'] })
+    ).rejects.toThrow(/sharedStrings\.xml 与写前不一致/)
+  })
+
+  it('部件被整块丢掉（ExcelJS 的经典行为）→ 拦下', async () => {
+    const after: Record<string, string> = { ...BASE_PKG }
+    delete after['xl/calcChain.xml']
+    await expect(
+      xlsxEnsureLossless(fakeZip(BASE_PKG), fakeZip(after), { allowParts: ['xl/worksheets/sheet1.xml'] })
+    ).rejects.toThrow(/calcChain\.xml 丢失/)
+  })
+
+  it('凭空多出预期之外的部件 → 拦下', async () => {
+    const after = { ...BASE_PKG, 'xl/worksheets/sheet99.xml': '<worksheet/>' }
+    await expect(
+      xlsxEnsureLossless(fakeZip(BASE_PKG), fakeZip(after), { allowParts: ['xl/worksheets/sheet1.xml'] })
+    ).rejects.toThrow(/多出预期之外的部件（xl\/worksheets\/sheet99\.xml）/)
+  })
+
+  it('allowNew 里登记过的新 sheet 部件 → 放行', async () => {
+    const after = { ...BASE_PKG, 'xl/worksheets/sheet2.xml': '<worksheet/>' }
+    await expect(
+      xlsxEnsureLossless(fakeZip(BASE_PKG), fakeZip(after), {
+        allowParts: ['xl/workbook.xml', 'xl/_rels/workbook.xml.rels', '[Content_Types].xml'],
+        allowNew: ['xl/worksheets/sheet2.xml']
+      })
+    ).resolves.toBeUndefined()
+  })
+
+  it('形状 / 图片 / docProps 被删同样会被抓到', async () => {
+    for (const part of ['xl/drawings/drawing1.xml', 'docProps/custom.xml']) {
+      const after: Record<string, string> = { ...BASE_PKG }
+      delete after[part]
+      await expect(
+        xlsxEnsureLossless(fakeZip(BASE_PKG), fakeZip(after), { allowParts: ['xl/worksheets/sheet1.xml'] })
+      ).rejects.toThrow(new RegExp(`${part.replace(/[./]/g, '\\$&')} 丢失`))
+    }
+  })
+})

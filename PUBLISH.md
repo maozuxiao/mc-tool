@@ -210,8 +210,8 @@ dist/
 >    **② `--update` 只改两行值 + 整行上色**：Build 模式让它把某个料号的 `Unit Cost` 改成 145.5 并把该行「整行标绿」→ 用 `unzip -l` / 脚本对比两份 xlsx：**丢部件数必须为 0**，内容变化的旧部件只允许 `xl/styles.xml` + `xl/worksheets/sheet1.xml`；`xl/drawings/drawing1.xml` 里 `<xdr:sp>` 仍是 17、`<xdr:pic>` 仍是 18；`<mergeCell>` 仍是 154；`Print_Area` 仍是 `Truck!$A$1:$O$67`（**不能**变成 `$A1`）；值变化的行数 = 2，目标单元格应写成数值型 `<v>145.5</v>` 而不是字符串。回归判定：任一形状消失、出现「发现不可读取的内容」修复提示、或打印区域丢 `$`，即算失败。
 >    **③ `--newsheet` 追加一张查询表**：`write <原文件> --newsheet MC料号查询 --content "<TSV>"` → 原表 `xl/worksheets/sheet1.xml` 必须与写前**逐字节一致**（`sha1` 相同），包内只允许**新增** `xl/worksheets/sheet2.xml` 一个部件，`workbook.xml` / rels / `[Content_Types].xml` 三处各加一行登记；用 Excel 打开应看到两张表且原表文本框、图片、打印预览全部正常。
 >    **④ 追加行 + 新列**：让它「再加一行料号，并新增一列『全新列』」→ 行数 +1、`<dimension>` 扩到新末列，形状/图片计数不变；原表其余行不得发生任何值变化。
->    **⑤ 写坏兜底**：写盘后会回读校验受保护部件（绘图 / 媒体 / 图表 / 打印设置 / `docProps`）的 SHA1，与写前不一致时**自动把原文件还原**并返回错误，不会留下半坏的文件。
->    **⑥ 自检**：`npx tsc --noEmit` 0 错误、`npm test` 63 passed（新增 `fileOfficeLossless.test.ts` 16 例，覆盖 `xmlEsc` / `xlsxIndex` / `xlsxStyles.styleFor` / `xlsxPatchSheetXml`）、`npm run build` 通过；产物应为 `mc-material-query-setup-1.0.73.exe`。注意 `.xls` 老格式仍走 SheetJS 整本重写（OOXML 之外无法无损），要精确保样式必须用 `.xlsx`。
+>    **⑤ 写坏兜底（白名单校验）**：写盘前先把新包解出来，与写前逐部件比对 SHA1 —— 除允许改的那几个部件（`workbook.xml` / `xl/_rels/workbook.xml.rels` / `[Content_Types].xml` / 目标 sheet / `styles.xml`，`--newsheet` 另加新增的那一个 sheet 部件）外，**任何一个部件**内容不同、缺失、或凭空多出，都判失败并中止（此时原文件还没被写，保持原样；写前另有 `<文件名>.bak-时间戳` 备份）。验法：故意让脚本改一下 `xl/calcChain.xml` 或在包里塞一个多余部件 → 应返回「写入会损坏原文件（… 与写前不一致）」/「多出预期之外的部件（…）」，且目标文件的 `mtime`、大小均不变。早先这里是黑名单（只盯绘图/媒体/图表/打印设置），`calcChain.xml`、`sharedStrings.xml` 被改是抓不到的。
+>    **⑥ 自检**：`npx tsc --noEmit` 0 错误、`npm test` 70 passed（新增 `fileOfficeLossless.test.ts` 23 例，覆盖 `xmlEsc` / `xlsxIndex` / `xlsxStyles.styleFor` / `xlsxPatchSheetXml` / `xlsxEnsureLossless` 白名单校验 7 例）、`npm run build` 通过；产物应为 `mc-material-query-setup-1.0.73.exe`。注意 `.xls` 老格式仍走 SheetJS 整本重写（OOXML 之外无法无损），要精确保样式必须用 `.xlsx`。
 
 ### 6. 发布到 GitHub Release
 

@@ -74,7 +74,7 @@ Windows 中文环境常见 GBK 编码的 `.txt` / `.csv`，Node 原生只认 UTF
 |------|------|------|
 | `.md` `.txt` `.csv` `.json` `.log` `.yml` 等纯文本 | ✅ | ✅（覆盖写 / `--append` 追加） |
 | `.docx` | ✅ mammoth 提取文本 | ✅ 生成：**content 给 Markdown**，产出真正的 .docx（标题/列表/粗体/表格齐全，UTF-8 任意语言）；已有文件需加 `--force` 覆盖。要**保留原布局只改文字**用 `translate_docx` |
-| `.xlsx` | ✅ exceljs 转 Markdown（公式取 result） | ✅ 生成 / `--update` 原地修改 / `--newsheet` 追加新工作表；改已有文件时**只做部件级补丁**（单元格 `inlineStr`、样式只追加 `<fill>/<xf>`），原表的形状、图片、图表、打印区域、合并单元格全部原样保留；写后回读校验，绘图/媒体部件不一致会自动还原原文件；新建用 `write`、改已有用 `write --update` 或 `write --newsheet`，禁止无 `--update`/`--newsheet` 重建 |
+| `.xlsx` | ✅ exceljs 转 Markdown（公式取 result） | ✅ 生成 / `--update` 原地修改 / `--newsheet` 追加新工作表；改已有文件时**只做部件级补丁**（单元格 `inlineStr`、样式只追加 `<fill>/<xf>`），原表的形状、图片、图表、打印区域、合并单元格全部原样保留；写后**白名单**回读校验（除允许改的部件外全部逐字节比对，缺件/多件也算失败），不通过即中止且原文件不动；新建用 `write`、改已有用 `write --update` 或 `write --newsheet`，禁止无 `--update`/`--newsheet` 重建 |
 | `.pptx` | ✅ jszip 提取 `<a:t>` 文本 | ❌ 二进制格式不支持 |
 | `.pdf` | ✅ pdfjs-dist（NodeCMapReaderFactory 解决中文丢失） | ❌ 二进制格式不支持 |
 | `.xls` | ✅ SheetJS(xlsx) 读取（老版 BIFF 二进制格式） | ❌ 二进制格式不支持 |

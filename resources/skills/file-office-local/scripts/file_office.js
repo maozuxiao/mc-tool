@@ -1163,24 +1163,34 @@ function xlsxBuildSheetPart(grid, styles) {
     '<pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/></worksheet>'
 }
 
-/** 这些部件是「原表观感」的载体，写完必须逐字节没变，否则算写坏 */
-const XLSX_GUARD_PREFIX = [
-  'xl/drawings/', 'xl/media/', 'xl/charts/', 'xl/printerSettings/', 'xl/embeddings/',
-  'xl/ctrlProps/', 'xl/drawings/vmlDrawing'
-]
-const XLSX_GUARD_FILES = ['docProps/custom.xml', 'xl/calcChain.xml', 'docProps/core.xml', 'docProps/app.xml']
-
-async function xlsxGuardSnapshot(zip) {
+/**
+ * 白名单无损校验：包里**除 allowParts 之外**的每个部件，写后都必须与写前逐字节一致；
+ * 且除 allowNew 之外不允许凭空多出部件、也不允许缺少部件。
+ *
+ * 早先这里是黑名单（只盯着绘图 / 媒体 / 图表 / 打印设置），漏掉的部件被改不会被发现
+ * —— ExcelJS 当年就是这样悄悄丢掉 calcChain.xml、改坏 definedName 的。
+ * 白名单的口径是「我不知道的全部不许动」，任何没想到的部件被碰都会立刻拦下。
+ */
+async function xlsxEnsureLossless(beforeZip, afterZip, { allowParts = [], allowNew = [] } = {}) {
   const crypto = require('crypto')
-  const snap = new Map()
-  for (const [name, entry] of Object.entries(zip.files)) {
-    if (entry.dir) continue
-    const hit = XLSX_GUARD_FILES.includes(name) || XLSX_GUARD_PREFIX.some(p => name.startsWith(p))
-    if (!hit) continue
-    const buf = await entry.async('nodebuffer')
-    snap.set(name, crypto.createHash('sha1').update(buf).digest('hex'))
+  const norm = (p) => String(p).replace(/^\/+/, '')
+  const hashOf = async (entry) =>
+    crypto.createHash('sha1').update(await entry.async('nodebuffer')).digest('hex')
+  const allow = new Set(allowParts.map(norm))
+  const allowNewSet = new Set(allowNew.map(norm))
+
+  for (const [name, entry] of Object.entries(beforeZip.files)) {
+    if (entry.dir || allow.has(name)) continue
+    const afterEntry = afterZip.file(name)
+    if (!afterEntry) throw new Error(`写入会损坏原文件（${name} 丢失），已中止，原文件未改动`)
+    if ((await hashOf(entry)) !== (await hashOf(afterEntry))) {
+      throw new Error(`写入会损坏原文件（${name} 与写前不一致），已中止，原文件未改动`)
+    }
   }
-  return snap
+  for (const [name, entry] of Object.entries(afterZip.files)) {
+    if (entry.dir || beforeZip.file(name) || allowNewSet.has(name)) continue
+    throw new Error(`写入会多出预期之外的部件（${name}），已中止，原文件未改动`)
+  }
 }
 
 const REL_WORKSHEET = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet'
@@ -1215,7 +1225,6 @@ async function xlsxAddSheetLossless(abs, grid, requestedName) {
   const part = nextSheetPart(zip)
   const sheetId = nextSheetId(sheets)
   const rid = nextRelId(relsXml)
-  const guard = await xlsxGuardSnapshot(zip)
 
   zip.file(part, xlsxBuildSheetPart(grid, styles))
   if (styles.dirty) zip.file('xl/styles.xml', styles.toXml())
@@ -1241,13 +1250,16 @@ async function xlsxAddSheetLossless(abs, grid, requestedName) {
     compressionOptions: { level: 6 }
   })
   const after = await JSZip.loadAsync(outBuf)
-  const afterGuard = await xlsxGuardSnapshot(after)
-  for (const [p, h] of guard) {
-    if (afterGuard.get(p) !== h) {
-      writeFileAtomic(abs, origBuf)
-      throw new Error(`写入会损坏原文件（${p} 与写前不一致），已自动还原，未做任何改动`)
-    }
-  }
+  // 白名单：除这几处索引 + 新 sheet 部件外，原包内其它部件必须一个字节都没变
+  await xlsxEnsureLossless(zip, after, {
+    allowParts: [
+      'xl/workbook.xml',
+      'xl/_rels/workbook.xml.rels',
+      '[Content_Types].xml',
+      'xl/styles.xml'
+    ],
+    allowNew: [part]
+  })
   writeFileAtomic(abs, outBuf)
   const afterSheets = xlsxIndex(
     await after.file('xl/workbook.xml').async('string'),
@@ -1371,7 +1383,6 @@ async function xlsxPatchCellsLossless(abs, sheetName, edits) {
   const stylesEntry = zip.file('xl/styles.xml')
   const stylesXml = stylesEntry ? await stylesEntry.async('string') : ''
   const styles = xlsxStyles(stylesXml)
-  const guard = await xlsxGuardSnapshot(zip)
 
   zip.file(partPath, xlsxPatchSheetXml(sheetXml, edits, (argb, baseS) => styles.styleFor(argb, baseS)))
   if (styles.dirty) zip.file('xl/styles.xml', styles.toXml())
@@ -1382,13 +1393,9 @@ async function xlsxPatchCellsLossless(abs, sheetName, edits) {
     compressionOptions: { level: 6 }
   })
   const after = await JSZip.loadAsync(outBuf)
-  const afterGuard = await xlsxGuardSnapshot(after)
-  for (const [p, h] of guard) {
-    if (afterGuard.get(p) !== h) {
-      writeFileAtomic(abs, origBuf)
-      throw new Error(`写入会损坏原文件（${p} 与写前不一致），已自动还原，未做任何改动`)
-    }
-  }
+  // 白名单：只允许目标 sheet 与 styles.xml 变化，其余部件（含 sharedStrings、calcChain、
+  // 绘图、打印设置、其它 sheet）一个字节都不许动，多出/缺少部件同样算失败
+  await xlsxEnsureLossless(zip, after, { allowParts: [partPath, 'xl/styles.xml'] })
   writeFileAtomic(abs, outBuf)
 }
 
@@ -2537,6 +2544,7 @@ module.exports = {
   xlsxCellXmlOf,
   xlsxParseRows,
   xlsxPatchSheetXml,
+  xlsxEnsureLossless,
   xmlEsc,
   xmlUnesc
 }
