@@ -311,3 +311,36 @@ export function placeCaretAtEnd(ed: HTMLElement | null): void {
   sel.removeAllRanges()
   sel.addRange(r)
 }
+
+/**
+ * 退格时要删掉的那枚 chip（没有则返回 null）。
+ *
+ * 坑位（用户 2026-11-04 反馈「删掉『表格』两个字，附件也被删了」）：
+ * 旧实现在 Backspace 时只看 `anchorNode.previousSibling`，**漏了 anchorOffset**。
+ * chip 后面紧跟的那段文字是同一个文本节点，于是无论光标停在这段文字的哪个位置
+ * （哪怕在句尾删一个字），只要它的前一个兄弟是 chip 就会被判定成「贴着 chip 退格」，
+ * 结果文字没删、附件先没了。
+ *
+ * 正确语义：只有光标正好位于**文本节点开头**（offset 0），或位于编辑器元素节点的
+ * 两个子节点之间，且左侧紧邻 chip 时，才算贴着 chip。
+ */
+export function chipBeforeCaret(sel: Selection | null): HTMLElement | null {
+  if (!sel || !sel.isCollapsed || !sel.anchorNode) return null
+  const node = sel.anchorNode
+  let prev: Node | null = null
+  if (node.nodeType === Node.TEXT_NODE) {
+    // 光标在文字内部或末尾 —— 用户就是要删字，绝不能动前面的 chip
+    if (sel.anchorOffset > 0) return null
+    prev = node.previousSibling
+  } else if (node.nodeType === Node.ELEMENT_NODE) {
+    const el = node as HTMLElement
+    prev = sel.anchorOffset > 0 ? el.childNodes[sel.anchorOffset - 1] || null : el.previousSibling
+  } else {
+    return null
+  }
+  // 中间夹着空的（或被清空的）文本节点时继续往前找
+  while (prev && prev.nodeType === Node.TEXT_NODE && !(prev.textContent || '').replace(/[\u200b\u00a0]/g, '')) {
+    prev = prev.previousSibling
+  }
+  return prev instanceof HTMLElement && prev.dataset.attachId ? prev : null
+}

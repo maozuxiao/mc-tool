@@ -1079,7 +1079,8 @@ export const JIRA_CREATE_TICKET_TOOL_DEFINITION = {
       'serviceDeskId / requestTypeId 必须来自 jira_service_desks / jira_request_types；' +
       '不确定必填项时先调 jira_request_type_fields。描述用 Markdown 写，服务端会转成 Jira Wiki；' +
       '长文档可传 descriptionFile（本机文本文件绝对路径）避免占用上下文。' +
-      '**描述内容按用户原话提交：用户给的成稿逐字照抄，不改写、不润色、不翻译、不补寒暄；只有用户明确要求时才改写或翻译。**',
+      '**描述内容：用户给的成稿逐字照抄；只给要点时帮他润色成通顺的书面语（默认行为），' +
+      '但不翻译、不附译文、不扩写成邮件体、不补寒暄、不增删型号/版本/单号等事实。**',
     parameters: {
       type: 'object',
       properties: {
@@ -1088,7 +1089,7 @@ export const JIRA_CREATE_TICKET_TOOL_DEFINITION = {
         summary: { type: 'string', description: '工单标题（可概括，但要含客户/现象/型号）' },
         description: {
           type: 'string',
-          description: '工单描述，Markdown 格式。**按用户原话提交，不要翻译、不要润色、不要补寒暄**'
+          description: '工单描述，Markdown 格式。**成稿照抄；只给要点可润色得更通顺，但不要翻译、不要补寒暄、不要扩写成邮件体**'
         },
         descriptionFile: { type: 'string', description: '（可选）本机 Markdown/文本文件绝对路径，作为描述正文；描述为空时才读取' },
         priority: { type: 'string', description: '（可选）优先级，可给名称（High/高）或 id' },
@@ -1126,15 +1127,16 @@ export const JIRA_ADD_COMMENT_TOOL_DEFINITION = {
       '服务端会换成 Jira 认可的提及语法并通知对方（不要自己手写 [~accountid:...]）。' +
       '**附件路径一律取消息里的【本条消息附件的本机路径】/【上一轮附件的本机路径】提示：用户贴在输入框里的图片已由系统落盘，' +
       '直接用那个路径，绝对不要再向用户索要「图片的完整路径」；只有两处提示都没有、用户也没贴文件时，才问他文件在哪。**' +
-      '**正文按用户原话提交：用户给的成稿逐字照抄，不改写、不润色、不翻译、不补「您好 / Hello」寒暄、不扩写成邮件体；' +
-      '只有用户明确说了「帮我润色 / 翻译成英文」才改，改了什么必须在确认话术里单列说明。**',
+      '**正文落笔规则：用户给的成稿逐字照抄；只给一句话要点时帮他润色成通顺专业的书面语（默认行为，用户嫌生硬）——' +
+      '但不翻译、不附译文、不补「您好 / Hello」寒暄、不扩写成邮件体、不增删型号/版本/单号等事实；' +
+      '改动了事实性表述（哪怕一个词）必须在确认话术里单列说明。**',
     parameters: {
       type: 'object',
       properties: {
         issueKey: ISSUE_KEY_SCHEMA,
         comment: {
           type: 'string',
-          description: '评论正文，Markdown。**内容按用户原话提交，不要翻译、不要润色、不要补寒暄**'
+          description: '评论正文，Markdown。**成稿照抄；只给要点可润色得更通顺专业，但不要翻译、不要补寒暄、不要扩写成邮件体**'
         },
         isPublic: { type: 'boolean', description: '是否对客户公开，默认 true' },
         mentions: {

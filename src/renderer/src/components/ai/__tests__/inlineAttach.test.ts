@@ -13,6 +13,7 @@ import {
   readEditorText,
   presentAttachIds,
   pruneToPresent,
+  chipBeforeCaret,
   type ChipRangeBox
 } from '../inlineAttach'
 
@@ -316,5 +317,79 @@ describe('粘贴/撤回的通用约束', () => {
     ed.appendChild(makeChip(att('a1', 'README.md')))
     document.body.appendChild(ed)
     expect(readEditorText(ed)).toBe('第一行\n第二行 结束')
+  })
+})
+
+/**
+ * 退格删 chip 的边界（用户 2026-11-04）：
+ * 「帮我review下这个表格」前面挂着一枚附件 chip，删掉「表格」两个字，附件也被删了。
+ * 根因是判定只看 previousSibling、没看 anchorOffset —— 这段文字的前一个兄弟就是 chip，
+ * 于是在文字中间/末尾按退格都被当成「贴着 chip」。
+ */
+describe('6. 退格只在光标贴着 chip 时才删附件', () => {
+  const withChip = (text: string): { ed: HTMLElement; chip: HTMLElement; text: Text } => {
+    const ed = document.createElement('div')
+    ed.contentEditable = 'true'
+    const chip = makeChip(att('a1', 'Moges_Q4.xlsx'))
+    ed.appendChild(chip)
+    const t = document.createTextNode(text)
+    ed.appendChild(t)
+    document.body.appendChild(ed)
+    return { ed, chip, text: t }
+  }
+
+  const select = (node: Node, offset: number) => {
+    const sel = window.getSelection()!
+    sel.removeAllRanges()
+    sel.addRange(caret(node, offset))
+    return sel
+  }
+
+  it('光标在文字中间 → 不删 chip（可以正常删字）', () => {
+    const { ed, text } = withChip('帮我review下这个表格')
+    const sel = select(text, 8)
+    expect(chipBeforeCaret(sel)).toBeNull()
+    // 编辑器与 chip 都还在，没有被误删
+    expect(ed.querySelector('[data-attach-id]')).not.toBeNull()
+  })
+
+  it('光标在文字末尾 → 不删 chip', () => {
+    const { text } = withChip('帮我review下这个表格')
+    expect(chipBeforeCaret(select(text, 12))).toBeNull()
+  })
+
+  it('光标在文字开头（紧贴 chip 右侧）→ 删 chip', () => {
+    const { chip, text } = withChip('帮我review下这个表格')
+    expect(chipBeforeCaret(select(text, 0))).toBe(chip)
+  })
+
+  it('光标在编辑器元素上、指向 chip 之后的子节点 → 删 chip', () => {
+    const { ed, chip } = withChip('abc')
+    // offset 1 = chip 与文字之间
+    expect(chipBeforeCaret(select(ed, 1))).toBe(chip)
+  })
+
+  it('没有 chip 时永远返回 null', () => {
+    const ed = makeEditor('纯文字')
+    expect(chipBeforeCaret(select(ed.firstChild as Text, 0))).toBeNull()
+  })
+
+  it('chip 与文字之间夹着空的 span → 仍能删到 chip', () => {
+    const { ed, chip } = withChip('abc')
+    const empty = document.createElement('span')
+    ed.insertBefore(empty, ed.childNodes[1])
+    // 光标落在空 span 里（offset 0），往前跳过它找到 chip
+    expect(chipBeforeCaret(select(empty, 0))).toBe(chip)
+  })
+
+  it('非折叠选区（选中一段文字）→ 交给浏览器删选区，不动 chip', () => {
+    const { text } = withChip('abcdef')
+    const sel = window.getSelection()!
+    sel.removeAllRanges()
+    const r = document.createRange()
+    r.setStart(text, 1)
+    r.setEnd(text, 4)
+    sel.addRange(r)
+    expect(chipBeforeCaret(sel)).toBeNull()
   })
 })

@@ -29,7 +29,8 @@ import {
   readEditorText,
   presentAttachIds,
   pruneToPresent,
-  placeCaretAtEnd
+  placeCaretAtEnd,
+  chipBeforeCaret
 } from './inlineAttach'
 
 interface ProviderBundle {
@@ -2243,16 +2244,14 @@ export function ChatPanel({ disabled }: Props) {
                     submit()
                     return
                   }
-                  // 光标紧贴 chip 右侧时先删 chip —— contentEditable=false 的节点浏览器删不掉
+                  // 光标紧贴 chip 右侧时先删 chip —— contentEditable=false 的节点浏览器删不掉。
+                  // 判定放在 chipBeforeCaret 里（必须看 anchorOffset），否则「在 chip 后面那句里删字」
+                  // 也会被误判成删 chip：文字没删掉，附件先没了（用户 2026-11-04 反馈）。
                   if (e.key === 'Backspace') {
-                    const sel = window.getSelection()
-                    if (sel && sel.isCollapsed && sel.anchorNode) {
-                      const node = sel.anchorNode
-                      const prev = node.nodeType === Node.TEXT_NODE ? node.previousSibling : null
-                      if (prev instanceof HTMLElement && prev.dataset.attachId) {
-                        e.preventDefault()
-                        removeAttachment(prev.dataset.attachId)
-                      }
+                    const chip = chipBeforeCaret(window.getSelection())
+                    if (chip?.dataset.attachId) {
+                      e.preventDefault()
+                      removeAttachment(chip.dataset.attachId)
                     }
                   }
                 }}
