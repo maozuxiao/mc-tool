@@ -7,8 +7,10 @@ import { resolveMode } from '@shared/ai-types'
 import { getProvider, savePreferences } from './providerStore'
 import { opencodeSessionHeaders } from './providerApi'
 import { mcSkillSystemPrompt } from './mcSkill'
+import { isRetryableMcResult } from './mcArgs'
+import { buildToolMediaMessage, extractMedia, type MediaImage } from './attachmentMedia'
 import { skillsPromptBlock } from './skillRegistry'
-import { dispatchTool, toolsForMode, type OpenFolderResult } from './toolRegistry'
+import { dispatchTool, toolsForMode, type OpenFolderResult, type ToolContext } from './toolRegistry'
 import { currentAttachNote, previousAttachNote, type SavedAttachment } from './attachPaths'
 import { persistAttachments, recallAttachments, rememberAttachments } from './attachStore'
 import { cachedToolNames as mcpCachedToolNames, isMcpTool, prepareForSkills as mcpPrepare } from './mcpClient'
@@ -69,8 +71,10 @@ function toolResultBrief(result: any): string {
   if (!result || typeof result !== 'object') return `result=${typeof result}`
   const bits: string[] = []
   if (result.ok !== undefined) bits.push(`ok=${result.ok}`)
-  if (result.error) bits.push(`error=${String(result.error).slice(0, 80)}`)
-  if (result.code) bits.push(`code=${result.code}`)
+  const err = result.error || result.error_message
+  if (err) bits.push(`error=${String(err).slice(0, 80)}`)
+  const code = result.code || result.error_code
+  if (code) bits.push(`code=${code}`)
   if (result.bytes !== undefined) bits.push(`bytes=${result.bytes}`)
   if (result.size !== undefined) bits.push(`size=${result.size}`)
   if (result.backup) bits.push('backup=1')
@@ -330,6 +334,13 @@ async function streamOpenAICompatible(input: {
   const MAX_ROUNDS = 24
   let conversation = [...messages]
 
+  // 1.0.74：工具下载的图片消息按**引用**跟踪（conversation 只是本轮内存副本，不落库）。
+  // 网关不接受「tool 结果后紧跟多模态 user 消息」时，需要整组移除再重试本轮；
+  // 用 Set 存引用比给消息打 _transient 字段可靠 —— 字段经拷贝 / 序列化会丢。
+  const mediaMsgs = new Set<any>()
+  let mediaDropped = false
+  const attachDir = join(app.getPath('userData'), 'attachments')
+
   // MCP（1.0.46）：进入轮次循环前，把「已勾选技能」绑定的服务连上（单飞、总时长有上限）。
   // 必须在这里做：tools 数组是每轮**同步**组装的，工具定义要先就绪。
   // 失败不阻断对话 —— 该服务本轮不下发工具，原因写进 debug-ai.log（并会进「诊断」）。
@@ -412,9 +423,17 @@ async function streamOpenAICompatible(input: {
       fetchController.abort()
     }, 60000)
 
-    let res: Response
+    let res: Response | null = null
+    // 1.0.74：累积变量提到外层 try 之外 —— 网关不兼容图片消息时要能整体重试本轮，
+    // 而 catch 里 continue 之后这些值会被重新填充，不能随 try 块一起销毁。
+    let content = ''
+    let reasoning = ''
+    let sawReasoning = false
+    let usage: any = null
+    let toolCalls: any[] = []
     try {
-      res = await net.fetch(`${config.baseUrl}/chat/completions`, {
+      try {
+        res = await net.fetch(`${config.baseUrl}/chat/completions`, {
         method: 'POST',
         signal: fetchController.signal,
         headers: {
@@ -434,9 +453,9 @@ async function streamOpenAICompatible(input: {
       // 每轮最多一个监听、会话结束后随 controller 一起回收，无泄漏风险。
     }
 
-    if (!res.ok || !res.body) {
-      const errText = await res.text().catch(() => '')
-      let msg = `HTTP ${res.status}`
+    if (!res || !res.ok || !res.body) {
+      const errText = res ? await res.text().catch(() => '') : ''
+      let msg = `HTTP ${res?.status}`
       try { msg = JSON.parse(errText)?.error?.message || msg } catch {}
       throw new Error(msg)
     }
@@ -444,17 +463,6 @@ async function streamOpenAICompatible(input: {
     const reader = res.body.getReader()
     const decoder = new TextDecoder()
     let buffer = ''
-    let content = ''
-    // thinking 模型的思维链（1.0.56）。DeepSeek 系（含 OpenCode Go 转发的那条上游）要求：
-    // **发起过 tool_call 的 assistant 轮，其 reasoning_content 必须在后续请求里原样回传**，
-    // 否则直接 400 `The reasoning_content in the thinking mode must be passed back to the API`。
-    // 此前我们只解析 delta.content、而且只把 {role,content,tool_calls} 放回 conversation，
-    // 于是「thinking 模型 + 调工具」从第二轮起必失败（用户实测 deepseek-v4.1-flash）。
-    // 这里逐轮收集（reasoning_content 与 reasoning 两种字段名都见过），下面按轮随消息回传。
-    let reasoning = ''
-    let sawReasoning = false
-    let usage: any = null
-    let toolCalls: any[] = []
 
     while (true) {
       // 流式阶段也要能停：父级监听已留在整轮上（推送 abort 给 fetchController），
@@ -501,6 +509,30 @@ async function streamOpenAICompatible(input: {
         if (json.usage) usage = json.usage
       }
     }
+    } catch (e: any) {
+      // 1.0.74 决策 B 降级：部分网关不接受「tool 结果之后紧跟多模态 user 消息」。
+      // 整组移除图片消息再重试本轮（round-- 不白耗一次工具轮次）；工具结果里的
+      // localPath 仍在，工具链不中断，也不会假装看过图。只降一次，二次失败真抛。
+      const aborted = e?.name === 'AbortError' || /aborted/i.test(String(e?.message || ''))
+      if (!aborted && !mediaDropped && mediaMsgs.size
+        && /tool|role|content|image|messages|400|invalid/i.test(String(e?.message || e))) {
+        mediaDropped = true
+        for (let i = conversation.length - 1; i >= 0; i--) {
+          if (mediaMsgs.has(conversation[i])) conversation.splice(i, 1)
+        }
+        mediaMsgs.clear()
+        // 明确告诉模型「图已撤回」，否则它会照着提示词里「图片已直接给你」假装看过图
+        conversation.push({
+          role: 'user',
+          content: '【系统提示】当前模型网关不接受工具下载的图片消息，图片已从上下文移除。' +
+            '请基于工具结果里的 localPath / textPreview 作答；确实需要看图时提示用户把图片拖进输入框，不要假装看过图。'
+        })
+        aiLog(`[AI] media downgrade: removed tool images after gateway error: ${String(e?.message || e).slice(0, 160)}`)
+        round--
+        continue
+      }
+      throw e
+    }
 
     // 每轮都记一行思维链状态：下一轮是否回传、回传了多少字符，全靠这两行定位
     // （`passback=yes` 表示这轮的 reasoning_content 已随 assistant(tool_calls) 带回历史）。
@@ -540,6 +572,10 @@ async function streamOpenAICompatible(input: {
     const toolController = new AbortController()
     toolControllers.set(conversationId, toolController)
     try {
+      // 1.0.74：本轮所有工具下载的图片，等全部 tool 消息 push 完再统一注入一条
+      // 多模态 user 消息（OpenAI 要求 assistant(tool_calls) 之后必须紧接 tool 消息）。
+      const pendingMedia: MediaImage[] = []
+      const pendingMediaTools = new Set<string>()
       for (const call of toolCalls) {
         // 工具是逐个执行的：每个之前查一次，停止后不再启动下一个工具
         throwIfAborted(controller.signal)
@@ -573,28 +609,44 @@ async function streamOpenAICompatible(input: {
         send({ type: 'tool-start', conversationId, messageId: assistantMessageId, run: runningRun })
         const startedAt = Date.now()
         aiLog(`[AI] tool ${call.function.name} start ${toolArgBrief(call.function.name, parsed)}`)
-        try {
-          const result = await dispatchTool(call.function.name, parsed, {
-            signal: toolController.signal,
-            allowedRoots,
-            enabledSkills: payload.enabledSkills || [],
-            requestRoot: (pp: string) => requestRoot(conversationId, pp),
-            onRun: persistedRun => {
-              // runMcQuery 会回调两次：开始时登记 running 态、结束时回传终态。
-              // 首次回调不能落「完成」态，否则工具刚起跑 UI 就把转圈收掉了。
-              if (persistedRun.status !== 'running') {
-                completeToolRun(runningRun.id, {
-                  output: persistedRun.output,
-                  summary: persistedRun.summary,
-                  status: persistedRun.status,
-                  durationMs: persistedRun.durationMs
-                })
-                send({ type: 'tool-end', conversationId, messageId: assistantMessageId, run: { ...runningRun, ...persistedRun, id: runningRun.id } })
-              }
-              // 本调用方已在外部用 appendToolRun 建好 run，故回传既有 id 即可。
-              return { id: runningRun.id }
+        const toolCtx: ToolContext = {
+          signal: toolController.signal,
+          allowedRoots,
+          enabledSkills: payload.enabledSkills || [],
+          requestRoot: (pp: string) => requestRoot(conversationId, pp),
+          onRun: persistedRun => {
+            // runMcQuery 会回调两次：开始时登记 running 态、结束时回传终态。
+            // 首次回调不能落「完成」态，否则工具刚起跑 UI 就把转圈收掉了。
+            if (persistedRun.status !== 'running') {
+              completeToolRun(runningRun.id, {
+                output: persistedRun.output,
+                summary: persistedRun.summary,
+                status: persistedRun.status,
+                durationMs: persistedRun.durationMs
+              })
+              send({ type: 'tool-end', conversationId, messageId: assistantMessageId, run: { ...runningRun, ...persistedRun, id: runningRun.id } })
             }
-          })
+            // 本调用方已在外部用 appendToolRun 建好 run，故回传既有 id 即可。
+            return { id: runningRun.id }
+          }
+        }
+        try {
+          let result = await dispatchTool(call.function.name, parsed, toolCtx)
+          // 1.0.74 #1 P1：参数类 / 网络类失败自动重试一次，不依赖模型自觉、不打扰用户。
+          // 只重试 mc_query：其它工具的重试语义（写文件 / 发邮件 / 建单）各不相同，不能一刀切。
+          if (isRetryableMcResult(result) && call.function.name === 'mc_query') {
+            aiLog(`[AI] tool mc_query auto-retry code=${result.error_code}`)
+            const retryInput = result.retryArgs || parsed
+            result = await dispatchTool(call.function.name, retryInput, toolCtx)
+            result = { ...result, retried: true }
+          }
+          // 1.0.74 #2 决策 B：必须在序列化 / 写调用日志**之前**摘掉 _images，
+          // 否则本地路径列表会占掉工具结果预算，还会被写进 tool_card。
+          const media = extractMedia(result)
+          if (media.length) {
+            pendingMedia.push(...media)
+            pendingMediaTools.add(call.function.name)
+          }
           conversation.push(openAIToolResponse(call.id, result))
           aiLog(`[AI] tool ${call.function.name} end ${Date.now() - startedAt}ms ${toolResultBrief(result)}`)
         } catch (e: any) {
@@ -604,6 +656,15 @@ async function streamOpenAICompatible(input: {
           }
           aiLog(`[AI] tool ${call.function.name} FAILED ${Date.now() - startedAt}ms: ${String(e?.message || e).slice(0, 200)}`)
           conversation.push(openAIToolResponse(call.id, { error: e.message }))
+        }
+      }
+      // mediaDropped 之后不再注入，否则同一网关错误会反复触发
+      if (!mediaDropped && pendingMedia.length) {
+        const im = buildToolMediaMessage(pendingMedia, [...pendingMediaTools].join(', ') || 'tool', attachDir)
+        if (im) {
+          conversation.push(im)
+          mediaMsgs.add(im)
+          aiLog(`[AI] injected ${pendingMedia.length} tool image(s) as multimodal user message`)
         }
       }
     } finally {

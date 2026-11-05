@@ -1,11 +1,18 @@
 import { app } from 'electron'
 import { spawn } from 'child_process'
-import { existsSync, readFileSync } from 'fs'
+import { existsSync, readFileSync, statSync } from 'fs'
 import { join } from 'path'
 import { promisify } from 'util'
 import { execFile } from 'child_process'
 import type { AIAgentMode, AIToolRun, AIExtraRoot } from '@shared/ai-types'
-import { normalizeItemNo, isItemNo, parseBatchItemNos } from '@shared/query'
+import {
+  MC_OUTPUT_SELF_CHECK, isLowConfidenceResult, makeMcError, resultCodeFor, validateMcInput,
+  type McQueryFailure
+} from './mcArgs'
+import {
+  MAX_IMAGE_BYTES, MAX_IMAGES_PER_TURN, MEDIA_TOOL_NOTE,
+  isInsideAttachDir, mimeFromName, type MediaImage
+} from './attachmentMedia'
 
 const execFileAsync = promisify(execFile)
 
@@ -78,7 +85,10 @@ ${MODE_SWITCH_NOTE}
 3.1 结果里带 pn_switch 字段（料号切换/替代通知，如 AD Plus2.0 8G eMMC → 内置 128GB）时，**必须**主动说明：这是已切换的料号、新料号是多少、截止日期（如 2026-10-31 之后旧料号一律不接单）；role=old 是切换前（别再按它报价/下单），role=new 是切换后新料号。若该料号在 MC 里查不到但返回里带了 [PN][WARN]，同样要把新料号告知用户（旧料号查不到往往正是切换造成的）。涉及客户邮件时可用 notice 里的 customer_notice_template。
 4. 批量查询时不要并发，一次 mc_query 可传入多个料号参数（args 传字符串数组）。
 4.0 **料号位数（硬规则）**：MC 料号有 **12 位和 13 位两种**（13 位 = 4-4-4 分组 + 1 位版本后缀，如 5196009100105）。13 位料号是正常料号，**禁止**以「常见是 12 位 / 位数不对 / 可能有识别误差」为由质疑用户给的料号、要求用户核对位数或截图 —— 直接照原样查。
-4.0.1 **工具报错不等于用户数据错**：mc_query 返回「参数不能为空」「不支持的 MC 查询命令」这类错误时，是**你传参的形态**有问题（args 必须是字符串数组），必须立刻改用 {"command":"batch","args":["料号1","料号2"]} 这种形态重试；**禁止**把工具失败说成「料号可能抄错了 / 请你确认位数」再让用户返工。只有工具明确返回「该料号在 MC 中不存在」时，才可以提示料号可能有问题。
+4.0.1 **工具失败只能说「查询失败」**：mc_query 的失败结果一律是 ok:false + error_code + error_message（措辞已由工具写好，照抄即可），**禁止**改写成「料号可能抄错了 / 位数不对 / BOM 未维护 / 需要权限 / 系统没数据」；带 retryable:true 的结果服务端会自动重试一次，你不要重复调用，也不要让用户返工。只有明确返回 NOT_FOUND 时才可以提示料号可能有问题。
+4.0.2 **「无数据」必须来自 OK_EMPTY**：只有结果里明确带 resultCode:OK_EMPTY 或 verifiedTwice:true 时才可说「无 BOM / 无规格文件 / 无记录」；反常识的空结论服务端会自动二次核验，核验通过才可陈述并注明「已二次核验」。
+${MC_OUTPUT_SELF_CHECK}
+${MEDIA_TOOL_NOTE}
 4.1 **料号书写（硬规则，实测最容易出错的一条）**：回复里出现的料号必须与查询返回的
    ITEM_NUMBER **逐字一致**，写成连续数字（如 515402210148）。**禁止**用 4-4-4 空格分组
    （不要写成 5154 0221 0148）、**禁止**省略或改写中间任何一位 —— 用户反馈过「输出料号时
@@ -242,7 +252,10 @@ export const MC_QUERY_TOOL_DEFINITION = {
   type: 'function',
   function: {
     name: 'mc_query',
-    description: '查询锐明 OA MC 物料系统。支持 search（描述搜索）、item（单料号）、batch（批量料号）、bom（BOM）、spec（规格文件列表）。',
+    description: '查询锐明 OA MC 物料系统。支持 search（描述搜索）、item（单料号）、batch（批量料号）、bom（BOM）、spec（规格文件列表）。' +
+      '失败时返回 ok:false + error_code + error_message，只能照抄措辞说「查询失败」，禁止解释成业务原因；' +
+      '成功但无数据返回 resultCode:OK_EMPTY。spec 传 download:true 会把规格文件下载到本机并返回 localPath，' +
+      '其中图片会作为图片消息直接给你看（用户要看接口图纸 / 规格图片时务必传 download:true）。',
     parameters: {
       type: 'object',
       properties: {
@@ -253,6 +266,11 @@ export const MC_QUERY_TOOL_DEFINITION = {
           description: '子命令参数，**必须是一维字符串数组**，例如 ["515402210148","5110038100029"]。' +
             '多个料号批量查就用 batch 一次传完，不要写成对象（禁止 {"item":"515402210148"} 这种把料号当 key 的写法）。' +
             '料号传连续数字（12 位或 13 位都可以），不要用 4-4-4 空格分组'
+        },
+        download: {
+          type: 'boolean',
+          description: '（仅 spec 有效，默认 false）为 true 时把规格文件下载到本机附件目录并返回 localPath；' +
+            '用户要看图纸 / 图片 / 规格内容时必须置 true，只对「列一下有哪些文件」保持 false。'
         }
       },
       required: ['command', 'args']
@@ -260,123 +278,126 @@ export const MC_QUERY_TOOL_DEFINITION = {
   }
 }
 
-/** 递归收集字符串（数组 / 嵌套对象 / 数字都摊平），用于宽容解析模型给的涂料号 */
-function collectStrings(v: any, out: string[], depth = 0): void {
-  if (v == null || depth > 6) return
-  if (typeof v === 'string' || typeof v === 'number') {
-    const s = String(v).trim()
-    if (s) out.push(s)
-    return
-  }
-  if (Array.isArray(v)) {
-    for (const x of v) collectStrings(x, out, depth + 1)
-    return
-  }
-  if (typeof v === 'object') {
-    for (const x of Object.values(v)) collectStrings(x, out, depth + 1)
-  }
-}
-
 /**
- * 宽容解析 args（1.0.69）。
- *
- * 实测事故（2026-11-02）：模型把 schema 里的 `args: string[]` 理解成对象，
- * 连续传了 `{"args":{"item":"5196009100105"}}`、`{"args":{"items":[...],"pns":[...]}}`
- * 这类形态，而旧实现只认 `Array.isArray(args)` —— 于是 4 次调用全部返回
- * 「MC 查询参数不能为空」，模型以为是用户料号有问题，反过来要用户核对位数、确认截图误差。
- * 这里把「字符串 / 数组 / 对象 / 各种别名键」统一摊平成料号数组，让传参形态不再决定成败。
+ * 1.0.74：参数归一化与校验已搬到 `mcArgs.ts`（纯函数、可单测、不依赖 electron）。
+ * 那里返回的是结构化结果而不是抛异常 —— 抛异常会被 dispatchTool 碾成
+ * `{ok:false, error: 纯文本}`，error_code 就丢了，模型又会把失败读成空结果。
  */
-function coerceArgs(input: any, command: string): string[] {
-  const { command: _cmd, ...rest } = (input && typeof input === 'object') ? input : {}
-  const raw = input?.args !== undefined ? input.args : rest
-  const itemCmds = command !== 'search'
-
-  // ① 整串文本：可能是 "料号1,料号2" 或「一行一个」（含 4-4-4 分组），交给既有的批量解析
-  if (typeof raw === 'string') {
-    const s = raw.trim()
-    if (!s) return []
-    if (!itemCmds) return [s]
-    return dedupe(parseBatchItemNos(s).map(normalizeItemNo).filter(Boolean))
-  }
-
-  // ② 数组 / 对象：递归摊平后去重
-  const flat: string[] = []
-  collectStrings(raw, flat)
-  const uniq = dedupe(flat)
-  if (!uniq.length) return []
-  if (!itemCmds) return uniq.slice(0, 1) // search 只需关键词
-  // 料号类命令：优先保留真正的 12/13 位料号，避免把 `{"keyword":"xxx"}` 这类杂项当料号查
-  const items = uniq.map(x => normalizeItemNo(x)).filter(x => isItemNo(x))
-  return dedupe(items.length ? items : uniq)
-}
-
-function dedupe(list: string[]): string[] {
-  const seen = new Set<string>()
-  const out: string[] = []
-  for (const x of list) {
-    const s = String(x).trim()
-    if (!s || seen.has(s)) continue
-    seen.add(s)
-    out.push(s)
-  }
-  return out
-}
-
-function validateInput(input: any): { command: string; args: string[] } {
-  const allowed = new Set(['search', 'item', 'batch', 'bom', 'spec'])
-  const command = String(input?.command || '')
-  if (!allowed.has(command)) {
-    throw new Error(
-      `不支持的 MC 查询命令: ${command || '(空)'}。command 只能是 search / item / batch / bom / spec 之一`
-    )
-  }
-  // 料号类命令的参数做归一化（2026-10-30）：模型很容易照着用户原话把 `5154 0211 0005 1`
-  // 这种 4-4-4(-1) 分组的料号原样传进来，而 OA 的 `q.ITEM_NUMBER` 只认连续数字串 ——
-  // 不归一化就会「8 个料号全查不到」。search 走的是描述关键词，不能去空格，保持原样。
-  const args = coerceArgs(input, command)
-  if (!args.length) {
-    // 报错必须告诉模型「我收到了什么」，否则它只能靠改字段名盲试（实测盲试了 4 轮）
-    const got = JSON.stringify(input?.args ?? null).slice(0, 200)
-    throw new Error(
-      `MC 查询参数不能为空（实际收到 args = ${got}）。正确写法：` +
-      `{"command":"batch","args":["515402210148","5110038100029"]} —— args 必须是**字符串数组**，` +
-      `不要把料号写成对象的 key（如 {"item":"..."}），也不要只传一个字符串字段名。`
-    )
-  }
-  if (args.length > 50) throw new Error('单次最多查询 50 个参数')
-  if (args.some((x: any) => !x.trim() || x.length > 500 || /[\r\n\0]/.test(x))) throw new Error('MC 查询参数包含非法字符')
-  return { command, args }
-}
 
 // onRun 同时承担「创建」与「更新」两个职责：首次调用传入 running 态、回传落库后的 id；
 // 后续调用传入带 id 的完整 run 做更新。因此入参允许可选 id，返回值保证带 id。
 export type McRunSink = (run: Omit<AIToolRun, 'id'> & { id?: string }) => { id: string }
 
+/**
+ * 一次子进程调用。**绝不抛业务异常**：脚本侧的结构化错误原样带回，
+ * 否则 dispatchTool 会把它收敛成 `{ok:false, error:'纯文本'}`，错误码就丢了。
+ * 用户中止（AbortError）仍按原语义上抛，让编排层中断整轮。
+ */
+async function execMcQuery(
+  command: string,
+  args: string[],
+  extraArgs: string[],
+  signal?: AbortSignal
+): Promise<{ ok: true; data: any } | { ok: false; failure: McQueryFailure }> {
+  const node = await getNodePath(signal)
+  const script = join(getSkillRoot(), 'scripts', 'mc_query.js')
+  if (!existsSync(script)) {
+    return { ok: false, failure: makeMcError('QUERY_FAILED', '内置 MC 查询脚本不存在') }
+  }
+  const child = spawn(node, [script, command, ...args, ...extraArgs, '--json'], {
+    cwd: getSkillRoot(),
+    windowsHide: true,
+    env: { ...process.env, MC_TOOL_AUTH_MODE: 'app' }
+  })
+  let stdout = ''
+  let stderr = ''
+  child.stdout.on('data', chunk => { stdout += chunk.toString() })
+  child.stderr.on('data', chunk => { stderr += chunk.toString() })
+  const cleanupAbort = () => {
+    if (!child.killed) {
+      child.kill('SIGTERM')
+      setTimeout(() => { if (!child.killed) child.kill('SIGKILL') }, 5000)
+    }
+  }
+  signal?.addEventListener('abort', cleanupAbort, { once: true })
+  let exitCode: number
+  try {
+    exitCode = await new Promise<number>((resolveCode, reject) => {
+      child.on('error', reject)
+      child.on('close', resolveCode)
+    })
+  } catch (e: any) {
+    return { ok: false, failure: makeMcError('QUERY_FAILED', e?.message || '查询子进程启动失败') }
+  } finally {
+    signal?.removeEventListener('abort', cleanupAbort)
+  }
+  if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+
+  const match = stdout.match(/===JSON_BEGIN===\s*([\s\S]*?)\s*===JSON_END===/)
+  let parsed: any = null
+  if (match) { try { parsed = JSON.parse(match[1]) } catch { /* 非法 JSON 走下面兜底 */ } }
+  if (parsed && parsed.ok === false) {
+    return { ok: false, failure: { ...parsed, source: 'mc_query' } as McQueryFailure }
+  }
+  if (exitCode !== 0 || !parsed) {
+    const errorText = `${stderr}\n${stdout}`.trim().slice(0, 500)
+    const code = /session|cookie|登录|auth/i.test(errorText) ? 'NEED_OA_LOGIN' : 'QUERY_FAILED'
+    return { ok: false, failure: makeMcError(code, errorText || `MC 查询脚本退出码 ${exitCode}`) }
+  }
+  return { ok: true, data: parsed }
+}
+
+/** spec --download 落盘后：图片走 _images 回灌，文档只回路径（交给 read_local_file） */
+function collectSpecMedia(result: any, outDir: string): { _images?: MediaImage[]; documents?: any[] } {
+  const images: MediaImage[] = []
+  const documents: any[] = []
+  for (const f of (result?.files || [])) {
+    const p = String(f?.localPath || '')
+    if (!p || !isInsideAttachDir(p, outDir) || !existsSync(p)) continue
+    let size = 0
+    try { size = statSync(p).size } catch { continue }
+    const name = String(f?.fileName || basenameOf(p))
+    const mime = mimeFromName(name)
+    if (mime && size > 0 && size <= MAX_IMAGE_BYTES && images.length < MAX_IMAGES_PER_TURN) {
+      images.push({ path: p, name, mime, size })
+    } else {
+      documents.push({ name, path: p, ext: f?.ext || '', size })
+    }
+  }
+  return {
+    ...(images.length ? { _images: images } : {}),
+    ...(documents.length ? { documents } : {})
+  }
+}
+
+function basenameOf(p: string): string {
+  return p.split(/[\\/]/).pop() || 'attachment'
+}
+
 export async function runMcQuery(input: any, onRun?: McRunSink, signal?: AbortSignal): Promise<any> {
   const started = Date.now()
-  let validated: { command: string; args: string[] }
-  try {
-    validated = validateInput(input)
-  } catch (e: any) {
-    // 校验失败也要把 run 收尾（1.0.69）：旧实现在建 run 之前抛错，onRun 从未被调用，
-    // 于是 UI 卡片永远停在「正在查询」—— 实测连挂 4 次，用户以为还在查，实际早就失败了。
-    const msg = e?.message || String(e)
+  const validated = validateMcInput(input)
+  if (!validated.ok) {
+    // 1.0.69 的教训：校验失败也要收尾工具卡片，否则 UI 永远停在「正在查询」。
     if (onRun) {
       onRun({
-        toolName: 'mc_query',
-        input,
-        status: 'error',
-        summary: msg,
-        output: { error: msg },
+        toolName: 'mc_query', input, status: 'error',
+        summary: validated.error_message, output: validated,
         durationMs: Date.now() - started
       })
     }
-    throw e
+    return validated
   }
-  const { command, args } = validated
+  const { command, args, normalized } = validated
+  // 1.0.74 决策 F：MC 规格文件与 Jira 附件共用同一条回灌链路。
+  // --out 必须指向可写的 userData，脚本默认 cwd 在安装版里位于 asar 内、不可写。
+  const wantDownload = command === 'spec' && input?.download === true
+  const outDir = join(app.getPath('userData'), 'attachments')
+  const extraArgs = wantDownload ? ['--download', '--out', outDir] : []
+
   const run = {
     toolName: 'mc_query',
-    input: { command, args },
+    input: { command, args, ...(wantDownload ? { download: true } : {}) },
     status: 'running' as const,
     summary: `正在查询 MC：${command} ${args.join(' ')}`
   }
@@ -387,59 +408,55 @@ export async function runMcQuery(input: any, onRun?: McRunSink, signal?: AbortSi
     throw new DOMException('Aborted', 'AbortError')
   }
   try {
-    const node = await getNodePath(signal)
-    const script = join(getSkillRoot(), 'scripts', 'mc_query.js')
-    if (!existsSync(script)) throw new Error('内置 MC 查询脚本不存在')
+    const first = await execMcQuery(command, args, extraArgs, signal)
+    if (!first.ok) {
+      const failure = { ...first.failure, toolRunId: persisted.id, summary: first.failure.error_message }
+      if (onRun) {
+        onRun({ ...persisted, status: 'error', summary: failure.summary, output: failure, durationMs: Date.now() - started })
+      }
+      return failure
+    }
+    let result: any = first.data
+    if (!result.resultCode) result.resultCode = resultCodeFor(command, result)
 
-    const child = spawn(node, [script, command, ...args, '--json'], {
-      cwd: getSkillRoot(),
-      windowsHide: true,
-      env: { ...process.env, MC_TOOL_AUTH_MODE: 'app' }
-    })
-
-    let stdout = ''
-    let stderr = ''
-    child.stdout.on('data', chunk => { stdout += chunk.toString() })
-    child.stderr.on('data', chunk => { stderr += chunk.toString() })
-
-    const cleanupAbort = () => {
-      if (!child.killed) {
-        child.kill('SIGTERM')
-        setTimeout(() => { if (!child.killed) child.kill('SIGKILL') }, 5000)
+    // 输出层：反常识的空结论自动二次核验（BOM 0 条 / 规格 0 文件 / 料号查无）。
+    // 只在空结果时多发一次请求，且两次不一致时以第二次为准。
+    if (!wantDownload && isLowConfidenceResult(command, result)) {
+      const again = await execMcQuery(command, args, extraArgs, signal)
+      if (again.ok) {
+        const code2 = resultCodeFor(command, again.data)
+        if (code2 === result.resultCode) result.verifiedTwice = true
+        else result = { ...again.data, resultCode: code2, verifiedTwice: true }
       }
     }
-    signal?.addEventListener('abort', cleanupAbort, { once: true })
 
-    const exitCode = await new Promise<number>((resolve, reject) => {
-      child.on('error', reject)
-      child.on('close', resolve)
-    })
-
-    signal?.removeEventListener('abort', cleanupAbort)
-    if (signal?.aborted) {
-      throw new DOMException('Aborted', 'AbortError')
-    }
-
-    const match = stdout.match(/===JSON_BEGIN===\s*([\s\S]*?)\s*===JSON_END===/)
-    if (exitCode !== 0 || !match) {
-      const errorText = `${stderr}\n${stdout}`.trim()
-      if (/session|cookie|登录|auth/i.test(errorText)) throw new Error('OA 登录状态已失效，请重新扫码登录后再试')
-      throw new Error(errorText || `MC 查询失败（exit ${exitCode}）`)
-    }
-    const result = JSON.parse(match[1])
+    const media = wantDownload ? collectSpecMedia(result, outDir) : {}
     const summary = summarize(command, result)
-    const patch = { output: result, summary, status: 'done' as const, durationMs: Date.now() - started }
-    if (onRun) onRun({ ...persisted, ...patch })
-    return { result, toolRunId: persisted.id, summary }
+    const payload: any = {
+      ok: true,
+      result,
+      toolRunId: persisted.id,
+      summary,
+      resultCode: result.resultCode,
+      ...(normalized ? { normalized: true } : {}),
+      ...(result.verifiedTwice ? { verifiedTwice: true } : {}),
+      ...media
+    }
+    if (onRun) {
+      onRun({ ...persisted, status: 'done', summary, output: payload, durationMs: Date.now() - started })
+    }
+    return payload
   } catch (e: any) {
     if (e.name === 'AbortError') {
       const patch = { output: { error: '已取消' }, summary: '已取消', status: 'error' as const, durationMs: Date.now() - started }
       if (onRun) onRun({ ...persisted, ...patch })
       throw e
     }
-    const patch = { output: { error: e.message }, summary: e.message, status: 'error' as const, durationMs: Date.now() - started }
-    if (onRun) onRun({ ...persisted, ...patch })
-    throw e
+    const failure = makeMcError('QUERY_FAILED', e?.message || String(e))
+    if (onRun) {
+      onRun({ ...persisted, status: 'error', summary: failure.error_message, output: failure, durationMs: Date.now() - started })
+    }
+    return failure
   }
 }
 

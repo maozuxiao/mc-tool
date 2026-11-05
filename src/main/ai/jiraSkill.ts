@@ -4,19 +4,30 @@
  * 来源：外部工具 `E:\工具\Jira_Jsm`（Node + 浏览器前端）。这里内置成 mc-tool 的原生技能：
  * 与 email-auto 同一模式 —— 主进程直接实现工具，**不随包分发脚本/运行时/前端页面**，不新增 npm 依赖。
  *
- * 工具面（14 个，统一 jira_ 前缀；仅在 build 模式 + 勾选「Jira/JSM 工单助手」时下发）：
+ * 工具面（15 个，统一 jira_ 前缀；仅在 build 模式 + 勾选「Jira/JSM 工单助手」时下发）：
  *   配置类 jira_config / jira_panel_status / jira_save_panel_curl
  *   只读类 jira_current_user / jira_service_desks / jira_request_types /
  *          jira_request_type_fields / jira_search_issues / jira_get_issue /
+ *          jira_get_issue_attachments（1.0.74 附件下载 + 图片回灌）/
  *          jira_request_status / jira_panel_rdms
  *   写入类 jira_create_ticket / jira_add_comment / jira_transition_issue
  *          —— 三个写操作都要求「先复述要点、等用户确认后再调用」（工具描述 + SKILL.md 双写）。
  *
  * 凭据：一律落 `userData/jira-jsm/config.json`，不通过对话索取；返回与日志只给掩码。
  */
+import { app } from 'electron'
 import { readFileSync, statSync } from 'fs'
-import { extname, resolve as resolvePath } from 'path'
-import { assertConfigured, attachLocalFiles, jsmErrorText, jsmFetch } from './jira/client'
+import { extname, join, resolve as resolvePath } from 'path'
+import {
+  assertConfigured, attachLocalFiles, jsmErrorText, jsmFetch, jsmHeaders, validateConfig
+} from './jira/client'
+import {
+  MAX_ATTACHMENT_BYTES, MAX_ATTACHMENT_CONCURRENCY, MAX_ATTACHMENT_ITEMS,
+  MAX_IMAGE_BYTES, MAX_IMAGES_PER_TURN, MEDIA_TOOL_NOTE,
+  attachmentTextPreview, cachedAttachmentFile, followAttachmentDownload,
+  isImageName, matchCommentImages, mimeFromName, saveDownloadedAttachment,
+  type MediaImage
+} from './attachmentMedia'
 import {
   configExists, configView, jiraLog, loadConfig, maskEmail, openConfigDir, writeConfigTemplate
 } from './jira/config'
@@ -411,14 +422,158 @@ async function runJiraGetIssue(input: any, signal?: AbortSignal): Promise<any> {
     created: f.created,
     updated: f.updated,
     description: description.length > 4000 ? description.slice(0, 4000) + '…（已截断）' : description,
+    // 1.0.74：补 content / mimeType / created —— Jira REST 本来就返回，旧映射全丢了，
+    // 于是模型知道「有附件」却既下不到也看不到图（见 __NEXT_VERSION.md #2 / G4）。
     attachments: (Array.isArray(f.attachment) ? f.attachment : []).slice(0, 20).map((a: any) => ({
-      id: a.id, filename: a.filename, size: a.size
+      id: a.id, filename: a.filename, size: a.size,
+      mimeType: a.mimeType || null, created: a.created || null, content: a.content || null
     })),
     commentCount: comments.length,
     ...(dedup.length ? { rdmsRefs: dedup } : {}),
     transitions: (Array.isArray(r.json?.transitions) ? r.json.transitions : [])
       .map((t: any) => ({ id: t.id, name: t.name, to: t.to?.name })),
     ...(extraDefs.length ? { customFields, ...(Object.keys(fieldUrls).length ? { fieldUrls } : {}) } : {})
+  }
+}
+
+/**
+ * 单条附件下载（1.0.74）。失败只让这一条 `status:'error'`，整体不失败；
+ * 报错文本不带签名 query 与 token。
+ */
+async function downloadIssueAttachment(
+  cfg: ReturnType<typeof loadConfig>,
+  base: string,
+  att: any,
+  maxBytes: number,
+  dir: string,
+  signal?: AbortSignal
+): Promise<any> {
+  const id = String(att?.id || '')
+  const filename = String(att?.filename || `attachment-${id}`)
+  const info: any = {
+    id,
+    filename,
+    mimeType: att?.mimeType || null,
+    size: att?.size == null ? null : Number(att.size),
+    created: att?.created || null
+  }
+  if (!att?.content) return { ...info, status: 'error', error: '附件缺少下载地址' }
+  if (Number(att.size) > maxBytes) {
+    return { ...info, status: 'skipped', error: `超过 ${Math.round(maxBytes / 1048576)}MB 上限，已跳过` }
+  }
+  try {
+    const first = new URL(String(att.content))
+    const site = new URL(base)
+    // 只信任当前站点返回的 content 地址，防止字段被篡改后打任意内网地址（SSRF）
+    if (first.protocol !== 'https:' || first.hostname.toLowerCase() !== site.hostname.toLowerCase()) {
+      throw new Error('附件下载地址不在当前 JSM 站点内，已拒绝')
+    }
+    let abs = cachedAttachmentFile(dir, id, filename, Number(att.size) || 0)
+    const cached = !!abs
+    if (!abs) {
+      // 首跳带 Basic Auth；303 到 CDN 后由 followAttachmentDownload 剥掉凭据
+      const { buf } = await followAttachmentDownload(
+        first.toString(),
+        hop => (hop === 0 ? jsmHeaders(cfg) : {}),
+        { maxBytes, signal }
+      )
+      abs = saveDownloadedAttachment(dir, id, filename, buf)
+    }
+    const st = statSync(abs)
+    const preview = attachmentTextPreview(abs, att.mimeType, filename)
+    return {
+      ...info,
+      status: 'ok',
+      cached,
+      bytes: st.size,
+      localPath: abs,
+      ...(preview ? { textPreview: preview } : {})
+    }
+  } catch (e: any) {
+    return { ...info, status: 'error', error: String(e?.message || e).slice(0, 300) }
+  }
+}
+
+/**
+ * jira_get_issue_attachments（1.0.74）
+ * 一工具两用：download:false 只列；默认列并下载。图片经 `_images` 由 chatService 回灌成
+ * 多模态消息，长文件只回 localPath + textPreview，完整内容交给 read_local_file。
+ */
+async function runJiraGetAttachments(input: any, signal?: AbortSignal): Promise<any> {
+  const cfg = loadConfig()
+  assertConfigured(cfg)
+  const { base, errors } = validateConfig(cfg)
+  if (errors.length) return { ok: false, error: errors.join('；') }
+  const issueKey = needStr(input, 'issueKey', '工单号，如 ETESC-128').toUpperCase()
+  const onlyImages = input?.onlyImages === true
+  const wantDownload = input?.download !== false
+  const includeMap = input?.includeCommentMap !== false
+  const maxBytes = clampInt(input?.maxBytes, MAX_ATTACHMENT_BYTES, 1024 * 1024, MAX_ATTACHMENT_BYTES)
+  const wanted = Array.isArray(input?.attachmentIds) && input.attachmentIds.length
+    ? new Set(input.attachmentIds.map(String))
+    : null
+
+  const r = await jsmFetch(cfg, 'GET',
+    `/rest/api/2/issue/${encodeURIComponent(issueKey)}?fields=attachment,comment`, null, signal)
+  if (r.status !== 200) return { ok: false, error: jsmErrorText(r), status: r.status }
+  const f = r.json?.fields || {}
+  const all: any[] = Array.isArray(f.attachment) ? f.attachment.filter((a: any) => a && a.id) : []
+  let list = all
+  if (wanted) list = list.filter((a: any) => wanted.has(String(a.id)))
+  if (onlyImages) list = list.filter((a: any) => isImageName(a.filename, a.mimeType))
+  const total = list.length
+  const truncated = total > MAX_ATTACHMENT_ITEMS
+  list = list.slice(0, MAX_ATTACHMENT_ITEMS)
+
+  const dir = join(app.getPath('userData'), 'attachments')
+  const results: any[] = new Array(list.length)
+  for (let i = 0; i < list.length; i += MAX_ATTACHMENT_CONCURRENCY) {
+    const batch = list.slice(i, i + MAX_ATTACHMENT_CONCURRENCY)
+    await Promise.all(batch.map(async (att: any, j: number) => {
+      results[i + j] = wantDownload
+        ? await downloadIssueAttachment(cfg, base, att, maxBytes, dir, signal)
+        : {
+            id: String(att.id), filename: att.filename, mimeType: att.mimeType || null,
+            size: att.size == null ? null : Number(att.size), created: att.created || null,
+            status: 'listed'
+          }
+    }))
+  }
+
+  const images: MediaImage[] = []
+  for (const item of results) {
+    if (item.status !== 'ok' || !item.localPath) continue
+    if (!isImageName(item.filename, item.mimeType)) continue
+    if (item.bytes > MAX_IMAGE_BYTES || images.length >= MAX_IMAGES_PER_TURN) continue
+    images.push({
+      path: item.localPath,
+      name: item.filename,
+      mime: item.mimeType || mimeFromName(item.filename) || 'image/png',
+      size: item.bytes
+    })
+  }
+
+  // 评论 ↔ 图片按文件名精确映射（不用 created 时间戳：实测相邻附件相差 0.4s 会误配）
+  const comments = (Array.isArray(f.comment?.comments) ? f.comment.comments : []).map((c: any) => ({
+    id: String(c.id || ''),
+    author: c.author?.displayName || c.author?.name || '',
+    body: String(c.body || '')
+  }))
+  const commentImages = includeMap ? matchCommentImages(comments, all) : []
+
+  return {
+    ok: true,
+    issueKey,
+    total,
+    returned: list.length,
+    downloaded: results.filter(x => x.status === 'ok').length,
+    ...(truncated
+      ? { truncatedNote: `共 ${total} 个附件，本次只处理前 ${MAX_ATTACHMENT_ITEMS} 个，可用 attachmentIds 指定其余文件` }
+      : {}),
+    attachments: results,
+    ...(commentImages.length ? { commentImages } : {}),
+    ...(images.length ? { _images: images } : {}),
+    note: MEDIA_TOOL_NOTE
   }
 }
 
@@ -1034,6 +1189,49 @@ export const JIRA_GET_ISSUE_TOOL_DEFINITION = {
   }
 }
 
+/**
+ * 1.0.74：读取工单 / 评论里的图片与附件。
+ * 图片落盘后由服务端转成多模态消息直接给模型看；日志 / 文档只回路径，按需用 read_local_file 读全文。
+ */
+export const JIRA_GET_ATTACHMENTS_TOOL_DEFINITION = {
+  type: 'function',
+  function: {
+    name: 'jira_get_issue_attachments',
+    description:
+      '读取工单的附件并下载到本机。用户要看工单 / 评论里的截图、要看轨迹图、要分析附件里的日志时用它。' +
+      '图片会作为图片消息直接提供给你（请直接看图作答，禁止说「我看不到图」）；' +
+      '日志 / PDF / 压缩包只回 localPath + textPreview，完整内容用 read_local_file 传 filePath 读取。' +
+      'commentImages 给出「哪条评论引用了哪张图」的映射，按文件名精确匹配。',
+    parameters: {
+      type: 'object',
+      properties: {
+        issueKey: ISSUE_KEY_SCHEMA,
+        download: {
+          type: 'boolean',
+          description: '默认 true（列并下载）；只想知道有哪些附件时传 false'
+        },
+        attachmentIds: {
+          type: 'array', items: { type: 'string' },
+          description: '（可选）只处理指定附件 id；不传则处理全部（最多 30 个）'
+        },
+        onlyImages: {
+          type: 'boolean',
+          description: '（可选）只看图片附件，默认 false'
+        },
+        maxBytes: {
+          type: 'number',
+          description: '（可选）单文件大小上限，默认 50MB，上限 50MB'
+        },
+        includeCommentMap: {
+          type: 'boolean',
+          description: '（可选）是否同时输出评论↔图片映射，默认 true'
+        }
+      },
+      required: ['issueKey']
+    }
+  }
+}
+
 export const JIRA_REQUEST_STATUS_TOOL_DEFINITION = {
   type: 'function',
   function: {
@@ -1193,6 +1391,10 @@ export const JIRA_TOOL_ENTRIES: Record<string, { definition: any; run: (input: a
   },
   jira_search_issues: { definition: JIRA_SEARCH_ISSUES_TOOL_DEFINITION, run: (input, ctx) => runJiraSearchIssues(input, ctx?.signal) },
   jira_get_issue: { definition: JIRA_GET_ISSUE_TOOL_DEFINITION, run: (input, ctx) => runJiraGetIssue(input, ctx?.signal) },
+  jira_get_issue_attachments: {
+    definition: JIRA_GET_ATTACHMENTS_TOOL_DEFINITION,
+    run: (input, ctx) => runJiraGetAttachments(input, ctx?.signal)
+  },
   jira_request_status: { definition: JIRA_REQUEST_STATUS_TOOL_DEFINITION, run: (input, ctx) => runJiraRequestStatus(input, ctx?.signal) },
   jira_panel_rdms: { definition: JIRA_PANEL_RDMS_TOOL_DEFINITION, run: async (input) => runJiraPanelRdms(input) },
   jira_create_ticket: { definition: JIRA_CREATE_TICKET_TOOL_DEFINITION, run: (input, ctx) => runJiraCreateTicket(input, ctx?.signal) },

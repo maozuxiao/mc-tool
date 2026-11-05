@@ -65,13 +65,15 @@ description: 用自然语言操作公司 Jira Service Management：查当前账�
 | 某服务台有哪些工单类型 | `jira_request_types`（传 `serviceDeskId`） | `requestTypes[].id / name` |
 | 某类型的必填项与选项 | `jira_request_type_fields`（传两个 id） | `requiredFields`、`priority`、`organizations`、`hint` |
 | 检索工单 | `jira_search_issues`（`jql` 必填） | 清单 + 可点击 `url` |
-| 看单条详情 | `jira_get_issue` | 状态、描述、附件、`transitions`、`rdmsRefs` |
+| 看单条详情 | `jira_get_issue` | 状态、描述、附件（`id/filename/size/mimeType/content`）、`transitions`、`rdmsRefs` |
+| 读工单 / 评论里的图片和附件（1.0.74） | `jira_get_issue_attachments`（`issueKey` 必填） | 落盘 `localPath`、`textPreview`、图片**直接作为图片消息给你看**、`commentImages` 评论↔图片映射 |
 | 看服务台视角状态 | `jira_request_status` | 当前状态、状态分类、解决结果、门户链接 |
 | 查面板里的 RDMS 关联 | `jira_panel_rdms` | `rmId`、`rdmsKind`、`rdmsUrl` |
 
 要点：
 - 用户只说「查一下工单」而没给服务台/项目时，先用 `jira_search_issues` 带 `project` 或 `reporter = currentUser()` 缩小范围；范围仍不明确就问一句，不要扫全站。
 - 找 RDMS 编号优先 `jira_get_issue`（`rdmsRefs` 直接可用）；只有它没给出、或用户明确要「面板里的关联」时才走 `jira_panel_rdms`。
+- **用户要看工单 / 评论里的截图、轨迹图，或要分析附件里的日志**（1.0.74）：用 `jira_get_issue_attachments`，**不要让用户重新上传图片**。图片会作为图片消息直接提供给你，请直接看图作答、禁止说「我看不到图」；日志 / PDF / 压缩包只回 `localPath` + `textPreview`，完整内容用 `read_local_file` 传 `filePath` 读取。`commentImages` 告诉你哪条评论引用了哪张图。
 
 ## 四、JQL 规则
 

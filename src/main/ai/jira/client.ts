@@ -118,7 +118,8 @@ export function validateConfig(cfg: JiraConfig): { base: string; errors: string[
   return { base, errors }
 }
 
-function jsmHeaders(cfg: JiraConfig): Record<string, string> {
+/** 1.0.74：附件下载复用同一套 Basic Auth 头（只在首跳携带，跟随 CDN 时由调用方剥离） */
+export function jsmHeaders(cfg: JiraConfig): Record<string, string> {
   const auth = Buffer.from(`${String(cfg.email).trim()}:${String(cfg.apiToken).trim()}`).toString('base64')
   return { Authorization: 'Basic ' + auth, 'X-ExperimentalApi': 'opt-in' }
 }

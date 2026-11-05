@@ -213,6 +213,14 @@ dist/
 >    **⑤ 写坏兜底（白名单校验）**：写盘前先把新包解出来，与写前逐部件比对 SHA1 —— 除允许改的那几个部件（`workbook.xml` / `xl/_rels/workbook.xml.rels` / `[Content_Types].xml` / 目标 sheet / `styles.xml`，`--newsheet` 另加新增的那一个 sheet 部件）外，**任何一个部件**内容不同、缺失、或凭空多出，都判失败并中止（此时原文件还没被写，保持原样；写前另有 `<文件名>.bak-时间戳` 备份）。验法：故意让脚本改一下 `xl/calcChain.xml` 或在包里塞一个多余部件 → 应返回「写入会损坏原文件（… 与写前不一致）」/「多出预期之外的部件（…）」，且目标文件的 `mtime`、大小均不变。早先这里是黑名单（只盯绘图/媒体/图表/打印设置），`calcChain.xml`、`sharedStrings.xml` 被改是抓不到的。
 >    **⑥ 自检**：`npx tsc --noEmit` 0 错误、`npm test` 70 passed（新增 `fileOfficeLossless.test.ts` 23 例，覆盖 `xmlEsc` / `xlsxIndex` / `xlsxStyles.styleFor` / `xlsxPatchSheetXml` / `xlsxEnsureLossless` 白名单校验 7 例）、`npm run build` 通过；产物应为 `mc-material-query-setup-1.0.73.exe`。注意 `.xls` 老格式仍走 SheetJS 整本重写（OOXML 之外无法无损），要精确保样式必须用 `.xlsx`。
 
+> 48. **BOM 查询误报「无 BOM」+ 附件里的图片模型看不到（1.0.74，两条一起验收）**：
+>    **① #1 参数归一化**：物料模式输入「查 5190010100062 的 BOM」→ 必须返回 26 个子项；故意把 `args` 写成单字符串 / `{"item":"..."}` / 全角 / 4-4-4 分组，也应自动归一化成功，**任何情况下都不许出现「BOM 子项 0 条 / 整机未维护 BOM / 需要权限」**。
+>    **② #1 失败与空结果不同构**：断开网络或让 OA 会话失效 → 回复里必须出现「查询失败」及 `error_code` 对应措辞，不得解释成业务原因；`args:[]` → `EMPTY_ARGS`，不重试、不编料号问题。查真实空 BOM 料号 → 工具结果带 `resultCode:OK_EMPTY` + `verifiedTwice:true`，回复注明「已二次核验」。
+>    **③ #2 Jira 图片**：Build 模式勾选 Jira/JSM 技能，问「看下 ETESC-128 评论里的轨迹图说明什么」→ 模型调用 `jira_get_issue_attachments`，`%APPDATA%\mc-material-query\attachments\` 下出现 `att-{id}-*.png`，且模型能**描述图中内容**（唯一判据）；第二跳 CDN 请求头不带 `Authorization`。追问「这条评论引用了哪张图」→ `commentImages` 给出文件名映射，`.log` 不被误配成图片。
+>    **④ #2 长文件与降级**：下载日志附件 → 工具结果只有 `localPath` + ≤500 字预览，`read_local_file` 能读到全文；混入 8 张以上图片 / 单张 >8MB → 只回灌前 8 张，单条 `status:'error'` 不影响其它。网关拒绝多模态注入时自动移除图片消息并重试本轮，回复如实说明「需要把图拖进输入框」，**工具链不中断、不假装看过图**。
+>    **⑤ #2 MC 规格图纸**：物料模式问「哪个能看到 5190010100062 的接口图纸」→ `mc_query spec` 带 `download:true`，落盘到 userData/attachments，PNG 走图片回灌、PDF 走 `read_local_file`。
+>    **⑥ 自检**：`npx tsc --noEmit` 0 错误、`npm test` 106 passed（新增 `mcArgs.test.ts` 16 例、`attachmentMedia.test.ts` 20 例）、`npm run build` 通过；产物应为 `mc-material-query-setup-1.0.74.exe`。
+
 ### 6. 发布到 GitHub Release
 
 需要一个有**仓库写权限**的 GitHub Token，二选一：

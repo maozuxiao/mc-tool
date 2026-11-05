@@ -228,16 +228,12 @@ function parseArgs(argv) {
   }
   const cmd = rest[0];
   const params = rest.slice(1);
-  if (!cmd) { printUsage(); process.exit(1); }
+  if (!cmd) { printUsage(); printError('EMPTY_ARGS', '缺少子命令 cmd'); }
   if (!['search', 'item', 'batch', 'bom', 'spec'].includes(cmd)) {
-    console.error(`[ERROR] 未知子命令: ${cmd}`);
-    printUsage();
-    process.exit(1);
+    printError('UNSUPPORTED_COMMAND', `未知子命令: ${cmd}`);
   }
   if (params.length === 0) {
-    console.error(`[ERROR] 子命令 ${cmd} 需要参数`);
-    printUsage();
-    process.exit(1);
+    printError('EMPTY_ARGS', `子命令 ${cmd} 需要参数`);
   }
   return { cmd, params, outDir, orgId, download, json };
 }
@@ -258,10 +254,30 @@ function printUsage() {
 }
 
 // JSON 输出：用标记包裹，便于调用方从 stdout 中可靠提取
+// 1.0.74：成功结果统一带 ok:true，让「调用成功」在结构上不可能与失败混淆。
 function printJson(obj) {
   console.log('===JSON_BEGIN===');
-  console.log(JSON.stringify(obj));
+  console.log(JSON.stringify({ ok: true, ...obj }));
   console.log('===JSON_END===');
+}
+
+// 1.0.74：失败一律走结构化协议，错误码与 src/main/ai/mcArgs.ts 一一对应。
+// 关键：错误文本由工具给（固定含「查询失败」），模型不得自行改写成业务原因。
+function printError(code, message, extra) {
+  // 脚本侧只有网络 / 执行类失败值得原样重试；参数错误由 TS 层带 retryArgs 修正，
+  // 到了这里再用原参数重试一次只会重复失败（且不打扰用户的意义也没了）。
+  const retryable = ['NETWORK_ERROR', 'QUERY_FAILED'].includes(code);
+  console.log('===JSON_BEGIN===');
+  console.log(JSON.stringify({
+    ok: false,
+    error_code: code,
+    error_message: `查询失败：${message}`,
+    retryable,
+    ...(extra || {})
+  }));
+  console.log('===JSON_END===');
+  console.error(`[ERROR] ${code}: ${message}`);
+  process.exit(code === 'NEED_OA_LOGIN' ? 2 : 1);
 }
 
 // ── Cookie 缓存 ──────────────────────────────────────────────
@@ -360,10 +376,7 @@ async function callApi(method, queryParams) {
   }
   // MC Tool 集成模式：OA 登录由 Electron App 扫码完成，脚本不得拉起 Chrome。
   if (process.env.MC_TOOL_AUTH_MODE === 'app') {
-    console.log('===JSON_BEGIN===');
-    console.log(JSON.stringify({ error: 'NEED_OA_LOGIN', message: 'OA 会话失效，请在 MC Tool 中重新扫码登录' }));
-    console.log('===JSON_END===');
-    process.exit(2);
+    printError('NEED_OA_LOGIN', 'OA 会话失效，请在 MC Tool 中重新扫码登录');
   }
   return await directApi(method, queryParams, loadCookieJar());
 }
@@ -903,7 +916,10 @@ async function main() {
         if (known) logPnSwitch([{ ITEM_NUMBER: itemNo, pn_switch: known }]);
       }
       if (json) {
-        printJson({ itemNumber: itemNo, method: result.method || null, error: result.error || null, rows: rows2 });
+        printJson({
+          itemNumber: itemNo, method: result.method || null, error: result.error || null, rows: rows2,
+          resultCode: rows2.length ? 'OK' : 'NOT_FOUND'
+        });
       } else {
         const rows = rows2.map(r => ({ ...r, _fallback: result.method === 'ITEM_DESC' }));
         if (rows.length === 0) rows.push({ ITEM_NUMBER: itemNo, ITEM_DESC: '未找到', _error: true });
@@ -968,7 +984,10 @@ async function main() {
       attachPnSwitchToBomRows(bomRows);
       logPnSwitch(parentRows, 'BOM 父项 ');
       logPnSwitch(bomRows, 'BOM 子项 ');
-      if (json) printJson({ itemNumber: itemNo, parent: parentRows[0] || {}, columns, bomRows });
+      if (json) printJson({
+        itemNumber: itemNo, parent: parentRows[0] || {}, columns, bomRows,
+        resultCode: bomRows.length ? 'OK' : 'OK_EMPTY'
+      });
       else saveHtml(outDir, 'bom_result.html', bomReportHtml(parentRows[0] || {}, bomRows, columns, itemNo));
     }
 
@@ -996,26 +1015,31 @@ async function main() {
             console.log(`  [OK] ${buf.length} bytes -> ${fp}`);
           } catch (e) {
             console.error(`  [ERROR] ${e.message}`);
-            f.downloadError = e.message;
+            f.downloadErrorCode = 'QUERY_FAILED';
+            f.downloadError = `查询失败：${e.message}`;
           }
         }
       }
 
-      if (json) printJson({ itemNumber: itemNo, files });
+      if (json) printJson({
+        itemNumber: itemNo, files,
+        resultCode: files.length ? 'OK' : 'OK_EMPTY',
+        ...(downloadDir ? { downloadDir } : {})
+      });
       else saveHtml(outDir, 'spec_file_result.html', specReportHtml(files, itemNo, downloadDir));
     }
 
     console.log('[DONE]');
   } catch (e) {
     if (e.sessionInvalid) {
-      console.error('[FATAL] 登录后会话仍无效，请检查内网网络，或手动在浏览器打开 OA 登录后重试');
-      process.exit(1);
+      printError('NEED_OA_LOGIN', '登录后会话仍无效，请检查内网网络，或在浏览器打开 OA 登录后重试');
     }
     throw e;
   }
 }
 
 main().catch(err => {
-  console.error('[FATAL]', err.message);
-  process.exit(1);
+  const m = String((err && err.message) || err);
+  const code = /timeout|ECONN|ENOTFOUND|socket|fetch failed|网络/i.test(m) ? 'NETWORK_ERROR' : 'QUERY_FAILED';
+  printError(code, m);
 });

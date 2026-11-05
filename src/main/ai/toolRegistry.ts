@@ -1,6 +1,10 @@
+import { app } from 'electron'
 import { tmpdir } from 'os'
 import { unlinkSync, writeFileSync } from 'fs'
 import { join } from 'path'
+import {
+  READ_LOCAL_FILE_TOOL_DEFINITION, readLocalTextFile
+} from './attachmentMedia'
 import { bareSkillId } from '@shared/ai-types'
 import type { AIAgentMode, AIExtraRoot } from '@shared/ai-types'
 import { MC_QUERY_TOOL_DEFINITION, runMcQuery, type McRunSink } from './mcSkill'
@@ -58,6 +62,29 @@ const REGISTRY: Record<string, ToolEntry> = {
   mc_query: {
     definition: MC_QUERY_TOOL_DEFINITION,
     run: (input, ctx) => runMcQuery(input, ctx.onRun, ctx.signal)
+  },
+  // 1.0.74：工具下载的日志 / 文档按需读全文；图片走多模态回灌，不走这里
+  read_local_file: {
+    definition: READ_LOCAL_FILE_TOOL_DEFINITION,
+    run: async (input, ctx) => {
+      const filePath = String(input?.filePath || '').trim()
+      const maxChars = Math.min(Math.max(Number(input?.maxChars) || 40000, 1000), 200000)
+      const dir = join(app.getPath('userData'), 'attachments')
+      const r = readLocalTextFile(filePath, { maxChars, allowedDir: dir })
+      if (r.ok) return r
+      // PDF / Office 转纯文本：绝对路径 + 空 roots 时 file-office-local 直接放行
+      if (/\.(pdf|docx?|xlsx?|pptx?|rtf|odt|ods|odp|epub|xls|ppt)$/i.test(filePath)) {
+        try {
+          const doc = await fileSkillRead({
+            path: filePath, roots: [], maxBytes: 50 * 1024 * 1024, signal: ctx.signal
+          })
+          return { ...doc, ok: true, path: filePath, text: doc?.text ?? doc }
+        } catch (e: any) {
+          return { ok: false, error: e?.message || String(e) }
+        }
+      }
+      return { ok: false, error: r.error }
+    }
   },
   // ── 内置技能「鸿翼文件查询下载」提供的工具（仅 build 模式 + 已启用该技能时下发）──
   wjxt_search: {
@@ -237,7 +264,7 @@ const SKILL_TOOLS: Record<string, string[]> = {
   'jira-jsm': [
     'jira_config', 'jira_panel_status', 'jira_save_panel_curl',
     'jira_current_user', 'jira_service_desks', 'jira_request_types', 'jira_request_type_fields',
-    'jira_search_issues', 'jira_get_issue', 'jira_request_status', 'jira_panel_rdms',
+    'jira_search_issues', 'jira_get_issue', 'jira_get_issue_attachments', 'jira_request_status', 'jira_panel_rdms',
     'jira_create_ticket', 'jira_add_comment', 'jira_transition_issue'
   ]
 }
@@ -287,10 +314,10 @@ export function toolNamesForMode(mode: AIAgentMode, hasWorkspace: boolean, enabl
   // 只能列清单、让用户自己点链接，或回「请切换到 Build 模式」（用户反馈的核心痛点）。
   // 1.0.54 先放开了 file_download；1.0.71 起再放开只读四件套 + file_write，
   // 边界仍由「受保护系统目录」闸门把守，且不开放 open_folder 与命令执行。
-  if (mode === 'mc') return [...MC_MODE_FILE_TOOL_DEFINITIONS.map(t => t.function.name), 'mc_query']
+  if (mode === 'mc') return [...MC_MODE_FILE_TOOL_DEFINITIONS.map(t => t.function.name), 'mc_query', 'read_local_file']
   // build：文件工具 + 打开目录 + mc_query 全量下发；未授权目录时文件工具会引导用 open_folder
   void hasWorkspace
-  return [...FILE_TOOL_DEFINITIONS.map(t => t.function.name), 'mc_query', ...skillToolNames(enabledSkills)]
+  return [...FILE_TOOL_DEFINITIONS.map(t => t.function.name), 'mc_query', 'read_local_file', ...skillToolNames(enabledSkills)]
 }
 
 /**
@@ -299,16 +326,16 @@ export function toolNamesForMode(mode: AIAgentMode, hasWorkspace: boolean, enabl
  */
 export function toolsForMode(mode: AIAgentMode, hasWorkspace: boolean, enabledSkills?: string[]): any[] {
   if (mode === 'ask') return []
-  if (mode === 'mc') return [...MC_MODE_FILE_TOOL_DEFINITIONS, MC_QUERY_TOOL_DEFINITION]
+  if (mode === 'mc') return [...MC_MODE_FILE_TOOL_DEFINITIONS, MC_QUERY_TOOL_DEFINITION, READ_LOCAL_FILE_TOOL_DEFINITION]
   // build：文件工具 + 打开目录 + mc_query 全量下发（不再强制先选工作区）+ 已启用技能带来的工具
   void hasWorkspace
-  return [...FILE_TOOL_DEFINITIONS, MC_QUERY_TOOL_DEFINITION, ...skillToolDefinitions(enabledSkills)]
+  return [...FILE_TOOL_DEFINITIONS, MC_QUERY_TOOL_DEFINITION, READ_LOCAL_FILE_TOOL_DEFINITION, ...skillToolDefinitions(enabledSkills)]
 }
 
 // 非 mc_query 工具没有 runMcQuery 那种「内部回调 onRun」机制，
 // 这里统一在结束时补发一次终态，让 UI 工具卡片能从转圈变成完成。
 function buildFileSummary(name: string, result: any): string {
-  if (!result || result.ok === false) return `失败：${result?.error || '未知错误'}`
+  if (!result || result.ok === false) return `失败：${result?.error || result?.error_message || '未知错误'}`
   switch (name) {
     case 'wjxt_search': return result?.ok ? `找到 ${result.count ?? 0} 个文件` : `失败：${result?.error || '未知错误'}`
     case 'wjxt_download': return result?.ok ? `已下载 ${result.items?.length ?? 0} 个文件` : `失败：${result?.error || '未知错误'}`

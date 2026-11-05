@@ -4,7 +4,7 @@
 
 - 仓库：https://github.com/maozuxiao/mc-tool
 - 技术栈：Electron 33 + electron-vite + React 18 + TypeScript + Zustand，UI 组件库 [`animal-island-ui`](https://www.npmjs.com/package/animal-island-ui)；AI 面板里的操作类小图标用 [`naive-icons`](https://www.npmjs.com/package/naive-icons)（同为手绘 naive 风，按需引 `svg/*.svg?raw` 并改色跟随主题，见 `src/renderer/src/components/NaiveIcon.tsx`）
-- 当前版本：`1.0.73`（`package.json` 的 `version` 为准）
+- 当前版本：`1.0.74`（`package.json` 的 `version` 为准）
 
 ---
 
@@ -199,6 +199,7 @@
 - **路径容错（1.0.70）**：模型给的路径里混进 NBSP / 全角斜杠 / 零宽字符，或把 `api_reference.md` 写成 `api reference.md`、目录名大小写不一致时，工具会先清洗、再逐段在真实目录里做归一化匹配（仅在唯一命中时采纳，绝不猜）；仍找不到就报「实际解析成了什么 + 最近存在的上级目录 + 该目录下有哪些条目」。模型若给的是**旧安装目录**的绝对路径，会自动按当前技能目录重定位。**表头不在第 1 行**的表格（PI / 报价单 / 对账单）也能定位真实表头（`headerRow` 可显式指定），合并单元格不再产生重复列名，`read` 的输出带 Excel 真实行号（`R13`）与列字母。
 - **整行染色**：更新 / 写入时可用 `__rowFill` / `rowFill` / `行色` / `整行颜色` / `rowColor` 键指定 `green` / `yellow` / `red`（或具体 ARGB 色），把该关键列所在行从 A 列到工作表最右列整体重染、覆盖旧色；未指定颜色键时回退到该行最右侧有填充的单元格颜色。
 - **改 Excel 不再改坏原表（1.0.73）**：此前 `--update` / `--newsheet` 用 ExcelJS 整本重写，而 ExcelJS 只认 OOXML 的图片（`<xdr:pic>`）、**不认文本框 / 标注 / 箭头等形状（`<xdr:sp>`）**，还会丢 `calcChain.xml`、打印设置和 `docProps/custom.xml`，`Print_Area` 的 `$A$1` 会被写成 `$A1` —— 结果就是改两个单元格，整张 PI 上的 17 个文本框全没了。现在改成**部件级无损补丁**：只增/改必需的部件（`workbook.xml`、rels、`[Content_Types].xml`、目标 sheet、`styles.xml`），单元格一律写 `inlineStr`（不动 `sharedStrings.xml`），样式只**追加** `<fill>`/`<xf>` 并以原 `xf` 为模板克隆（不改任何既有索引，字体/边框/数字格式不会被吃掉），公式和值也不会被 `fillOnly` 上色过程覆盖。写盘后做**白名单回读校验**：除允许改的那几个部件（`workbook.xml` / rels / `[Content_Types].xml` / 目标 sheet / `styles.xml` + 新增的那一个 sheet 部件）外，原包内**每一个**部件的 SHA1 都必须与写前一致，缺部件、多出部件同样算失败。校验不过就直接中止、原文件不动（写前另有 `.bak-时间戳` 备份）—— 口径是「我不知道的部件一律不许动」，任何没想到的角落被碰都会当场拦下，而不是靠一张黑名单去猜。
+- **工具下载的图片直接给模型看、工具失败不再被当成「查无数据」（1.0.74）**：① `mc_query` 失败一律返回 `ok:false` + `error_code` + `error_message`（措辞由工具给，模型只能照抄「查询失败」），参数类失败自动归一化 / 自动重试一次，反常识空结论（BOM 0 条、规格 0 文件）自动二次核验后才允许陈述 —— 不会再出现「工具报错 → 回复整机未维护 BOM」；② 新增 `jira_get_issue_attachments` 与 `read_local_file`，工单 / 评论里的截图、MC 规格图纸会下载落盘并**作为图片消息直接进上下文**，日志 / PDF 只回 `localPath` 按需读全文；图片消息按引用跟踪、不写进会话历史，网关不兼容时自动降级为路径提示，不中断工具链，也不会假装看过图。
 - **目录与搜索**：`file_search` 支持正则（`--regex`）、文件名通配符（`*`/`?`）、按类型过滤（`--glob` / `--ext`），类似 FileLocatorPro 的保底检索。
 - **下载文件到目录**：`file_download` 把 URL 下载到你指定的目录。支持 OA 物料规格文件链接（自动复用当前 OA 登录态）与任意 http/https 直链；**边下边写**（先写 `xxx.part`，完成再改名，失败自动清理），只有「空闲 60 秒没有新数据」才判超时，大文件不会被打断；目录不存在自动创建，同名文件自动重命名（`名称(1).ext`）**不覆盖**已有文件，单次上限 200MB。目标目录必须在已授权工作区内，越界会提示先用 `open_folder` 打开该目录；OA 未登录时会提示先在应用内登录 OA。
 
@@ -440,9 +441,9 @@ npm run pack:all   # 全平台
 ```
 dist/
 ├─ latest.yml                            # 自动更新元数据
-├─ mc-material-query-setup-1.0.73.exe            # NSIS 安装包
-├─ mc-material-query-setup-1.0.73.exe.blockmap  # 增量更新块映射
-└─ mc-material-query-1.0.73.exe   # 便携版
+├─ mc-material-query-setup-1.0.74.exe            # NSIS 安装包
+├─ mc-material-query-setup-1.0.74.exe.blockmap  # 增量更新块映射
+└─ mc-material-query-1.0.74.exe   # 便携版
 ```
 
 > macOS 交叉编译在 Windows 上不可靠，DMG 请在 macOS 上打包。
