@@ -3,6 +3,11 @@ import { app, BrowserWindow, session } from 'electron'
 import { appendFileSync, existsSync, statSync, renameSync, unlinkSync } from 'fs'
 import { join } from 'path'
 import { PARTITION, downloadToDir, type DownloadToDirResult } from './fileDownload'
+import { shouldThrottleLoginSync, isWjSsoShimUrl } from './wjxtSyncPolicy'
+import { tr, getUiLang } from './uiLang'
+import {
+  clearWjxtCredentials, loadWjxtAccounts, loadWjxtCredentials, saveWjxtCredentials
+} from './wjxtCredentials'
 import type { AIExtraRoot, IamAlive } from '@shared/ai-types'
 
 /**
@@ -370,14 +375,13 @@ export async function silentSsoHeal(): Promise<boolean> {
  */
 export const WJXT_H5_LOGIN_URL = `${WJXT_ORIGIN}/h5.html#login/index?returnUrl=%252Findex.html`
 
-// ── 关于「记住账号密码」：本应用**不再保存也不再使用**文件系统账号密码 ────────────
-// 原因：站点（edoc2）本身没有「让第三方记住密码」的接口，所谓记住/自动续登是**浏览器自己的行为**；
-// 应用此前是在 H5 登录页里注入脚本抓取用户输入的账号密码再加密落盘（userData/wjxt-login.json），
-// 这既越权（用户以为只是登录一次）也脆弱（页面结构一变就抓不到，弹窗也就不再出现 —— 用户反馈的正是
-// 「登录时没有保存账号密码的窗口」）。1.0.48 起整套移除：不保存、不读取、不自动填表续登。
-// 已存在的 wjxt-login.json 由主进程启动时清理（见 src/main/index.ts）。
+// ── 关于「记住账号密码」（1.0.75 按用户明确要求恢复，口径与 1.0.48 前完全不同）──
+// 1.0.48 曾因「越权抓取 + 页面结构脆弱」整套移除；这次用户明确要求「输入的账密可以保存、
+// 账密更新也要实时更新」，所以恢复为：safeStorage 加密落盘（见 wjxtCredentials.ts）、
+// 只在登录成功后保存最后一次提交的值、明文不进日志、不上传、可随时清除。
+// 文件用 wjxt-credentials.bin，与旧的 wjxt-login.json 区分（后者仍由主进程启动时清理）。
 
-/** 页面里要执行的脚本：只探测 H5 登录表单是否渲染出来（不再抓任何输入值） */
+/** 页面里要执行的脚本：只探测 H5 登录表单是否渲染出来 */
 function h5FormReadyScript(): string {
   return `(() => {
   try {
@@ -389,24 +393,152 @@ function h5FormReadyScript(): string {
 })()`
 }
 
+/**
+ * 1.0.75：H5 登录页的自动填充 + 提交值捕获。
+ * - 有已保存凭据 → 填入用户名/密码并自动点登录，窗口可保持隐藏，用户无感；
+ * - 无论自动还是手动，都在「点登录」那一刻把最新输入通过 console 通道发给主进程，
+ *   主进程只在**登录成功后**加密保存 —— 密码改了重新登一次即自动更新，错密码不会记住。
+ */
+function h5AutofillScript(
+  creds: { username: string; password: string } | null,
+  accounts: Array<{ username: string; password: string }>
+): string {
+  return `(() => {
+  try {
+    var u = document.querySelector('input.mui-input-clear');
+    var p = document.querySelector('input.mui-input-password');
+    var btn = document.querySelector('div.login-btn') || document.querySelector('button.mui-btn-primary');
+    if (!u || !p) return 'no-form';
+    function setVal(el, v) {
+      el.value = v;
+      ['input', 'change', 'blur'].forEach(function (n) {
+        try { el.dispatchEvent(new Event(n, { bubbles: true })); } catch (e) {}
+      });
+    }
+    var accounts = ${JSON.stringify(accounts || [])};
+    var creds = ${JSON.stringify(creds || null)};
+
+    // 1.0.75：多个账号时在用户名输入框上方给一个下拉框，选中即自动填充账号密码。
+    // 只有 1 个账号时不显示，避免多余控件。
+    var sel = document.getElementById('__mcAccountSelect');
+    if (!sel && u.parentNode && accounts.length > 1) {
+      sel = document.createElement('select');
+      sel.id = '__mcAccountSelect';
+      sel.setAttribute('style', 'width:100%;box-sizing:border-box;margin:0 0 10px;padding:8px 10px;' +
+        'border:1px solid #ddd;border-radius:6px;font:13px sans-serif;color:#333;background:#fff');
+      var ph = document.createElement('option');
+      ph.value = ''; ph.textContent = ${JSON.stringify(tr('wjxtAccountSelect'))};
+      sel.appendChild(ph);
+      accounts.forEach(function (a) {
+        var o = document.createElement('option');
+        o.value = a.username; o.textContent = a.username;
+        sel.appendChild(o);
+      });
+      u.parentNode.insertBefore(sel, u);
+      sel.addEventListener('change', function () {
+        var a = accounts.filter(function (x) { return x.username === sel.value; })[0];
+        if (a) { setVal(u, a.username); setVal(p, a.password); }
+      });
+    }
+
+    // 「记住账号密码」：放在**密码框下、登录按钮上**（用户指定的版式），
+    // 左边缘与密码输入框 / 登录按钮对齐 —— 用输入框的实时 left 算偏移，页面改版也不跑偏。
+    var cb = document.getElementById('__mcRememberCheck');
+    if (!cb && btn && btn.parentNode) {
+      var wrap = document.createElement('label');
+      wrap.id = '__mcRememberWrap';
+      wrap.setAttribute('style', 'display:flex;align-items:center;gap:6px;margin:10px 0 12px;' +
+        'font:12px/1.6 sans-serif;color:#666;cursor:pointer');
+      cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.id = '__mcRememberCheck';
+      cb.checked = true;
+      wrap.appendChild(cb);
+      wrap.appendChild(document.createTextNode(${JSON.stringify(tr('wjxtRemember'))}));
+      btn.parentNode.insertBefore(wrap, btn);
+      try {
+        var d = Math.round(p.getBoundingClientRect().left - wrap.getBoundingClientRect().left);
+        if (d) wrap.style.marginLeft = d + 'px';
+      } catch (e) {}
+    }
+    if (btn && !window.__mcWjCredsHooked) {
+      window.__mcWjCredsHooked = true;
+      btn.addEventListener('click', function () {
+        try {
+          var c = document.getElementById('__mcRememberCheck');
+          console.log('__MC_WJXT_CREDS__' + JSON.stringify({
+            username: u.value, password: p.value, remember: !c || c.checked
+          }));
+        } catch (e) {}
+      }, true);
+    }
+    if (creds && creds.username && creds.password) {
+      setVal(u, creds.username);
+      setVal(p, creds.password);
+      if (btn) { setTimeout(function () { btn.click(); }, 300); return 'autofilled'; }
+      return 'filled-no-button';
+    }
+    return 'manual';
+  } catch (e) { return 'error:' + String((e && e.message) || e); }
+})()`
+}
+
 let h5Win: BrowserWindow | null = null
 let h5Pending: Promise<boolean> | null = null
 
-/** 登录成功后的收尾：关窗 → 让隐藏页面上下文用新会话重新绑定 */
+/**
+ * 1.0.75：edoc2 会话建立后的通知（由 index.ts 注入）。
+ * H5 登录只销毁自己这个窗口、重绑隐藏上下文，**不会**刷新用户从 OA 打开的那个
+ * 可见窗口 —— 它会永远停在截图里的 `Loading...`（2026-11-09 实测）。
+ */
+let sessionRestoredHandler: (() => void) | null = null
+export function setWjxtSessionRestored(fn: (() => void) | null): void {
+  sessionRestoredHandler = fn
+}
+
+/** 登录成功后的收尾：关窗 → 通知可见窗口刷新 → 让隐藏页面上下文用新会话重新绑定 */
 async function afterH5LoginSuccess(win: BrowserWindow): Promise<void> {
   wjxtLog('[h5login] logged in')
   try { if (!win.isDestroyed()) win.destroy() } catch { /* ignore */ }
   warmedUp = false
+  try { sessionRestoredHandler?.() } catch { /* ignore */ }
   await reloadCtxWin()
 }
 
 /**
- * 打开 H5 登录窗口并等登录成功（**总是可见**：由用户在窗口里自己输账号密码）。
- * 返回 true = edoc2 会话已建立。全程只创建一次窗口（重复调用复用同一个 Promise）。
+ * 1.0.75：登录窗口的「立即反馈」占位页（data URL，零网络请求）。
+ * 站点 H5 页冷启动要几秒到十几秒，旧实现让用户对着空白 / 迟迟不出现的窗口等；
+ * 先渲染一个带 spinner + 进度条的本地页，真实页 commit 前 Chromium 会一直显示它。
+ */
+function h5LoadingUrl(): string {
+  // 文案在调用时按当前界面语言取词（模块级常量会在 dialog:setLang 之前就固化成中文）
+  const html = `<!doctype html><html lang="${getUiLang()}"><head><meta charset="utf-8"><style>
+html,body{height:100%;margin:0;background:#fff;font:14px/1.6 "Microsoft YaHei",sans-serif;color:#555;
+display:flex;align-items:center;justify-content:center;flex-direction:column;gap:16px}
+.sp{width:38px;height:38px;border:3px solid #e3edff;border-top-color:#2b7bf3;border-radius:50%;animation:r .8s linear infinite}
+@keyframes r{to{transform:rotate(360deg)}}
+.bar{width:180px;height:4px;background:#eef3fb;border-radius:2px;overflow:hidden}
+.bar i{display:block;width:40%;height:100%;background:#2b7bf3;border-radius:2px;animation:b 1.2s ease-in-out infinite}
+@keyframes b{0%{transform:translateX(-100%)}100%{transform:translateX(350%)}}
+</style></head><body><div class="sp"></div><div class="bar"><i></i></div><div>${tr('wjxtLoading')}</div></body></html>`
+  return 'data:text/html;charset=utf-8,' + encodeURIComponent(html)
+}
+
+/**
+ * 1.0.75：打开 H5 登录窗口并等登录成功。
+ * - 窗口**立即显示** loading 占位，再后台导航真实 H5 页（用户明确要求「先开窗口显示 loading」）。
+ * - 有已保存账密 → 自动填充 + 自动提交；无账密 → 用户手输；登录成功后加密保存。
+ * - 全程只创建一次窗口（重复调用复用同一个 Promise），登录成功自动销毁。
  */
 export function wjxtH5Login(): Promise<boolean> {
   if (h5Pending) return h5Pending
   h5Pending = (async (): Promise<boolean> => {
+    const creds = loadWjxtCredentials()
+    const autoMode = !!creds
+    // 用对象包一层：值由 console-message 回调异步写入，TS 对闭包赋值的裸变量会误判成 never
+    const submitted: { value: { username: string; password: string; remember: boolean } | null } = { value: null }
+    const CRED_PREFIX = '__MC_WJXT_CREDS__'
+
     const win = (h5Win && !h5Win.isDestroyed())
       ? h5Win
       : new BrowserWindow({
@@ -415,31 +547,102 @@ export function wjxtH5Login(): Promise<boolean> {
         height: 860,
         minWidth: 380,
         minHeight: 620,
-        title: '登录文件系统（账号密码）',
+        title: tr('wjxtH5Title'),
         autoHideMenuBar: true,
-        webPreferences: { partition: PARTITION, contextIsolation: true, nodeIntegration: false, sandbox: true }
+        webPreferences: {
+          partition: PARTITION,
+          contextIsolation: true,
+          nodeIntegration: false,
+          sandbox: true,
+          // 隐藏窗口会被 Chromium 节流，站点登录脚本可能不跑
+          backgroundThrottling: false
+        }
       })
     h5Win = win
     win.on('closed', () => { if (h5Win === win) h5Win = null })
+    // 1.0.75：先渲染本地 loading 页并立刻显示 —— 站点 H5 页冷启动期间用户看到的是
+    // spinner + 进度条，而不是空白窗口 / 迟迟不出现的窗口。复用已有窗口时不重置，
+    // 免得用户正在输账号密码时把表单刷掉。
+    if (!win.webContents.getURL()) {
+      try {
+        await win.loadURL(h5LoadingUrl())
+        if (!win.isDestroyed()) { win.show(); win.focus() }
+      } catch { /* 占位页失败不影响后续真实导航 */ }
+    }
+    // 页面把「点登录那一刻」的最新输入通过 console 传回来；只在内存暂存、明文不进日志，
+    // 登录成功后才加密保存 —— 密码改了重新登一次即自动更新，错密码不会被记住。
+    if (!(win.webContents as any).__mcCredsHooked) {
+      (win.webContents as any).__mcCredsHooked = true
+      win.webContents.on('console-message', (...args: any[]) => {
+        for (const a of args) {
+          if (typeof a !== 'string' || !a.startsWith(CRED_PREFIX)) continue
+          try {
+            const c = JSON.parse(a.slice(CRED_PREFIX.length))
+            if (c && typeof c.username === 'string' && typeof c.password === 'string'
+              && c.username.trim() && c.password) {
+              submitted.value = { username: c.username, password: c.password, remember: c.remember !== false }
+            }
+          } catch { /* ignore */ }
+          break
+        }
+      })
+    }
     try {
       await new Promise<void>((resolve, reject) => {
-        const t = setTimeout(() => reject(new Error('load timeout')), 25000)
-        win.webContents.once('did-finish-load', () => { clearTimeout(t); resolve() })
-        win.webContents.once('did-fail-load', (_e, c, d) => { clearTimeout(t); reject(new Error(`did-fail-load ${c} ${d}`)) })
+        let timer: ReturnType<typeof setTimeout> | null = null
+        function cleanup() {
+          if (timer) clearTimeout(timer)
+          win.webContents.removeListener('did-finish-load', onDone)
+          win.webContents.removeListener('did-fail-load', onFail)
+        }
+        function onDone() {
+          let u = ''
+          try { u = win.webContents.getURL() || '' } catch { return }
+          // 本地 loading 占位页的 did-finish-load 不算，只等真实 H5 页
+          if (!/h5\.html/i.test(u)) return
+          cleanup()
+          resolve()
+        }
+        function onFail(_e: any, c: any, d: any) {
+          cleanup()
+          reject(new Error(`did-fail-load ${c} ${d}`))
+        }
+        timer = setTimeout(() => {
+          cleanup()
+          reject(new Error('load timeout'))
+        }, 25000)
+        win.webContents.on('did-finish-load', onDone)
+        win.webContents.on('did-fail-load', onFail)
         void win.loadURL(WJXT_H5_LOGIN_URL)
       })
       await new Promise(r => setTimeout(r, 1500)) // 等 knockout 把表单渲染出来
       const res = await win.webContents
         .executeJavaScript(h5FormReadyScript(), true)
         .catch((e: any) => JSON.stringify({ error: String(e?.message || e) }))
-      wjxtLog(`[h5login] window open form=${String(res).slice(0, 120)}`)
+      wjxtLog(`[h5login] window open autoMode=${autoMode} form=${String(res).slice(0, 120)}`)
+      const fill = await win.webContents
+        .executeJavaScript(h5AutofillScript(creds, loadWjxtAccounts()), true)
+        .catch((e: any) => 'error:' + String(e?.message || e))
+      wjxtLog(`[h5login] autofill=${String(fill).slice(0, 60)}`)
 
-      // 轮询登录结果（用户手输也给足 3 分钟）
-      const deadline = Date.now() + 3 * 60 * 1000
+      // 轮询登录结果（自动 / 手输都给足 3 分钟）
+      const started = Date.now()
+      const deadline = started + 3 * 60 * 1000
       while (Date.now() < deadline) {
         await new Promise(r => setTimeout(r, 2000))
         if (win.isDestroyed()) break
         if (await probeLoggedIn() === true) {
+          const sub = submitted.value
+          if (sub) {
+            if (sub.remember) {
+              const saved = saveWjxtCredentials(sub)
+              wjxtLog(`[h5login] credentials ${saved ? 'saved/updated (encrypted)' : 'save skipped (encryption unavailable)'}`)
+            } else {
+              // 用户在登录界面主动取消勾选 → 清掉之前保存的账密，之后回到手动登录
+              clearWjxtCredentials()
+              wjxtLog('[h5login] credentials cleared (remember unchecked)')
+            }
+          }
           await afterH5LoginSuccess(win)
           return true
         }
@@ -449,10 +652,7 @@ export function wjxtH5Login(): Promise<boolean> {
     } catch (e: any) {
       wjxtLog('[h5login] failed: ' + String(e?.message || e))
       // H5 页都起不来 → 退回原来的 SSO 登录窗口（老路径，**仅 IAM 会话还在时可用**）：
-      // IAM 已过期时那个入口会停在 idp/authCenter/authenticate，用户点进去是白屏，
-      // 那就别开这个窗口了 —— 上层会把H5 入口重新给用户一次。
-      // 1.0.51：探针改三态后判据同步放宽为 `!== false`（无法判定时也开），
-      // 与 reloginResult 的 gating 保持一致，避免同一个探针在两处给出相反结论。
+      // IAM 已过期时那个入口会停在 idp/authCenter/authenticate，用户点进去是白屏。
       let iamAlive: boolean | null = null
       if (iamProbe) {
         try { iamAlive = await iamProbe() } catch { iamAlive = null }
@@ -828,17 +1028,23 @@ async function pageFetch(
   //     （实测把日志刷爆、还不停向 IAM 发起新的 OAuth 跳转）；
   //   · 也不能拿它当业务结论 —— 交给降级通道去给出明确的「未登录」判据。
   if (!isOnSite(win.webContents.getURL())) {
+    const curUrl = win.webContents.getURL()
+    // 1.0.75 H5 修复：IAM 的 /idp/authCenter/authenticate 在会话有效时返回
+    // **200 + ssoShim 自动提交脚本**（HAR 实测），是换票中间态，不是「未登录」。
+    // 旧实现在这里全量重导航，会打断页面 JS 把 code 提交给 /sso/auth/callback，
+    // 于是窗口永远停在 authenticate、jump.html 的 token 也换不成 cookie。
+    const inSsoShim = isWjSsoShimUrl(curUrl)
     // 日志节流：未登录时这条会持续命中（历史日志里 off-site + Failed to fetch 合计 500+ 行）
     if (Date.now() - lastOffSiteLogAt > OFFSITE_LOG_INTERVAL_MS) {
       lastOffSiteLogAt = Date.now()
-      wjxtLog(`[page] hidden window off-site (${win.webContents.getURL().slice(0, 120)}) -> not logged in, skip page-context fetch`)
+      wjxtLog(`[page] hidden window off-site (${curUrl.slice(0, 120)}) -> ${inSsoShim ? 'SSO shim mid-flight, keep window' : 'not logged in, skip page-context fetch'}`)
     }
     // 2026-10-27 解耦：**不再计入通道健康度**（见 OFFSITE_BACKOFF_MS 注释）。
     // 站外是「登录态失效」的表现，把它当成「上下文坏了」会让熔断日志误报，
     // 且登录恢复后 30s 内仍然不走页面通道（拿不到完整结果）。
-    offSiteUntil = Date.now() + OFFSITE_BACKOFF_MS
+    offSiteUntil = Date.now() + (inSsoShim ? 1000 : OFFSITE_BACKOFF_MS)
     noteSkip('not-logged-in')
-    void renavigateCtxWinIfStale()
+    if (!inSsoShim) void renavigateCtxWinIfStale()
     return null
   }
 
@@ -957,9 +1163,16 @@ async function mainFetch(
   }
   if (opts.form) headers['Content-Type'] = 'application/x-www-form-urlencoded; charset=UTF-8'
   const { count: cookieCount, names: cookieNames } = await cookieNamesFor(url)
+  // 1.0.75：登录态排查时只记「cookie 数量 + 名字」看不出 token 到底属于哪个域/路径。
+  // 实测出现过「恢复时有 token、请求里却没有」的组合，这里把关键票据的 domain/path/secure 也打出来。
+  let keyCookieDetail = ''
   if (cookieCount) {
     const cookies = await sess.cookies.get({ url })
     headers['Cookie'] = cookies.map(c => `${c.name}=${c.value}`).join('; ')
+    keyCookieDetail = cookies
+      .filter(c => /^(token|checkToken|LtpaToken)$/i.test(c.name))
+      .map(c => `${c.name}@${c.domain || '-'}${c.path || '/'}${c.secure ? '(S)' : ''}`)
+      .join(',')
   }
 
   const res = await sess.fetch(url, {
@@ -972,7 +1185,7 @@ async function mainFetch(
   const body = await res.text()
   const finalUrl = String(res.url || url)
   const contentType = String(res.headers.get('content-type') || '')
-  wjxtLog(`[main] ${opts.method || 'GET'} ${url} status=${res.status} final=${finalUrl.slice(0, 200)} ct=${contentType} len=${body.length} cookies=${cookieCount} names=${cookieNames}`)
+  wjxtLog(`[main] ${opts.method || 'GET'} ${url} status=${res.status} final=${finalUrl.slice(0, 200)} ct=${contentType} len=${body.length} cookies=${cookieCount} names=${cookieNames} keyCookies=${keyCookieDetail || '-'}`)
   return { status: res.status, body, finalUrl, contentType, cookieCount }
 }
 
@@ -1103,6 +1316,14 @@ export async function wjxtDiag(): Promise<WjxtDiagSnapshot> {
   let loggedIn: boolean | null = null
   try {
     loggedIn = await probeLoggedIn()
+    // 1.0.75：SSO 换票落地有临界期（`token` 已出现、`GetCurrentUser` 会话还没绑完），
+    // 单次探测会把「正在建立」误报成未登录 —— 用户扫码后立刻点自检就看到 ❌
+    // （日志 03:57:45 DIAG=out，03:57:48 同步就 after=true）。非 true 时隔 1.2s 补探一次。
+    if (loggedIn !== true) {
+      await new Promise(r => setTimeout(r, 1200))
+      loggedIn = await probeLoggedIn().catch(() => loggedIn)
+      wjxtLog(`[diag] re-probe after 1.2s -> loggedIn=${loggedIn}`)
+    }
   } catch (e: any) {
     wjxtLog('[diag] probeLoggedIn failed: ' + String(e?.message || e))
   }
@@ -1763,6 +1984,29 @@ export function wjxtProbeLoggedIn(): Promise<boolean | null> {
  *
  * @returns true=已登录 / false=确实未登录 / null=无法判定
  */
+/** 用户主动进文件系统、但自动换票失败时的登录窗口节流（不新增顶栏按钮） */
+let lastLoginFallbackAt = 0
+const LOGIN_FALLBACK_COOLDOWN_MS = 5 * 60 * 1000
+
+/**
+ * 1.0.75：用户主动进文件系统却卡在白屏 / Loading 时的退路。
+ *
+ * 2026-11-08 第一版把 `ssoHttp` 拿到的 `iam…/ac/#/index?lck=…&entityId=edoc2`
+ * 用可见窗口开出来，**2026-11-09 日志实证那个 AC 页在应用内窗口里就是白屏**
+ * （源码注释也记过「IAM 登录页在应用内 = 白屏」），用户仍无从下手。
+ * 现改用站点自带的 H5 账号密码页：历史日志 `[h5login] window open form={"ready":true,…}`
+ * 证明它在应用内窗口能正常渲染表单，且 `wjxtH5Login()` 自带 3 分钟登录态轮询、
+ * 成功后自动销毁窗口；IAM 明确失效时它也不会再退回白屏的 SSO 壳页。
+ * 只在 `reason='oa-window'`（用户主动进文件系统）时弹，后台自动同步不打扰；
+ * 5 分钟节流 + `wjxtH5Login` 自带单飞，避免叠窗。
+ */
+function offerManualLoginWindow(reason: string): void {
+  if (Date.now() - lastLoginFallbackAt < LOGIN_FALLBACK_COOLDOWN_MS) return
+  lastLoginFallbackAt = Date.now()
+  wjxtLog(`[sync] ${reason}: IAM expired -> open visible H5 login window once`)
+  void wjxtH5Login().catch(() => false)
+}
+
 export function wjxtSyncAfterLogin(reason = 'oa-login'): Promise<boolean | null> {
   if (loginSyncInFlight) return loginSyncInFlight
   loginSyncInFlight = (async () => {
@@ -1789,6 +2033,17 @@ export function wjxtSyncAfterLogin(reason = 'oa-login'): Promise<boolean | null>
           wjxtLog(`[sync] ${reason}: hidden window did not establish session, http fallback`)
           const finalUrl = await ssoHttp(WJXT_SSO_LOGIN_URL)
           wjxtLog(`[sync] ${reason}: http fallback final=${String(finalUrl).slice(0, 140)}`)
+          // 1.0.75：纯 HTTP 换票第一跳就落到 AC 登录页 = IAM 会话已过期、edoc2 需要人重新扫码。
+          // 实测（2026-11-08 14:01:12 `[wjxtSsoHttp] step1 final=.../ac/#/index?entityId=edoc2`）
+          // 此后 shim / callback 都不会发生，原实现却还要再探一次并让 loginWatch 空等 3 分钟。
+          // 这里给出确定结论，让上层能直接提示「需要重新登录」，而不是一直转圈。
+          if (finalUrl && isAcLoginUrl(finalUrl)) {
+            wjxtLog(`[sync] ${reason}: IAM session expired (AC login page) -> need user re-login, stop retrying`)
+            // 1.0.75（用户明确要求）：启动 / 心跳**不弹**鸿翼登录界面，也不在后台自动登录；
+            // 只有用户主动用技能或点「文件管理」（reason='oa-window'）才允许触发。
+            if (reason === 'oa-window') offerManualLoginWindow(reason)
+            return false
+          }
         } catch (e: any) {
           wjxtLog(`[sync] ${reason}: http fallback failed: ${String(e?.message || e)}`)
         }
@@ -1804,6 +2059,34 @@ export function wjxtSyncAfterLogin(reason = 'oa-login'): Promise<boolean | null>
     }
   })()
   return loginSyncInFlight
+}
+
+/**
+ * 1.0.75：统一的「登录成功 → 同步 edoc2 会话」入口，带 30 秒限频。
+ *
+ * 为什么要单独包一层：此前只有 `completeOaSso`（扫码成功）会调 `wjxtSyncAfterLogin`，
+ * 而**从备份 cookie 恢复会话**（`[startup] restoredOk=true, isOALoggedin = true`）和
+ * **心跳静默自愈成功**这两条同样"已登录"的路径压根不触发同步 —— 2026-11-08 的日志里，
+ * 用户全程没有扫码，app 判定 OA 正常，鸿翼却一直未登录（自检弹窗 ①✅ ②❌）。
+ * 现在三条路径共用一个入口；限频避免心跳 / 多个子窗口重复发起换票。
+ */
+let lastLoginSyncAt = 0
+export function scheduleWjxtSync(reason = 'oa-login', minIntervalMs = 30_000): Promise<boolean | null> {
+  const now = Date.now()
+  // 1.0.75：扫码登录成功（`oa-login`）是低频且关键的用户动作，**必须立刻重跑换票**。
+  // 2026-11-09 04:17 实测：启动恢复在 04:17:41 跑过一次并记下时间戳，用户 04:17:52
+  // 扫码成功，04:17:53 的同步被 30 秒限频挡掉 → `[login-sync] edoc2=unknown`、
+  // 自检 ② ❌，用户以为「扫码仍然是失败的」。后台同步绝不能挤掉这个事件。
+  const effInterval = reason === 'oa-login' ? 0 : minIntervalMs
+  if (shouldThrottleLoginSync(now, lastLoginSyncAt, effInterval)) {
+    wjxtLog(`[sync] ${reason}: skipped (throttled)`)
+    // 后台同步刚跑过导致这里被限频时，别让用户对着白屏干等下一次 30 秒窗口；
+    // 但同样只在用户主动进文件系统时才给登录窗，启动 / 心跳一律不打扰。
+    if (reason === 'oa-window') offerManualLoginWindow(reason)
+    return Promise.resolve(null)
+  }
+  lastLoginSyncAt = now
+  return wjxtSyncAfterLogin(reason)
 }
 
 /**
@@ -1961,7 +2244,10 @@ async function reloginResult(code: 'NEED_RELOGIN' | 'WJXT_NO_SESSION'): Promise<
     const fresh = qr.fresh
     const label = fresh ? '扫码登录' : 'SSO 登录'
     const note = fresh
-      ? 'IAM 二维码页，已生成一次性登录上下文'
+      // 1.0.75：edoc2 的 IAM AC 扫码页在应用内窗口是白屏（用户实测点了没用）。
+      // 链接仍保留，但主进程会把它路由到「重新扫 OA 二维码」——扫码成功后
+      // completeOaSso 会顺手把 edoc2 会话建起来（用户 A 场景复测 ✅）。
+      ? '点击后会先退出当前登录并弹出 OA 二维码，重新扫码成功即恢复文件系统登录态（已验证路径）'
       // 非 fresh = 站点 SSO 入口：它全靠 IAM 会话换票，IAM 一旦判不出来/已失效，
       // 打开后就是停在 idp/authCenter/authenticate 的空白页。把这个前提写进文案，
       // 免得用户点完一头雾水（2026-10-26 用户实测：点了链接仍然登不上）。

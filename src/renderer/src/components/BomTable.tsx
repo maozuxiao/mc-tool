@@ -3,6 +3,7 @@ import { useStore } from '../store'
 import { escapeHtml, fixLinks } from '@shared/query'
 import { OA_ORIGIN } from '@shared/constants'
 import { Button, Icon } from 'animal-island-ui'
+import { NoDataState } from './NoDataState'
 
 // 空值兜底显示「—」（对齐用户脚本 v4.1）
 const v = (x: any) => (x === undefined || x === null || x === '') ? '—' : escapeHtml(String(x))
@@ -14,6 +15,7 @@ const v = (x: any) => (x === undefined || x === null || x === '') ? '—' : esca
 export const BomTable = memo(function BomTable() {
   const t = useStore(s => s.t)
   const bomData = useStore(s => s.bomData)
+  const bomQueried = useStore(s => s.bomQueried)
   const bomFiltered = useStore(s => s.bomFiltered)
   const searchBom = useStore(s => s.searchBom)
   const searchFile = useStore(s => s.searchFile)
@@ -27,7 +29,10 @@ export const BomTable = memo(function BomTable() {
   const expandedKeys = useStore(s => s.bomExpandedKeys)
   const toggle = useStore(s => s.toggleBomExpanded)
 
-  if (!bomData.length) return <div className="empty-box" dangerouslySetInnerHTML={{ __html: t('emptyBom') }} />
+  // 1.0.75：查过 BOM 但 0 条 → NO DATA；从未查询 → 保留 PLM 引导语
+  if (!bomData.length) return bomQueried
+    ? <NoDataState />
+    : <div className="empty-box" dangerouslySetInnerHTML={{ __html: t('emptyBom') }} />
   if (!bomFiltered.length) return <div className="empty-box">{t('emptyFiltered')}</div>
 
   // 翻译按钮三态（与 MaterialTable 一致）：有待译 → 可点开始；翻译中 → 仍可点（再次点击弹取消确认，

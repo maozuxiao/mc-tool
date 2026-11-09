@@ -2,10 +2,12 @@ import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { extractFileLink, escapeHtml } from '@shared/query'
 import { OA_ORIGIN } from '@shared/constants'
+import { NoDataState } from './NoDataState'
 
 export function FileTable() {
   const t = useStore(s => s.t)
   const fileData = useStore(s => s.fileData)
+  const fileQueried = useStore(s => s.fileQueried)
   const [downloading, setDownloading] = useState<string | null>(null)
   // 流式下载进度：主进程选完保存位置后边下边写，这里显示「下载中 42%」
   const [progress, setProgress] = useState<{ received: number; total: number } | null>(null)
@@ -20,8 +22,11 @@ export function FileTable() {
     return () => { off?.() }
   }, [])
 
+  // 1.0.75：查过规格文件但 0 条 → NO DATA；从未查询 → 保留引导语
   if (!fileData.length) {
-    return <div className="empty-box" dangerouslySetInnerHTML={{ __html: t('emptyFile') }} />
+    return fileQueried
+      ? <NoDataState />
+      : <div className="empty-box" dangerouslySetInnerHTML={{ __html: t('emptyFile') }} />
   }
 
   const rows = fileData

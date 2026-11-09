@@ -7,6 +7,8 @@ import { QueryPanel } from './components/QueryPanel'
 import { ChatPanel } from './components/ai/ChatPanel'
 import { UpdateBar } from './components/UpdateBar'
 import { SessionExpiredBar } from './components/SessionExpiredBar'
+import { NoticeModal } from './components/NoticeModal'
+import { WriteConfirmModal } from './components/WriteConfirmModal'
 
 type MainView = 'query' | 'ai'
 
@@ -225,6 +227,9 @@ export function App() {
         <button type="button" className={view === 'query' ? 'active' : ''} onClick={() => switchTo('query')}>{t('viewQuery')}</button>
         <button type="button" className={view === 'ai' ? 'active' : ''} onClick={() => switchTo('ai')}>{t('viewAi')}</button>
       </div>
+      {/* 全局信息提示 / 写文件确认：与「批量删除确认」同款暖米色库 Modal，常驻于两个视图之外 */}
+      <NoticeModal />
+      <WriteConfirmModal />
     </div>
   )
 }

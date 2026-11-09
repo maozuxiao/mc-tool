@@ -11,7 +11,7 @@
 ## 零、一图看懂流程
 
 ```text
-改代码 → 类型检查 → 改版本号(2处) → 写 Release Notes
+改代码 → 类型检查 → 改版本号(package.json / electron-builder.yml / package-lock.json×2) → 写 Release Notes
       → 设 GH_TOKEN → .\build_now.ps1 -Publish
       → GitHub 上把 draft Release 改为 Published
       → 老客户端启动即收到更新提示
@@ -220,6 +220,75 @@ dist/
 >    **④ #2 长文件与降级**：下载日志附件 → 工具结果只有 `localPath` + ≤500 字预览，`read_local_file` 能读到全文；混入 8 张以上图片 / 单张 >8MB → 只回灌前 8 张，单条 `status:'error'` 不影响其它。网关拒绝多模态注入时自动移除图片消息并重试本轮，回复如实说明「需要把图拖进输入框」，**工具链不中断、不假装看过图**。
 >    **⑤ #2 MC 规格图纸**：物料模式问「哪个能看到 5190010100062 的接口图纸」→ `mc_query spec` 带 `download:true`，落盘到 userData/attachments，PNG 走图片回灌、PDF 走 `read_local_file`。
 >    **⑥ 自检**：`npx tsc --noEmit` 0 错误、`npm test` 106 passed（新增 `mcArgs.test.ts` 16 例、`attachmentMedia.test.ts` 20 例）、`npm run build` 通过；产物应为 `mc-material-query-setup-1.0.74.exe`。
+
+> 49. **OA 登录后鸿翼会话不再漏建、文件管理不再一直 Loading（1.0.75，两条一起验收）**：
+>    **① #3 备份恢复路径**：清空 `%APPDATA%\mc-material-query\` 里 edoc2 会话但保留 OA cookie 备份，重启 app → 日志应出现 `[startup] restoredOk=true, isOALoggedin = true` **并紧接 `[login-sync] startup edoc2=ok`**；打开「登录态自检」→ ① OA ✅ ② 鸿翼 edoc2 ✅。旧版这一步 ② 恒 ❌。
+>    **② #3 三条路径限频**：扫码登录 / 启动恢复 / 心跳静默自愈都触发同步，但 30 秒内重复事件要被 `[sync] … skipped (throttled)` 挡住，不能刷屏；`wjxtSyncPolicy.test.ts` 已覆盖边界。
+>    **③ #3 IAM 过期快速失败**：让 IAM 会话过期后重开 app → 纯 HTTP 换票落到 `iam.streamax.com/ac/#/index?lck=...entityId=edoc2` 时，日志应出现 `[sync] … IAM session expired (AC login page) -> need user re-login`，**不再出现 `[loginWatch] give up after 3 minutes` 空等**，界面给明确「需要重新扫码」而不是一直转圈。
+>    **④ #4 文件管理**：OA 里点「文件管理」→ 新窗口加载完应有 `[oaWindow] wj page finished -> probe edoc2`；若会话缺失则 `[oaWindow] edoc2 session ready -> reload wj page once`，页面正常进入而不是永远 `Loading...`；反复开 3 个子窗口，每个最多 reload 一次（日志计数），不得出现 reload 死循环。
+>    **⑤ 可观测**：`wjxt.log` 的 `[main] …` 行末应带 `keyCookies=token@…(S)` 明细，能直接看出 `token` 的 domain/path/Secure；对照 `GetCurrentUser` 返回 `ErrorCode4` 时请求头里到底有没有 `token`。
+>    **⑥ 待抓包（用户配合）**：`authenticate?client_id=oa` 与 `?client_id=edoc2` 两条 302 链、`/sso/auth/callback?code=` 是否存在、各 `Set-Cookie` 的 domain/path/Secure —— 结论回来前本版状态只记「已修」，不记「已验证」。
+>    **⑦ 自检**：`npx tsc --noEmit` 0 错误、`npm test` 118 passed（`wjxtSyncPolicy.test.ts` 12 例）、`npm run build` 通过；产物应为 `mc-material-query-setup-1.0.75.exe`。
+>    **⑧ 按 H5 修后的复测（用户确认鸿翼地址 `https://wj.streamax.com:9443/`）**：重开 app → `debug-login.log` 里 `[wjxtBootstrap] SSO chain landed on SPA: https://wj.streamax.com:9443/index.html…`，不再是 2.5 秒就 `hidden window done onsite=false`；`wjxt.log` 里能看到 `[main] … cookies=… keyCookies=token@…(S)` 且 `GetCurrentUser` 返回 `{"result":0,…}` 而非 `ErrorCode4`；`[page] hidden window off-site` 不再每 12 秒刷屏。扫码登录 / 启动恢复 / 心跳自愈三条路径后自检弹窗 ② 都应为 ✅。
+>    **⑨ 登录退路与 UI**：IAM 会话已过期时，从 OA 点「文件管理」（或应用内打开鸿翼首页）→ 应在约 5~8 秒内看到 `[wjxtBootstrap] SSO shim stuck 5s` 早退、随后 `[sync] oa-window: IAM expired -> open visible H5 login window once`，并**自动弹出「登录文件系统（账号密码）」窗口**（表单必须能正常渲染，不能是白屏）；登录成功后该窗口自动关闭，白屏的原页面上应有一条蓝色说明条指向登录窗口，关闭原页重新进入即恢复。**不应再出现「白屏且无任何提示」**，顶栏也不应出现「文件系统」按钮。窄屏、侧栏折叠、长对话滚动都要复测，AI 助手「会话记录」框与主会话框**下边缘齐平**（不再差 14px）。
+>    **⑩ 账密保存与自动登录**：① 全新状态（无 `wjxt-credentials.bin`）→ 打开 APP **不弹**登录窗；主动进文件系统 → 显示 H5 窗口 → 手输一次账密登录成功 → 日志 `[h5login] credentials saved/updated (encrypted)`，检查 `%APPDATA%\mc-material-query\wjxt-credentials.bin` 存在且**不是明文**（用文本编辑器打开应是乱码）。② 重启 APP → 不出现登录窗，日志 `[h5login] window open autoMode=true … autofill=autofilled`，自检弹窗 ② 鸿翼 edoc2 = ✅。③ 改密码后重启 → 旧密码自动提交失败，约 20 秒后窗口显示「请重新输入」→ 输新密码登录成功 → 文件被覆盖；再次重启应能自动登录。④ 故意输错密码 → 不应被保存到文件。⑤ 删除 `wjxt-credentials.bin` → 回到①的行为。⑥ `npm test` 123 passed。
+>    **⑪ 启动不弹窗 / 界面开关 / 二维码竞态**：① **全新启动（无论有无已保存账密）都不应出现鸿翼登录界面**，日志里不应有 `[sync] oa-window: IAM expired -> open visible H5 login window once`；只有点 OA「基础应用 → 文件管理」或用鸿翼技能时才允许触发。② 点「文件管理」弹出登录窗时，登录按钮下方必须有「记住账号密码（仅保存在本机加密存储）」勾选框；勾选登录成功 → `credentials saved/updated`；**取消勾选**登录成功 → `credentials cleared (remember unchecked)` 且 `wjxt-credentials.bin` 被删除。③ npm dev 启动（已有 OA 登录态）→ **直接进 APP，不显示二维码界面**，不需手点「刷新二维码」；日志 `duplicate login check skipped` 后渲染层应收到 `loggedIn:true`。④ 会话确实失效时仍要正常显示二维码且只拉一次码；dev HMR 整页重载不误关登录层。
+>    **⑫ 账密登录后原窗口不再 Loading（1.0.75）**：先按上一轮的方法清掉鸿翼登录态（保留 `wjxt-credentials.bin`）→ 启动 APP（不弹任何登录窗）→ 点 OA「基础应用 → 文件管理」。① 原窗口应**立即**出现蓝色提示条「正在用已保存的账密自动登录…登录成功后本页会自动刷新」，不再是纯空白 `Loading...`；② 日志 `[h5login] auto sign-in not done in 8s` 之后（若 8 秒还没登完）才显示「登录文件系统（账号密码）」窗口，窗口里账密已填好，且「记住账号密码」勾选框**左边缘与蓝色「登录」按钮左边缘对齐**（截图目测）；③ 登录成功（日志 `[h5login] credentials saved/updated` + `logged in`）后，应出现 `[oaWindow] edoc2 session restored -> reload wj window once`，**原窗口自动刷新并正常显示文件系统**，不再停在 `Loading...`；每窗口只 reload 一次，不来回闪。④ 顶栏「退出登录」→ 重新扫码 → 自检弹窗 ② 鸿翼 edoc2 应为 ✅。
+>    **⑬ 扫码路径 / 单窗口 / 多账号 / 登录态保持（1.0.75）**：① 在 Skill 里点「**扫码登录**」→ 不应再出现白屏「认证中心」窗口，而是**先退出当前登录并弹出 OA 二维码**，扫码成功后自检 ② 鸿翼 edoc2 = ✅（日志 `[openInternal] edoc2 AC page is blank in-app -> perform logout + OA QR re-login`）。② 点「**账号密码登录**」→ **只弹出 1 个**账密窗口；反复点链接也只是聚焦同一窗口，不叠窗。③ 版式：勾选框在**密码框下、登录按钮上**，左边缘与输入框 / 按钮对齐（对照用户给的效果图）。④ 用第二个账号登录成功 → 再打开登录窗时用户名框上方出现「选择已保存的账号…」**下拉框**，切换即自动填充；改密码后重新登录 → 该账号密码被覆盖、其它账号保留，`wjxt-credentials.bin` 仍是密文。⑤ 登录成功后自检 ② 应为 ✅、不再 `edoc2=out`；日志里**不能**再出现 `reload wj window once: …h5.html#login`，应改为 `close stale H5 login window`。⑥ `npm test` 129 passed。
+>    **⑭ 登录窗口即时反馈 / 扫码后状态可感知（1.0.75）**：① 点「账号密码登录」→ 窗口**立即出现**并显示 spinner + 进度条 + 「正在打开文件系统登录页…」，随后才切到真实登录表单；不应有长时间空白窗口。② 点「扫码登录」→ 重新扫 OA 二维码 → 扫码成功后应看到「文件系统登录态已恢复」提示，自检 ② 应为 ✅（同步有几秒延迟，不要再拿临界期的旧自检结果判断）。③ **会话已恢复后再点一次「扫码登录」** → 日志 `[openInternal] edoc2 already logged in -> ignore QR link, keep session`，**不得**再出现 `[COOKIE_CLEAR] logged out`，自检仍为 ✅。④ `npm test` 129 passed。
+> 50. **#8 物料查询「证据不足不得输出业务结论」（1.0.75，P0 闭环验收）**：
+>    **① 检索凭证**：任意 `mc_query` 成功结果（search / item / batch / bom / spec）都必须带 `evidence`，含 `channel`（`wuliao` / `bom` / `specificationFile`）、`queryString`、`scannedRows`、`scanCalls`、`matchCount`、`sampleHits`（最多 3 条）；命中数与返回数组长度一致。
+>    **② 强证据闸门**：构造「删掉数据文件 / 接口返回空」场景查询 → 回复必须说「**查询失败**」或 `CONFLICT`，**绝不能**出现「无记录 / 无 BOM / 未维护 / 需要权限」；真实空 BOM 料号 → `resultCode:OK_EMPTY` + `verifiedTwice:true` + `matchCount:0`，回复注明「已二次核验」。
+>    **③ 二次核验**：`bom` / `spec` / `item` / `batch` / **`search`** 空结果都应多发一次请求；第二次调用失败 → `CONFLICT`，不得静默沿用第一次的空结果；两次不一致 → 返回第二次并带 `conflictResolved:true`。
+>    **④ 文案审计**：`EMPTY_ARGS` / `BAD_ARGS` / `UNSUPPORTED_COMMAND` / `QUERY_FAILED` / `CONFLICT` 的输出中不得出现「位数不对 / 可能是 xlsx / 需要权限 / 系统没数据 / BOM 未维护 / 料号可能抄错」。
+>    **⑤ 写入确认**：AI 写**已存在**的 xlsx / docx 前必须弹出「写入前确认」对话框，列出目标文件、现有大小、写入方式、行数、内容预览、起始列 / 表头行与 .bak 备份提示；点「取消」→ 文件字节数不变、工具返回 `USER_CANCELLED`；新建文件不弹框。
+>    **⑥ 回归**：`npx tsc --noEmit` 0 错误、`npm test` **142 passed**（`mcEvidence.test.ts` 13 例含 30 条畸形传参回归）、`node --check mc_query.js` 通过、`npm run build` 通过；`node mc_query.js bom --json` 仍输出 `{"ok":false,"error_code":"EMPTY_ARGS",...}`。
+
+> 51. **扫码链路与登录提示收尾（1.0.75，第四轮复测）**：
+>    **① 扫码成功后自检 ② 必须 ✅**：清空 edoc2 会话 → 扫码登录 OA → 日志应出现 `[login-sync] edoc2=ok`（**不得**再出现 `[sync] oa-login: skipped (throttled)`）；`[DIAG]` 应为 `edoc2=ok`。
+>    **② 提示条**：未登录时从 OA 进文件系统 → 顶部蓝条应为「暂未就绪，正在自动恢复」，右侧有 **`×` 可关闭**，90 秒后自动消失；账密登录成功后**再进一次文件系统，不得再出现任何失效提示条**，页面也不应白闪 reload。
+>    **③ 已登录点链接有反馈**：已登录时点「扫码登录」/「账密登录」→ 应弹出「文件系统已登录，无需重复扫码 / 无需再次登录」提示，**不开新窗口、不退出登录、不清 cookie**；点需重新扫码的链接时提示「正在重新扫码登录 OA…」。
+>    **④ 不重复登录**：已登录时点「账密登录」→ 日志 `[openInternal] edoc2 already logged in -> skip H5 login link`，自检 ② 保持 ✅，不得出现第二个登录窗口或概率性 ❌。
+>    **⑤ 自检**：`npx tsc --noEmit` 0 错误、`npm test` 142 passed、`npm run build` 通过。
+
+> 52. **新增提示语英语多语言（1.0.75）**：把界面语言切到 **English** 后逐项复测 —— ① 已登录时点「扫码登录」/「账密登录」→ 提示必须为英文（`no need to scan again` / `no need to sign in again`），不得出现中文；② 触发重新扫码 → `Reopening OA QR sign-in…`；③ 未登录进文件系统 → 顶部蓝条与 `×` 按钮 title 为英文（`Dismiss`）；④ 账密登录窗口标题为 `Sign in to file system (username & password)`，loading 占位页显示 `Opening file system sign-in…`（且 `<html lang="en">`）；⑤ 登录表单的「记住账号密码 / 选择已保存的账号」为英文；⑥ AI 写已存在文件时确认对话框的标题、按钮、差异摘要、取消提示、写入方式全为英文；⑦ 切回中文后以上全部恢复中文。⑧ `npm test` **146 passed**（`uiLang.test.ts` 4 例双语契约）。
+
+> 53. **提示弹窗风格 + NO DATA 空状态（1.0.75）**：
+>    **① 弹窗**：已登录时点「扫码登录」/「账密登录」，或扫码成功会话恢复 → 应弹出**暖米色、圆角、胶囊立体按钮**的应用内 Modal（与「批量删除确认」同款），**不再是 Windows 原生蓝标题栏弹窗**；两个视图（物料查询 / AI 助手）下都要能弹出，且只弹一次。其它原有原生弹窗的「确定」按钮不应再带 `→` 箭头。
+>    **② 空状态三种情形**：首次打开（未查询）→ 显示「请输入料号后点击…」引导语；输入不存在的料号点「查料号」→ 结果区显示 **NO DATA 空状态**（有机 blob + 放大镜图标 + 「暂无数据 / No data」+ 提示语），BOM 与规格文件页同理；查到数据后再用筛选框筛到 0 条 → 仍显示「暂无匹配结果 / No matching results」，不要误显示 NO DATA。点「重置」后回到首次打开的引导语。
+>    **③ 双语与动效**：切 English 后空状态文案为 `No data / Nothing matched this time…`；blob 有轻微浮动、`prefers-reduced-motion` 开启时不动；深色主题下配色跟随 `--mc-*` 变量不错乱。
+>    **④ 自检**：`npx tsc --noEmit` 0 错误、`npm test` 146 passed、`npm run build` 通过。
+
+> 54. **「帮助 → 关于」弹窗风格（1.0.75）**：点顶栏「帮助 → 关于」→ 应弹出**暖米色、22px 圆角、胶囊立体按钮**的应用内 Modal（与「批量删除确认」同款），**不再是 Windows 原生蓝标题栏弹窗**，也不应有 `→ 确定` 命令链接。内容需完整显示应用名、说明、内置 AI 助手说明、作者、联系方式、`版本：1.0.75`（版本号动态读取，不写死）；切 English 后整体为英文（`MC Material Query / Description: … / Author: … / Version: …`）；遮罩可点击关闭，两个视图下都能正常全屏显示（不被裁切）。`npm test` 146 passed。
+
+> 55. **AI 写文件「写入前确认」弹窗风格（1.0.75）**：
+>    **① 正常路径**：让 AI 修改一个已存在的 xlsx / docx → 弹出**暖米色、22px 圆角、两个胶囊按钮**的应用内 Modal（与「关于」/「批量删除确认」同款），**不再是 Windows 原生弹窗**；内容含目标文件、现有大小、写入方式、行数/字符数、内容预览、起始列/表头行与 .bak 备份说明。
+>    **② 确认 / 取消**：点「确认写入」→ 工具继续执行并写文件；点「取消」/ 按 ESC → 返回 `USER_CANCELLED`，**文件字节数不变**；点遮罩不应关闭（`maskClosable=false`）。切 English 后标题、按钮、差异摘要全为英文。
+>    **③ 兜底**：关闭主窗口 / 渲染层未挂载时 → 自动回退原生 `dialog.showMessageBox`，工具链仍能完成确认；120 秒无人操作 → 按取消处理，不得误写；连续 2 次写文件请求 → 两个确认框依次出现（FIFO），不互相覆盖。
+>    **④ 自检**：`npx tsc --noEmit` 0 错误、`npm test` 146 passed、`npm run build` 通过。
+
+> 56. **物料描述翻译关闭 thinking（1.0.75，#9）**：
+>    **① 变快**：保持当前配置（AI 助手模型 = `hy3-preview-agent`），点「翻译物料描述」翻 1 条 → 明显快于原来的 20 秒以上，按钮不再长时间停在 `翻译中 0/1`。
+>    **② 日志**：`%APPDATA%\mc-material-query\debug-ai.log` 应新增 `[translate] start provider=… model=hy3 texts=1 noThink=yes timeout=30000ms` 与 `[translate] done … ms=…`；**model 不应再是 `hy3-preview-agent`**。若网关不接受关闭 thinking 参数，会出现一行 `gateway rejected no-think params (400) -> retry plain body`，属正常兼容回退，翻译仍应成功。
+>    **③ 可配置**：在 `ai-prefs.json` 写 `"translateModelId": "glm-5.3-flash"` → 翻译严格用该模型；删掉该字段则回到自动（agent 型换快模型）；把聊天模型切到非推理模型（如 `glm-5.2`）→ 翻译沿用该模型，不强行替换。
+>    **④ 兜底**：上游 30 秒无响应（仅 1 条）→ 报「翻译超时（30 秒内没有响应）」并复位按钮；多批仍 90 秒，逐批回写译文；切 English 后错误文案同步。
+>    **⑤ 自检**：`npx tsc --noEmit` 0 错误、`npm test` 151 passed（`translateModel.test.ts` 5 例）、`npm run build` 通过。
+
+> 57. **翻译跟随当前服务商（1.0.75）**：在 AI 助手面板把服务商从本地 `Codebuddy` 切到 **OpenCode Go**（等约 0.5 秒）→ 回物料查询页点「翻译物料描述」→ `debug-ai.log` 的 `[translate] start provider=` 应变成 `opencode-go`（对应 id），**不再是 `custom-mvgd8aoy-lgst35`**；模型也应跟着变成新服务商的默认/所选模型。切回本地网关同理。修改模型输入框后等 0.5 秒再翻译，日志里的 model 应随之变化。重启 app 后 AI 助手应仍停在最后选的服务商。若日志仍是旧 provider，检查 `%APPDATA%\mc-material-query\ai-prefs.json` 的 `lastProviderId` 是否已更新。`npm test` 151 passed。
+
+> 58. **翻译兼容性与失败弹窗统一（1.0.75）**：
+>    **① 不兼容模型**：把模型换成 `gpt-5.6-luna`（或任何走 openai-responses 的模型）后点翻译 → 不应再出现 `enable_thinking: cannot be represented` 的直接失败；日志要么 `done`，要么出现 `gateway rejected no-think params … -> retry plain body` 后 `done`。
+>    **② 失败提示风格**：故意让翻译失败（断网 / 填一个不存在的模型）→ 应弹出**暖米色、22px 圆角、胶囊按钮**的应用内 Modal，徽标为暖红色（error），**不再是 Windows 原生蓝标题栏弹窗**；工具栏按钮旁仍有常驻的红色失败原因。
+>    **③ 另两类提示**：没配 API Key 时点翻译 → 暖米色 Modal、徽标琥珀色（warning）；翻译中点取消 → 暖米色 Modal（info）。切 English 后文案同步。
+>    **④ 回归**：`glm-5.3-flash` / `deepseek-v4-pro` / `hy3` 仍应在 1~3 秒内完成，日志无异常回退。
+>    **⑤ 自检**：`npx tsc --noEmit` 0 错误、`npm test` 151 passed、`npm run build` 通过。
+
+> 59. **主题跨版本保留（1.0.75，#10）**：
+>    **① 配置位置**：`%APPDATA%\mc-material-query\app-prefs.json` 的 `theme` 字段，普通文本可直接查看/备份（旧的 `mc-theme` 在 `Partitions\mc-query\Local Storage\leveldb\` 二进制里）。
+>    **② 复测**：选一个非默认主题 → 检查 json 里出现对应 `theme` → 重启 app / 覆盖安装新版本 / 删掉 `Local Storage` 目录 → 主题都应保持，**不再回到默认**。dev 版（`localhost:5173`）与打包版应显示同一主题。
+>    **③ 首次升级**：旧 localStorage 值只在原 origin 内可迁移，打包版第一次需要**重新选一次主题**；之后永久写入 json，后续升级无需重选。
+>    **④ 兼容性**：`theme` 指向已下线主题时回退默认且不崩；改托盘/开机自启设置时不会把 `theme` 冲掉。
+>    **⑤ 自检**：`npx tsc --noEmit` 0 错误、`npm test` 151 passed、`npm run build` 通过。
 
 ### 6. 发布到 GitHub Release
 

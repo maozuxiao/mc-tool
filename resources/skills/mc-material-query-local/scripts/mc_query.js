@@ -253,11 +253,41 @@ function printUsage() {
   --json         结果以 JSON 输出到 stdout，不生成 HTML 报告`);
 }
 
+// 1.0.75 #8 P0-2：检索方式凭证。由 rowsFromData 累加「本次实际解析到的服务端记录行数」，
+// 让「本次没检索到」与「数据不存在」在结构上可区分。
+const CHANNEL_BY_CMD = {
+  search: 'wuliao', item: 'wuliao', batch: 'wuliao',
+  bom: 'bom', spec: 'specificationFile'
+};
+const SCAN = { rows: 0, calls: 0 };
+let CURRENT_QUERY = { channel: 'oa-mc', queryString: '' };
+
 // JSON 输出：用标记包裹，便于调用方从 stdout 中可靠提取
 // 1.0.74：成功结果统一带 ok:true，让「调用成功」在结构上不可能与失败混淆。
+// 1.0.75：统一注入 evidence（channel / queryString / scannedRows / matchCount / sampleHits）。
 function printJson(obj) {
+  const hitList = Array.isArray(obj.rows) ? obj.rows
+    : Array.isArray(obj.bomRows) ? obj.bomRows
+      : Array.isArray(obj.files) ? obj.files
+        : Array.isArray(obj.items) ? obj.items.filter(x => x && x.found) : [];
+  const matchCount = hitList.length;
+  const sampleHits = hitList.slice(0, 3).map(x => String(
+    (x && (x.ITEM_NUMBER || x.itemNumber || x.fileName || x.ASSEMBLY_ITEM_NUMBER)) || ''
+  ).trim()).filter(Boolean);
+  const evidence = {
+    channel: CURRENT_QUERY.channel,
+    queryString: CURRENT_QUERY.queryString,
+    scannedRows: SCAN.rows,
+    scanCalls: SCAN.calls,
+    matchCount,
+    sampleHits,
+    // 一行都没解析到时不能当作「查无此料」：可能是通道/接口异常，交给上层强证据闸门处理
+    ...(SCAN.rows === 0 && matchCount === 0
+      ? { scanWarning: '本次未解析到任何记录，可能是检索通道异常，不得据此判定「无数据」' }
+      : {})
+  };
   console.log('===JSON_BEGIN===');
-  console.log(JSON.stringify({ ok: true, ...obj }));
+  console.log(JSON.stringify({ ok: true, ...obj, evidence }));
   console.log('===JSON_END===');
 }
 
@@ -551,6 +581,9 @@ async function loginAndCaptureCookies() {
 
 function rowsFromData(data) {
   if (!data || !Array.isArray(data.datas)) return [];
+  // 1.0.75 #8 P0-2：累计本次真实解析到的服务端行数（不是命中数）
+  SCAN.rows += data.datas.length;
+  SCAN.calls += 1;
   return data.datas.map(row => {
     const obj = {};
     row.forEach(cell => { obj[cell.col] = cell.value; });
@@ -882,6 +915,11 @@ ${downloadDir ? `<div class="meta" style="margin-top:15px">文件已下载至: $
 // ── 主流程 ───────────────────────────────────────────────────
 async function main() {
   const { cmd, params, outDir, orgId, download, json } = parseArgs(process.argv);
+  // 1.0.75 #8 P0-2：把「这次到底查了什么、走的哪个接口」写进返回凭证
+  CURRENT_QUERY = {
+    channel: CHANNEL_BY_CMD[cmd] || 'oa-mc',
+    queryString: `${cmd} ${(params || []).join(' ')}`.trim()
+  };
   if (!json) {
     if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
   }

@@ -1,6 +1,16 @@
-import { net } from 'electron'
+import { app, net } from 'electron'
+import { appendFileSync } from 'fs'
+import { join } from 'path'
 import type { AIModelInfo } from '@shared/ai-types'
 import { getProvider, saveCachedModels } from './providerStore'
+
+/** 1.0.75：翻译链路写进 debug-ai.log —— 以前这里一行日志都没有，慢/卡只能靠猜 */
+function translateLog(msg: string): void {
+  try {
+    appendFileSync(join(app.getPath('userData'), 'debug-ai.log'),
+      `[${new Date().toISOString()}] [translate] ${msg}\n`, 'utf8')
+  } catch { /* 日志失败不影响翻译 */ }
+}
 
 /**
  * 增强提示词（1.0.43）：用当前供应商把用户的草稿改写成更明确、可执行的提示词。
@@ -53,6 +63,21 @@ const translateAborts = new Map<string, AbortController>()
  * 返回可读文案，已在译出的批次仍保留，用户可直接再点一次续翻。
  */
 const TRANSLATE_TIMEOUT_MS = 90_000
+/** 1.0.75：只有 1 条描述时别让用户干等 90 秒 —— 一条短翻译超出 30 秒基本可判上游异常 */
+const TRANSLATE_TIMEOUT_SINGLE_MS = 30_000
+
+/**
+ * 1.0.75：识别「网关不认识关闭 thinking 的参数」这类 400，
+ * 以便去掉未知字段重试一次。OpenAI 兼容网关大多忽略未知字段，
+ * 但严格校验的会 400，此时必须回退到原始请求体，不能让翻译整个失败。
+ */
+function isUnsupportedThinkingParam(e: any): boolean {
+  const s = String(e?.message || e || '')
+  // 2026-11-09 真机：OpenCode Go + gpt-5.6-luna 走 openai-responses 后端，
+  // 报 `enable_thinking: cannot be represented by openai-responses; use scoped
+  // provider_options…`，原正则不含这些词 → 没触发回退，翻译直接失败。
+  return /400|unknown|unsupported|not supported|unexpected|not allowed|extra field|invalid.*param|参数|cannot be represented|provider_options|openai-responses|reasoning_effort|enable_thinking/i.test(s)
+}
 
 /**
  * 把一批中文物料描述翻译成英文（1.0.54，「翻译物料描述」按钮用）。
@@ -74,6 +99,7 @@ export async function translateDescriptions(input: {
   taskId?: string
 }): Promise<{ ok: boolean; items?: string[]; message?: string; canceled?: boolean; timeout?: boolean; error?: string }> {
   const texts = (input?.texts || []).map(t => String(t ?? '')).filter(t => t.trim())
+  const started = Date.now()
   if (!texts.length) return { ok: false, message: '没有需要翻译的描述' }
   const { config, apiKey } = getProvider(input.providerId)
   if (!apiKey && input.providerId !== 'ollama') return { ok: false, message: '请先在 AI 助手面板配置 API Key' }
@@ -83,11 +109,12 @@ export async function translateDescriptions(input: {
   // 超时与「用户取消」两个中断源汇流到一个内部 controller，同时用 timedOut 标记区分
   // 是谁打断的：取消 → 安静收尾（canceled），超时 → 按失败提示（timeout）。
   const ctl = new AbortController()
+  const timeoutMs = texts.length <= 1 ? TRANSLATE_TIMEOUT_SINGLE_MS : TRANSLATE_TIMEOUT_MS
   let timedOut = false
   const timer = setTimeout(() => {
     timedOut = true
     try { ctl.abort() } catch { /* 已中止 */ }
-  }, TRANSLATE_TIMEOUT_MS)
+  }, timeoutMs)
   const onCancel = () => { try { ctl.abort() } catch { /* 已中止 */ } }
   ac?.signal.addEventListener('abort', onCancel, { once: true })
   const cleanupAbortSources = () => {
@@ -100,21 +127,41 @@ export async function translateDescriptions(input: {
     '用户消息是编号列表（每行「编号. 描述」），你必须按相同编号逐行输出（每行「编号. 译文」），' +
     '编号与行数一一对应，不要合并、不要省略、不要输出额外内容。'
   const list = texts.map((t, i) => `${i + 1}. ${t}`).join('\n')
+  const baseBody = {
+    model: input.modelId || config.defaultModel,
+    stream: false,
+    temperature: 0.2,
+    messages: [
+      { role: 'system', content: sys },
+      { role: 'user', content: list }
+    ]
+  }
+  // 1.0.75：关闭 thinking。翻译是「编号列表 → 编号列表」的确定性任务，
+  // 推理模型却会先生成一大段思维链（实测 1500~3200 字符、20~26 秒），1 条描述也慢。
+  // 只带 OpenAI 标准的 `reasoning_effort:'none'` —— 原来还带 Qwen/DashScope 私有的
+  // `enable_thinking:false`，实测会让走 openai-responses 后端的模型（gpt-5.6-luna）
+  // 直接报错「cannot be represented」。不认识该字段的网关多数忽略，
+  // 少数严格校验返回参数错误 —— 那时去掉参数用原始 body 重试一次。
+  const NO_THINK = { reasoning_effort: 'none' }
+  const url = `${config.baseUrl}/chat/completions`
+  const post = (body: any) => requestJSON<any>(url, apiKey, {
+    method: 'POST', body: JSON.stringify(body)
+  }, ctl.signal)
+  translateLog(`start provider=${input.providerId} model=${baseBody.model} texts=${texts.length} noThink=yes timeout=${timeoutMs}ms`)
   try {
-    const data = await requestJSON<any>(`${config.baseUrl}/chat/completions`, apiKey, {
-      method: 'POST',
-      body: JSON.stringify({
-        model: input.modelId || config.defaultModel,
-        stream: false,
-        temperature: 0.2,
-        messages: [
-          { role: 'system', content: sys },
-          { role: 'user', content: list }
-        ]
-      })
-    }, ctl.signal)
+    let data: any
+    try {
+      data = await post({ ...baseBody, ...NO_THINK })
+    } catch (e: any) {
+      if (ctl.signal.aborted || !isUnsupportedThinkingParam(e)) throw e
+      translateLog(`gateway rejected no-think params (${String(e?.message || '').slice(0, 90)}) -> retry plain body`)
+      data = await post(baseBody)
+    }
     const out = String(data?.choices?.[0]?.message?.content || '').trim()
-    if (!out) return { ok: false, message: '模型没有返回内容' }
+    if (!out) {
+      translateLog(`empty output model=${baseBody.model} texts=${texts.length} ms=${Date.now() - started}`)
+      return { ok: false, message: '模型没有返回内容' }
+    }
     // 按行首编号解析译文；模型偶尔会把多条并成一行或换行输出，按编号对齐后
     // 缺失的条目回退原文（不错位、不丢行）。
     const byIndex = new Map<number, string>()
@@ -123,11 +170,13 @@ export async function translateDescriptions(input: {
       if (m) byIndex.set(Number(m[1]), m[2])
     }
     const items = texts.map((t, i) => byIndex.get(i + 1) || t)
+    translateLog(`done model=${baseBody.model} texts=${texts.length} ms=${Date.now() - started}`)
     return { ok: true, items }
   } catch (e: any) {
+    translateLog(`fail model=${baseBody.model} texts=${texts.length} ms=${Date.now() - started} timedOut=${timedOut} reason=${String(e?.message || e).slice(0, 160)}`)
     // 超时：上游迟迟不返回，net.fetch 本身没有超时，必须自己判（否则界面会一直「翻译中」）
     if (timedOut) {
-      return { ok: false, timeout: true, error: 'TIMEOUT', message: `翻译超时（${Math.round(TRANSLATE_TIMEOUT_MS / 1000)} 秒内没有响应）` }
+      return { ok: false, timeout: true, error: 'TIMEOUT', message: `翻译超时（${Math.round(timeoutMs / 1000)} 秒内没有响应）` }
     }
     // 被 cancelTranslate 中断：不算失败，返回 canceled 让调用方安静收尾
     if (ac?.signal.aborted || e?.name === 'AbortError') {

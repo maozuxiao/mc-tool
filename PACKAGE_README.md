@@ -6,6 +6,7 @@
 |------|------|------|----------|------|
 | 产品版本 / 自动更新识别 | `package.json` | `version` | SemVer 三段，如 `1.0.1` | `app.getVersion()`、`latest.yml` 均使用此值 |
 | Windows 文件版本 / exe 属性 | `electron-builder.yml` | `buildVersion` | 四位，如 `1.0.1.0` | 写入 exe 的「文件版本」属性 |
+| 依赖锁文件版本（1.0.75 起） | `package-lock.json` | 顶部 `version` 与 `packages[""].version` | 与 `package.json` 一致的三段 | 只是元数据，不影响安装，但停在旧版本会让人误判基线；发版时一并同步两处 |
 | 界面显示版本 | `src/renderer/src/store.ts` | `appVersion` | 自动读取 | 启动时从 `window.mcApi.appVersion()` 读取，**无需手动修改** |
 | 文档版本标注 | `README.md` / `MC Tool Release Notes.md` / `PUBLISH.md` / 本文件的「当前基线版本」 | 文本 | 三段 + 四段 | 版本表、产物名示例（`mc-material-query-setup-1.0.x.exe`）、冒烟清单里的产物名都要跟着改；漏改会让人照着旧名字找产物 |
 
@@ -92,8 +93,8 @@ Windows 任务栏右键菜单第一项（窗口名称）由主窗口 `title` 与
 ### 当前基线版本
 
 ```text
-package.json version:          1.0.74
-electron-builder buildVersion: 1.0.74.0
+package.json version:          1.0.75
+electron-builder buildVersion: 1.0.75.0
 ```
 
 打包命令：

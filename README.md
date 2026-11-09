@@ -4,7 +4,7 @@
 
 - 仓库：https://github.com/maozuxiao/mc-tool
 - 技术栈：Electron 33 + electron-vite + React 18 + TypeScript + Zustand，UI 组件库 [`animal-island-ui`](https://www.npmjs.com/package/animal-island-ui)；AI 面板里的操作类小图标用 [`naive-icons`](https://www.npmjs.com/package/naive-icons)（同为手绘 naive 风，按需引 `svg/*.svg?raw` 并改色跟随主题，见 `src/renderer/src/components/NaiveIcon.tsx`）
-- 当前版本：`1.0.74`（`package.json` 的 `version` 为准）
+- 当前版本：`1.0.75`（2026-11-09 发布，`package.json` 的 `version` 为准；完整改动见 `MC Tool Release Notes.md`）
 
 ---
 
@@ -200,6 +200,14 @@
 - **整行染色**：更新 / 写入时可用 `__rowFill` / `rowFill` / `行色` / `整行颜色` / `rowColor` 键指定 `green` / `yellow` / `red`（或具体 ARGB 色），把该关键列所在行从 A 列到工作表最右列整体重染、覆盖旧色；未指定颜色键时回退到该行最右侧有填充的单元格颜色。
 - **改 Excel 不再改坏原表（1.0.73）**：此前 `--update` / `--newsheet` 用 ExcelJS 整本重写，而 ExcelJS 只认 OOXML 的图片（`<xdr:pic>`）、**不认文本框 / 标注 / 箭头等形状（`<xdr:sp>`）**，还会丢 `calcChain.xml`、打印设置和 `docProps/custom.xml`，`Print_Area` 的 `$A$1` 会被写成 `$A1` —— 结果就是改两个单元格，整张 PI 上的 17 个文本框全没了。现在改成**部件级无损补丁**：只增/改必需的部件（`workbook.xml`、rels、`[Content_Types].xml`、目标 sheet、`styles.xml`），单元格一律写 `inlineStr`（不动 `sharedStrings.xml`），样式只**追加** `<fill>`/`<xf>` 并以原 `xf` 为模板克隆（不改任何既有索引，字体/边框/数字格式不会被吃掉），公式和值也不会被 `fillOnly` 上色过程覆盖。写盘后做**白名单回读校验**：除允许改的那几个部件（`workbook.xml` / rels / `[Content_Types].xml` / 目标 sheet / `styles.xml` + 新增的那一个 sheet 部件）外，原包内**每一个**部件的 SHA1 都必须与写前一致，缺部件、多出部件同样算失败。校验不过就直接中止、原文件不动（写前另有 `.bak-时间戳` 备份）—— 口径是「我不知道的部件一律不许动」，任何没想到的角落被碰都会当场拦下，而不是靠一张黑名单去猜。
 - **工具下载的图片直接给模型看、工具失败不再被当成「查无数据」（1.0.74）**：① `mc_query` 失败一律返回 `ok:false` + `error_code` + `error_message`（措辞由工具给，模型只能照抄「查询失败」），参数类失败自动归一化 / 自动重试一次，反常识空结论（BOM 0 条、规格 0 文件）自动二次核验后才允许陈述 —— 不会再出现「工具报错 → 回复整机未维护 BOM」；② 新增 `jira_get_issue_attachments` 与 `read_local_file`，工单 / 评论里的截图、MC 规格图纸会下载落盘并**作为图片消息直接进上下文**，日志 / PDF 只回 `localPath` 按需读全文；图片消息按引用跟踪、不写进会话历史，网关不兼容时自动降级为路径提示，不中断工具链，也不会假装看过图。
+- **OA 登录后鸿翼会话不再漏建（1.0.75）**：此前只有「扫码成功」会顺手同步 edoc2 会话，**从备份 cookie 恢复**和**心跳静默自愈**这两条同样是「已登录」的路径直接漏掉 —— 表现为 OA 显示正常、鸿翼却一直未登录。现在三条路径共用一个 30 秒限频的同步入口；纯 HTTP 换票一落到 IAM 登录页就明确判「需要重新扫码」，不再空等 3 分钟。OA「文件管理」跳到鸿翼网页版时，子窗口加载完会主动探一次登录态，换票成功后自动 reload 一次，不再永远 `Loading...`。日志里补上 `token` / `checkToken` / `LtpaToken` 的 domain / path / Secure 明细，便于定位票据落错域。**抓包后按 H5 补齐**：HAR 证实换票链是 `IAM authenticate(200 + 自动提交脚本) → /sso/auth/callback?code= → /jump.html?token=(JS 换 cookie) → /index.html`，隐藏窗口原先在第一跳后 2.5 秒就被销毁、页面 JS 没机会执行；现在改为轮询等整条链跑完（最多 20 秒），`/jump.html` 不再被误判为「已落回站点」，`authenticate` 中间态也不再触发重导航。**IAM 会话过期时自动弹出可用的登录窗**（2026-11-09 日志实证：`iamSessionAlive=false` 时服务端一定把 `authenticate` 打到 AC 登录页，自动换票绕不过「人登录」）：实测 `iam…/ac/#/index?lck=…` 在应用内窗口里就是白屏，所以退路改为打开站点自带的「**登录文件系统（账号密码）**」H5 窗口（历史日志 `[h5login] window open form={"ready":true,…}` 证明表单能正常渲染），仅在用户主动进文件系统时触发、5 分钟内最多一次，登录成功自动关窗；白屏页面上另注入一条说明，告诉用户该去哪个窗口操作。顶栏**没有新增按钮**，原来的「点 title 图标进 OA → 文件管理」路径照旧可用。
+- **账密保存与自动登录（1.0.75）**：用户明确授权保存文件系统账密后，用 Electron `safeStorage`（Windows DPAPI）加密写入 `userData/wjxt-credentials.bin`，明文不进日志、不上传；**只在登录成功后**保存最后一次提交的值，密码改了重新登一次即自动更新，错密码不会被记住。重启 APP 有凭据时走**隐藏窗口自动填充 + 自动提交**，用户无感；20 秒仍未成功（多半是旧密码）才显示窗口让用户改。同时修掉「隐藏同步窗口被误判成用户主动进文件系统」导致的**打开 APP 就弹登录窗**。首次仍需手输一次账密。
+- **启动更安静、登录可控（1.0.75）**：鸿翼登录界面**不会在软件启动时弹出**，只有使用鸿翼技能或点 OA「基础应用 → 文件管理」才允许触发；启动恢复 / 心跳自愈一律不打扰。H5 登录界面新增可见的「记住账号密码」勾选框（默认勾选、可取消；取消会清除已保存账密）。另修 npm dev 启动「明明有登录态却卡在二维码刷新界面、必须手点刷新」的竞态 —— 结论算对了但 IPC 发得比渲染层挂监听还早，现在被抑制的重复检查会重放已登录结论。**账密登录成功后，OA 打开的那个文件系统窗口会自动刷新**（不再一直 `Loading...`），「记住账号密码」勾选框置于密码框下、登录按钮上方并与输入框左对齐，自动登录时原窗口立即显示进度提示、8 秒未完成才显示登录窗。**鸿翼账密登录全局只保留 1 个窗口**，支持多个账号的下拉选择（加密存储按账号 upsert，改密码自动覆盖）；Skill 提示里的「扫码登录」不再打开白屏的 edoc2 认证页，改为走已验证的「退出登录 → 重新扫 OA 二维码」路径；登录窗口**点击即打开**并先显示 spinner + 进度条占位，不再对着空白等站点 H5 页；扫码 / 账密登录成功后会主动提示「文件系统登录态已恢复」，且已登录时再点扫码链接不会误退出、清掉刚建好的会话。**扫码成功后不再被限频挤掉**（`oa-login` 豁免 30 秒节流）；已登录时点扫码 / 账密链接会明确提示「无需重复登录」，账密登录入口先检查登录态、已登录不再开窗重置会话；鸿翼页面的蓝色提示条带关闭按钮、90 秒自动消失，登录成功后自动撤掉，不再残留「已失效」的过期信息。**以上新增提示语全部支持中英双语**：主进程新增 `uiLang.ts` 共享语言（`dialog:setLang` 同步、启动按系统语言兜底），通用通知发 i18n key 由渲染层翻译，提示条 / 登录窗口 loading 页 / 窗口标题 / 记住账密勾选框 / 多账号下拉 / 写入前确认框均按当前语言取词。
+- **提示弹窗统一风格 + 查询结果空状态（1.0.75）**：新增提示（已登录时点扫码 / 账密链接、会话恢复）改用与「批量删除确认」同款的 `animal-island-ui` 暖米色 Modal，不再是 Windows 原生蓝标题栏弹窗；其余原生弹窗也去掉了「→ 确定」命令链接样式。**MC 物料 / BOM / 规格文件查询成功但 0 条**时，显示参考 animal-island-ui no-data 风格制作的 NO DATA 空状态（有机 blob + 矢量图标 + 软动效，中英双语），与「尚未查询」时的引导语区分开；筛选后无匹配仍显示原「暂无匹配结果」。**「帮助 → 关于」也换成同款暖米色 Modal**（原来的 Windows 原生蓝标题栏弹窗已弃用），说明 / 作者 / 联系方式 / 版本沿用原有中英文案，版本号仍动态读取。**AI 写已有文件前的「写入前确认」也换成同款 Modal**：新增一条主→渲染→主的确认 IPC，主进程挂起工具调用、按请求 id 唤醒；渲染层不可用时自动回退原生弹窗，120 秒无人操作按「取消」处理，绝不误写。差异摘要与按钮全部双语。
+- **物料描述翻译不再被 thinking 拖慢（1.0.75 / #9）**：诊断确认不是网络问题，而是翻译复用了 AI 助手当前选中的推理型 Agent 模型（`hy3-preview-agent`），1 条描述也要先跑 20 秒以上思维链。现在翻译请求会带 `reasoning_effort:'none'` / `enable_thinking:false`（网关不认则 400 自动回退），并把**翻译模型与聊天模型解耦**：agent/thinking 型自动换用同服务商的快模型（当前配置下 `hy3-preview-agent` → `hy3`）；也可在 `ai-prefs.json` 用 `translateModelId` 显式指定。单条超时 90 秒缩短到 30 秒，`debug-ai.log` 新增 `[translate] start/done/fail` 耗时日志（真机实测 1.2~2.7 秒完成）。**翻译的服务商现在会跟随 AI 助手面板的当前选择**：此前切换服务商只改局部状态，翻译一直用上一次「保存配置」时的旧服务商；现在切换即写回偏好，重启后 AI 助手也会回到上次选的服务商。部分走 `openai-responses` 后端的模型（如 `gpt-5.6-luna`）不认非标准 thinking 参数，已改为只带 OpenAI 标准的 `reasoning_effort:'none'` 并对参数类错误自动退回原始请求；**翻译失败 / 未配置 Key / 已取消的提示也统一为暖米色 Modal**（带 info / warning / error 语义色），不再弹 Windows 原生框。
+- **主题设置跨版本保留（1.0.75 / #10）**：主题原先只存在渲染层 `localStorage` 的 `mc-theme`（Chromium leveldb，路径 `%APPDATA%\mc-material-query\Partitions\mc-query\Local Storage\leveldb\`），而 localStorage 按 origin 隔离 —— dev 版 `http://localhost:5173` 与打包版 `file://` 各存一份，所以每次装新版本都像被重置。现改为与其它设置一起写进 **`%APPDATA%\mc-material-query\app-prefs.json`** 的 `theme` 字段（可直接查看/备份），dev 与打包版共享、覆盖安装不丢；旧的 localStorage 值启动时自动迁移一次。
+- **物料查询：证据不足就不给业务结论（1.0.75 / #8）**：`mc_query` 成功结果统一带 `evidence`（`channel` / `queryString` / `scannedRows` / `matchCount` / `sampleHits`），一行都没解析到时附 `scanWarning`；只有 `resultCode:OK_EMPTY` + `verifiedTwice:true` + `matchCount===0` + 凭证齐备才允许说「无数据」，二次核验失败或证据不齐一律返回 `CONFLICT`（只能说「查询失败」）。搜索空结果也纳入二次核验；**写已有文件前**会弹差异摘要（目标文件 / 写入方式 / 内容预览 / 备份提示）要求确认，取消则不改动。
+- **会话记录框与主会话框等高（1.0.75）**：两列共用一个 grid 行高，主会话框却因多挂了通用 `.card` 背了 14px 下外边距，所以看起来比「会话记录」框短一截；把这一个 `margin-bottom` 归零即可，布局与滚动不变。
 - **目录与搜索**：`file_search` 支持正则（`--regex`）、文件名通配符（`*`/`?`）、按类型过滤（`--glob` / `--ext`），类似 FileLocatorPro 的保底检索。
 - **下载文件到目录**：`file_download` 把 URL 下载到你指定的目录。支持 OA 物料规格文件链接（自动复用当前 OA 登录态）与任意 http/https 直链；**边下边写**（先写 `xxx.part`，完成再改名，失败自动清理），只有「空闲 60 秒没有新数据」才判超时，大文件不会被打断；目录不存在自动创建，同名文件自动重命名（`名称(1).ext`）**不覆盖**已有文件，单次上限 200MB。目标目录必须在已授权工作区内，越界会提示先用 `open_folder` 打开该目录；OA 未登录时会提示先在应用内登录 OA。
 
@@ -441,9 +449,9 @@ npm run pack:all   # 全平台
 ```
 dist/
 ├─ latest.yml                            # 自动更新元数据
-├─ mc-material-query-setup-1.0.74.exe            # NSIS 安装包
-├─ mc-material-query-setup-1.0.74.exe.blockmap  # 增量更新块映射
-└─ mc-material-query-1.0.74.exe   # 便携版
+├─ mc-material-query-setup-1.0.75.exe            # NSIS 安装包
+├─ mc-material-query-setup-1.0.75.exe.blockmap  # 增量更新块映射
+└─ mc-material-query-1.0.75.exe   # 便携版
 ```
 
 > macOS 交叉编译在 Windows 上不可靠，DMG 请在 macOS 上打包。

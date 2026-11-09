@@ -217,6 +217,9 @@
   min-height: 0;
   padding: 0;
   overflow: hidden;
+  /* 1.0.75：抵消通用 .card 的 margin-bottom:14px —— grid 默认 stretch 会把 margin box
+     拉到行高，导致主会话框比左侧「会话记录」框短 14px。两列共用同一行高，归零即等高。 */
+  margin-bottom: 0;
 }
 .ai-toolbar {
   display: flex;

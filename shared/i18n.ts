@@ -280,6 +280,7 @@ export const I18N: Record<string, Record<string, string | string[]>> = {
     aiDiagBtn: '诊断',
     aiDiagRunning: '自检中…',
     aiDiagTitle: '登录态自检',
+    aiWjxtRestored: '文件系统登录态已恢复，可以正常使用查询与预览了',
     aiDiagFailed: '自检失败',
     // MCP 服务管理（1.0.46）
     mcpTitle: 'MCP 服务',
@@ -753,6 +754,7 @@ aiImgLoadFail: '图片加载失败（链接可能已过期）',
     aiDiagBtn: 'Diagnose',
     aiDiagRunning: 'Checking…',
     aiDiagTitle: 'Login self-check',
+    aiWjxtRestored: 'File system session restored — search and preview are ready',
     aiDiagFailed: 'Self-check failed',
     // MCP services (1.0.46)
     mcpTitle: 'MCP services',
@@ -1025,3 +1027,70 @@ export function translateItemType(lang: Lang, value: string): string {
 export function translateLifecycle(lang: Lang, value: string): string {
   return lang === 'en' ? (lookupValue(LIFECYCLE_EN, value) ?? value) : value
 }
+
+// ── 1.0.75 新增 UI 提示语（主进程弹窗 / 注入页 / 通用通知）─────────────────
+// 用 Object.assign 追加而不是插进上千行的字典块，避免改坏末尾逗号；
+// translate() 读的是同一个 I18N 对象，模块加载完即可命中。
+Object.assign(I18N.zh, {
+  wjxtNoticeAlreadyH5: '文件系统已登录，无需再次登录。',
+  wjxtNoticeAlreadyQr: '文件系统已登录，无需重复扫码。',
+  wjxtNoticeReQr: '正在重新扫码登录 OA，扫码成功后文件系统登录态会自动恢复。',
+  wjxtTipBar: '文件系统登录态暂未就绪，正在自动恢复；若长时间无变化，请在弹出的「登录文件系统（账号密码）」窗口里登录。',
+  wjxtTipClose: '关闭提示',
+  wjxtLoading: '正在打开文件系统登录页…',
+  wjxtH5Title: '登录文件系统（账号密码）',
+  wjxtAccountSelect: '选择已保存的账号…',
+  wjxtRemember: '记住账号密码（仅保存在本机加密存储）',
+  writeConfirmTitle: '写入前确认',
+  writeConfirmOk: '确认写入',
+  writeConfirmCancel: '取消',
+  writeConfirmMsg: '即将写入已有文件：{name}',
+  writeConfirmTarget: '目标文件：{p}',
+  writeConfirmExisting: '现有大小：{size} 字节（脚本会自动生成 .bak 备份，可回滚）',
+  writeConfirmMode: '写入方式：{mode}',
+  writeConfirmLines: '本次内容：{lines} 行 / {chars} 字符',
+  writeConfirmPreview: '内容预览：{text}',
+  writeConfirmStartCol: '起始列：{v}',
+  writeConfirmHeaderRow: '表头行：{v}',
+  writeConfirmBackup: '确认后才会写入；取消则文件保持原样。',
+  writeCancelled: '用户取消了写入，文件未改动',
+  writeModeUpdate: '按条件更新单元格',
+  writeModeAppend: '追加',
+  writeModeNewsSheet: '新增工作表',
+  writeModeOverwrite: '覆盖写入',
+  // 1.0.75：查询成功但 0 条的 NO DATA 空状态
+  noDataTitle: '暂无数据',
+  noDataHint: '这次没有查到匹配的记录，换个料号或调整筛选条件再试一次吧。'
+})
+
+Object.assign(I18N.en, {
+  wjxtNoticeAlreadyH5: 'File system is already signed in — no need to sign in again.',
+  wjxtNoticeAlreadyQr: 'File system is already signed in — no need to scan again.',
+  wjxtNoticeReQr: 'Reopening OA QR sign-in. The file system session will be restored automatically after you scan.',
+  wjxtTipBar: 'File system sign-in is not ready yet — restoring automatically. If nothing changes, use the "Sign in to file system (username & password)" window that opened.',
+  wjxtTipClose: 'Dismiss',
+  wjxtLoading: 'Opening file system sign-in…',
+  wjxtH5Title: 'Sign in to file system (username & password)',
+  wjxtAccountSelect: 'Choose a saved account…',
+  wjxtRemember: 'Remember credentials (encrypted, stored locally only)',
+  writeConfirmTitle: 'Confirm write',
+  writeConfirmOk: 'Write',
+  writeConfirmCancel: 'Cancel',
+  writeConfirmMsg: 'About to write to an existing file: {name}',
+  writeConfirmTarget: 'Target file: {p}',
+  writeConfirmExisting: 'Current size: {size} bytes (the script makes a .bak backup so you can roll back)',
+  writeConfirmMode: 'Write mode: {mode}',
+  writeConfirmLines: 'This content: {lines} lines / {chars} characters',
+  writeConfirmPreview: 'Preview: {text}',
+  writeConfirmStartCol: 'Start column: {v}',
+  writeConfirmHeaderRow: 'Header row: {v}',
+  writeConfirmBackup: 'Nothing is written until you confirm; cancelling leaves the file unchanged.',
+  writeCancelled: 'Write cancelled by the user; the file was not changed',
+  writeModeUpdate: 'Update cells by condition',
+  writeModeAppend: 'Append',
+  writeModeNewsSheet: 'Add a new sheet',
+  writeModeOverwrite: 'Overwrite',
+  // Empty state for a successful query that returned 0 rows
+  noDataTitle: 'No data',
+  noDataHint: 'Nothing matched this time. Try another item number or adjust your filters.'
+})

@@ -266,6 +266,8 @@ export const AI_IPC = {
   DELETE_CUSTOM_PROVIDER: 'ai:delete-custom-provider',
   RESET_PROVIDER: 'ai:reset-provider',
   SAVE_PROVIDER: 'ai:save-provider',
+  /** 1.0.75：AI 助手面板切换服务商/模型时同步当前选择（供物料查询页翻译等读取） */
+  SET_CURRENT_SELECTION: 'ai:set-current-selection',
   LIST_MODELS: 'ai:list-models',
   TEST_PROVIDER: 'ai:test-provider',
   LIST_CONVERSATIONS: 'ai:list-conversations',

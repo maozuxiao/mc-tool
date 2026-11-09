@@ -44,6 +44,19 @@ export function registerAIIPC(): void {
     }
   })
 
+  /**
+   * 1.0.75：AI 助手面板切换服务商 / 模型时同步写回偏好。
+   * 之前 `setProviderId` 只改 ChatPanel 局部 state，物料查询页的翻译读
+   * `getProviders().preferences` 时永远拿到上一次「保存配置」的旧值 ——
+   * 实测用户切到 Opencode Go 后，翻译日志仍是 `provider=custom-…(本地网关)`。
+   */
+  ipcMain.handle(AI_IPC.SET_CURRENT_SELECTION, (_e, sel: { providerId?: string; modelId?: string }) => {
+    const patch: { lastProviderId?: string; lastModelId?: string } = {}
+    if (sel?.providerId) patch.lastProviderId = sel.providerId
+    if (sel?.modelId !== undefined) patch.lastModelId = sel.modelId
+    return savePreferences(patch)
+  })
+
   ipcMain.handle(AI_IPC.SAVE_PROVIDER, (_e, input: any) => {
     const saved = saveProvider(input)
     // 保存配置的同时记住这次选择，下次打开 app 直接回到这套配置

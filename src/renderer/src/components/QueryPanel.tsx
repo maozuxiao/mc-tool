@@ -8,6 +8,7 @@ import { MaterialTable } from './MaterialTable'
 import { BomTable } from './BomTable'
 import { FileTable } from './FileTable'
 import { WorkCountdown } from './WorkCountdown'
+import { AboutModal } from './AboutModal'
 import { THEMES, getThemePreset, themeBackdrop } from '../theme'
 
 import { NOOK_ICON } from './nookIcon'
@@ -337,11 +338,13 @@ export function QueryPanel({ disabled }: { disabled: boolean }) {
   // 展开后又是一块黄色大圆角菜单，与周围奶油色的控件不是同一套语言。
   // 现在改为「与设置按钮同款」的 trigger + 面板，度量、描边、悬停色全部复用设置那一套。
   const [helpOpen, setHelpOpen] = useState(false)
+  // 1.0.75：「关于」改用应用内暖米色 Modal（与批量删除确认 / 全局提示同款）
+  const [aboutOpen, setAboutOpen] = useState(false)
 
   const onHelp = async (key: 'about' | 'check') => {
     setHelpOpen(false)
     if (key === 'about') {
-      void window.mcApi.showMessage({ message: t('aboutInfo', { v: appVersion }), lang })
+      setAboutOpen(true)
       return
     }
     // 手动检查：弹窗返回结果；有更新则提供「立即下载」入口
@@ -781,6 +784,7 @@ export function QueryPanel({ disabled }: { disabled: boolean }) {
           />
         </div>
       </div>
+      <AboutModal open={aboutOpen} onClose={() => setAboutOpen(false)} appVersion={appVersion} />
     </div>
   )
 }

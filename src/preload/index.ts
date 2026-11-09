@@ -64,6 +64,16 @@ const mcApi = {
   onLoginReady: (cb: (s: { loggedIn: boolean }) => void) => subscribe(IPC.OA_LOGIN_READY, cb),
   onLoginState: (cb: (s: { state: string }) => void) => subscribe(IPC.OA_LOGIN_STATE, cb),
   onLoginLanding: (cb: () => void) => subscribe(IPC.OA_LOGIN_LANDING, cb),
+  // 1.0.75：扫码 / 账密登录成功后主进程主动通知，渲染层提示「登录态已恢复」，
+  // 不用用户自己去点「登录态自检」（同步有几秒延迟，之前容易被误看成 ❌）。
+  onWjxtSessionRestored: (cb: () => void) => subscribe(IPC.WJXT_SESSION_RESTORED, cb),
+  // 1.0.75：主进程来的通用提示（如「已登录，无需重复扫码」），不再静默无反馈
+  onMcNotice: (cb: (message: string) => void) => subscribe(IPC.MC_NOTICE, cb),
+  // 1.0.75：AI 写已有文件前，主进程把确认内容交给渲染层的暖米色 Modal；
+  // 用户点完用 send 回传，主进程按 id 唤起等待中的工具调用。
+  onWriteConfirm: (cb: (payload: any) => void) => subscribe(IPC.WRITE_CONFIRM, cb),
+  replyWriteConfirm: (id: string, ok: boolean): void =>
+    ipcRenderer.send(IPC.WRITE_CONFIRM_REPLY, { id, ok }),
 
   fetchOA: (url: string): Promise<any> => ipcRenderer.invoke(IPC.OA_FETCH, url),
   // id 可选：带上它就订阅得到这次下载的进度（见 onDownloadProgress），用于链接上显示百分比
@@ -115,8 +125,10 @@ const mcApi = {
   setUiLang: (lang: 'zh' | 'en'): void => { currentLang = lang === 'en' ? 'en' : 'zh'; ipcRenderer.send('dialog:setLang', lang) },
 
   // 托盘 / 偏好设置（设置面板：最小化到托盘、关闭按钮行为、开机自启；持久化在主进程 app-prefs.json）
-  getAppPrefs: (): Promise<{ minimizeToTray: boolean; closeToTray: boolean; autoLaunch: boolean }> =>
+  getAppPrefs: (): Promise<{ minimizeToTray: boolean; closeToTray: boolean; autoLaunch: boolean; theme?: string }> =>
     ipcRenderer.invoke('app:getPrefs'),
+  // 1.0.75：主题持久化到 userData/app-prefs.json（更新版本/跨 origin 都不丢）
+  setThemePref: (id: string): void => ipcRenderer.send('app:setTheme', id),
   setSetting: (key: 'minimizeToTray' | 'closeToTray' | 'autoLaunch', v: boolean): Promise<{ ok: boolean }> =>
     ipcRenderer.invoke('app:setSetting', key, v),
   // 托盘右键菜单「物料查询 / AI 助手」→ 渲染层切换视图
@@ -161,6 +173,9 @@ const mcApi = {
   ai: {
     getProviders: () => ipcRenderer.invoke(AI_IPC.GET_PROVIDERS),
     saveProvider: (input: any) => ipcRenderer.invoke(AI_IPC.SAVE_PROVIDER, input),
+    // 1.0.75：切换服务商/模型即写回偏好，翻译等功能才能跟随当前选择
+    setCurrentSelection: (sel: { providerId?: string; modelId?: string }) =>
+      ipcRenderer.invoke(AI_IPC.SET_CURRENT_SELECTION, sel),
     addCustomProvider: (input: any) => ipcRenderer.invoke(AI_IPC.ADD_CUSTOM_PROVIDER, input),
     deleteCustomProvider: (id: string) => ipcRenderer.invoke(AI_IPC.DELETE_CUSTOM_PROVIDER, id),
     resetProvider: (id: string) => ipcRenderer.invoke(AI_IPC.RESET_PROVIDER, id),

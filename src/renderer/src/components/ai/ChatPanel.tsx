@@ -297,6 +297,18 @@ export function ChatPanel({ disabled }: Props) {
   const [conversationId, setConversationId] = useState<string | null>(null)
   const [messages, setMessages] = useState<AIMessage[]>([])
 
+  // 1.0.75：把当前服务商 / 模型同步写回主进程偏好。
+  // 之前切换只改 ChatPanel 局部 state，物料查询页「翻译物料描述」读的是
+  // getProviders().preferences（上一次「保存配置」的值），于是用户切到 Opencode Go
+  // 之后翻译日志里仍是 provider=custom-…（本地网关）。防抖 400ms，避免输入框逐字写盘。
+  useEffect(() => {
+    if (!providerId) return
+    const timer = window.setTimeout(() => {
+      void window.mcApi.ai.setCurrentSelection?.({ providerId, modelId })
+    }, 400)
+    return () => window.clearTimeout(timer)
+  }, [providerId, modelId])
+
   // ── 流式 delta 的「按帧合并」（1.0.42 性能优化）──
   // 原先每个 delta 都 setState 一次，而一次回复动辄几百上千个 delta：每来一个 token 都要
   // 重建 messages 数组、重渲染整条消息列表（并重新解析所有 Markdown）。现改为先把文本累积
@@ -1604,6 +1616,9 @@ export function ChatPanel({ disabled }: Props) {
       setDiagBusy(false)
     }
   }
+
+  // 1.0.75：会话恢复 / 通用提示的弹窗已上移到 App 根组件的 <NoticeModal />
+  // （暖米色库 Modal 风格，且物料查询页未挂载 AI 页时也能收到），此处不再重复弹窗。
 
   const importSkill = async (kind: 'zip' | 'dir') => {
     setSkillBusy(true)

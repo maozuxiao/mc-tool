@@ -3,6 +3,7 @@ import { useStore } from '../store'
 import { useColResize } from '../hooks/useColResize'
 import { escapeHtml } from '@shared/query'
 import { Button, Icon, Tag } from 'animal-island-ui'
+import { NoDataState } from './NoDataState'
 import { translateItemType, translateLifecycle } from '@shared/i18n'
 
 // 生命周期值 → 组件库合法 Tag 颜色（对齐用户脚本 SC 映射，使用 animal-island-ui 主题色）
@@ -40,6 +41,7 @@ export const MaterialTable = memo(function MaterialTable() {
   const t = useStore(s => s.t)
   const lang = useStore(s => s.lang)
   const matData = useStore(s => s.allData)
+  const matQueried = useStore(s => s.matQueried)
   const matFiltered = useStore(s => s.filtered)
   const matSortKey = useStore(s => s.sortKey)
   const matSortAsc = useStore(s => s.sortAsc)
@@ -62,7 +64,10 @@ export const MaterialTable = memo(function MaterialTable() {
   const tableRef = useRef<HTMLTableElement>(null)
   useColResize(tableRef, { storageKey: 'mc_mat_cols' })
 
-  if (!matData.length) return <div className="empty-box" dangerouslySetInnerHTML={{ __html: t('emptyMat') }} />
+  // 1.0.75：查过但 0 条 → NO DATA 空状态；从未查询 → 保留原来的引导语
+  if (!matData.length) return matQueried
+    ? <NoDataState />
+    : <div className="empty-box" dangerouslySetInnerHTML={{ __html: t('emptyMat') }} />
   if (!matFiltered.length) return <div className="empty-box">{t('emptyFiltered')}</div>
 
   const cols = [

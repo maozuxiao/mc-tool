@@ -15,6 +15,8 @@ const PREFS_PATH = () => join(app.getPath('userData'), 'ai-prefs.json')
 export interface AIPreferences {
   lastProviderId?: string
   lastModelId?: string
+  /** 1.0.75：翻译专用模型；留空则自动避开 agent/thinking 模型挑快模型（见 renderer/translateModel.ts） */
+  translateModelId?: string
   /** Build 模式的工作区根目录，空字符串表示未选择 */
   workspaceRoot?: string
   /** 额外可访问目录白名单（工作区之外），跨启动持久化；会话内 open_folder 打开的目录不在此列 */
@@ -41,6 +43,8 @@ export function savePreferences(patch: AIPreferences): AIPreferences {
   const next = { ...readPrefs() }
   if (patch.lastProviderId) next.lastProviderId = patch.lastProviderId
   if (patch.lastModelId) next.lastModelId = patch.lastModelId
+  // 允许清空（回到自动选择），所以用 undefined 判断
+  if (patch.translateModelId !== undefined) next.translateModelId = patch.translateModelId
   // workspaceRoot 允许被清空（传空字符串），所以用 undefined 判断而不是真值判断
   if (patch.workspaceRoot !== undefined) next.workspaceRoot = patch.workspaceRoot
   // extraRoots 用 undefined 判断：传 [] 表示清空白名单

@@ -6,8 +6,8 @@ import { promisify } from 'util'
 import { execFile } from 'child_process'
 import type { AIAgentMode, AIToolRun, AIExtraRoot } from '@shared/ai-types'
 import {
-  MC_OUTPUT_SELF_CHECK, isLowConfidenceResult, makeMcError, resultCodeFor, validateMcInput,
-  type McQueryFailure
+  MC_OUTPUT_SELF_CHECK, assertEmptyConclusion, isLowConfidenceResult, makeMcError,
+  resultCodeFor, validateMcInput, type McQueryFailure
 } from './mcArgs'
 import {
   MAX_IMAGE_BYTES, MAX_IMAGES_PER_TURN, MEDIA_TOOL_NOTE,
@@ -87,6 +87,7 @@ ${MODE_SWITCH_NOTE}
 4.0 **料号位数（硬规则）**：MC 料号有 **12 位和 13 位两种**（13 位 = 4-4-4 分组 + 1 位版本后缀，如 5196009100105）。13 位料号是正常料号，**禁止**以「常见是 12 位 / 位数不对 / 可能有识别误差」为由质疑用户给的料号、要求用户核对位数或截图 —— 直接照原样查。
 4.0.1 **工具失败只能说「查询失败」**：mc_query 的失败结果一律是 ok:false + error_code + error_message（措辞已由工具写好，照抄即可），**禁止**改写成「料号可能抄错了 / 位数不对 / BOM 未维护 / 需要权限 / 系统没数据」；带 retryable:true 的结果服务端会自动重试一次，你不要重复调用，也不要让用户返工。只有明确返回 NOT_FOUND 时才可以提示料号可能有问题。
 4.0.2 **「无数据」必须来自 OK_EMPTY**：只有结果里明确带 resultCode:OK_EMPTY 或 verifiedTwice:true 时才可说「无 BOM / 无规格文件 / 无记录」；反常识的空结论服务端会自动二次核验，核验通过才可陈述并注明「已二次核验」。
+4.0.3 **检索凭证必查（1.0.75 #8）**：每次引用结果前先看 evidence.channel / evidence.queryString / evidence.scannedRows / evidence.matchCount，确认这次查的确实是用户问的料号；evidence 缺失、matchCount 与「无数据」矛盾、出现 evidence.scanWarning 或工具返回 CONFLICT 时，一律只能说「查询失败」，照抄工具措辞，禁止编造「系统没数据 / 未维护 BOM / 需要权限」。
 ${MC_OUTPUT_SELF_CHECK}
 ${MEDIA_TOOL_NOTE}
 4.1 **料号书写（硬规则，实测最容易出错的一条）**：回复里出现的料号必须与查询返回的
@@ -254,7 +255,8 @@ export const MC_QUERY_TOOL_DEFINITION = {
     name: 'mc_query',
     description: '查询锐明 OA MC 物料系统。支持 search（描述搜索）、item（单料号）、batch（批量料号）、bom（BOM）、spec（规格文件列表）。' +
       '失败时返回 ok:false + error_code + error_message，只能照抄措辞说「查询失败」，禁止解释成业务原因；' +
-      '成功但无数据返回 resultCode:OK_EMPTY。spec 传 download:true 会把规格文件下载到本机并返回 localPath，' +
+      '成功但无数据返回 resultCode:OK_EMPTY；成功结果一律带 evidence（channel/queryString/scannedRows/matchCount/sampleHits），' +
+      '陈述结论前必须核对它，证据不齐或返回 CONFLICT 时只能说「查询失败」。spec 传 download:true 会把规格文件下载到本机并返回 localPath，' +
       '其中图片会作为图片消息直接给你看（用户要看接口图纸 / 规格图片时务必传 download:true）。',
     parameters: {
       type: 'object',
@@ -419,14 +421,27 @@ export async function runMcQuery(input: any, onRun?: McRunSink, signal?: AbortSi
     let result: any = first.data
     if (!result.resultCode) result.resultCode = resultCodeFor(command, result)
 
-    // 输出层：反常识的空结论自动二次核验（BOM 0 条 / 规格 0 文件 / 料号查无）。
-    // 只在空结果时多发一次请求，且两次不一致时以第二次为准。
+    // 1.0.75 #8：反常识的空结论自动二次核验 + 强证据闸门。
+    // 只在空结果时多发一次请求；两次不一致以第二次为准，但二次调用失败 / 证据不齐一律 CONFLICT，
+    // 绝不把「一次失败 + 一次空」当成查无数据。
     if (!wantDownload && isLowConfidenceResult(command, result)) {
       const again = await execMcQuery(command, args, extraArgs, signal)
-      if (again.ok) {
-        const code2 = resultCodeFor(command, again.data)
-        if (code2 === result.resultCode) result.verifiedTwice = true
-        else result = { ...again.data, resultCode: code2, verifiedTwice: true }
+      if (!again.ok) {
+        const conflict = makeMcError('CONFLICT',
+          `空结果二次核验未通过（${again.failure.error_code}），不能据此判定「无数据」`, { retryable: false })
+        if (onRun) onRun({ ...persisted, status: 'error', summary: conflict.error_message, output: conflict, durationMs: Date.now() - started })
+        return conflict
+      }
+      const code2 = resultCodeFor(command, again.data)
+      if (code2 === result.resultCode) result.verifiedTwice = true
+      else result = { ...again.data, resultCode: code2, verifiedTwice: true, conflictResolved: true }
+      if (isLowConfidenceResult(command, result)) {
+        const verdict = assertEmptyConclusion(result)
+        if (!verdict.allowed) {
+          const conflict = makeMcError('CONFLICT', `证据不足：${verdict.reason}`, { retryable: false })
+          if (onRun) onRun({ ...persisted, status: 'error', summary: conflict.error_message, output: conflict, durationMs: Date.now() - started })
+          return conflict
+        }
       }
     }
 
@@ -438,8 +453,15 @@ export async function runMcQuery(input: any, onRun?: McRunSink, signal?: AbortSi
       toolRunId: persisted.id,
       summary,
       resultCode: result.resultCode,
+      ...(result.evidence ? { evidence: result.evidence } : {}),
+      // 空结果（含 spec download 未走二次核验的情况）显式带上闸门结论，
+      // 让模型无法绕过 4.0.3 / 输出前自检把「没查到」说成「没有数据」。
+      ...(isLowConfidenceResult(command, result)
+        ? { evidenceGate: assertEmptyConclusion(result) }
+        : {}),
       ...(normalized ? { normalized: true } : {}),
       ...(result.verifiedTwice ? { verifiedTwice: true } : {}),
+      ...(result.conflictResolved ? { conflictResolved: true } : {}),
       ...media
     }
     if (onRun) {

@@ -1538,3 +1538,122 @@ thead th .col-resizer:hover { background: color-mix(in srgb, var(--mc-accent) 25
   background: var(--mc-surface);
   border-color: var(--mc-line);
 }
+
+/* ── 1.0.75 全局提示弹窗内容 ──────────────────────────────────────────────
+   外层是 animal-island-ui 的 <Modal>（暖米色 #f7f3df / 22px 圆角 / 胶囊立体按钮），
+   这里只排内容。配色一律取 --mc-* 主题变量，跟随主题与深浅色切换。 */
+.mc-notice {
+  display: flex; align-items: center; gap: 14px;
+  padding: 6px 2px 2px; text-align: left;
+}
+.mc-notice__icon {
+  flex: 0 0 46px; height: 46px; display: grid; place-items: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--mc-accent-soft) 45%, transparent);
+  color: var(--mc-accent-deep);
+  animation: mc-notice-pop .35s cubic-bezier(.4, 0, .2, 1) both;
+}
+.mc-notice__text {
+  font-size: 14px; font-weight: 600; line-height: 1.7; color: var(--mc-ink);
+}
+/* 1.0.75：翻译失败 / 未配 Key 等提示用语义色区分，仍是同一套暖色 Modal */
+.mc-notice__icon--warning {
+  background: color-mix(in srgb, var(--mc-amber) 32%, transparent);
+  color: var(--mc-accent-deep);
+}
+.mc-notice__icon--error {
+  background: color-mix(in srgb, var(--mc-red) 26%, transparent);
+  color: var(--mc-red-deep);
+}
+@keyframes mc-notice-pop {
+  from { opacity: 0; transform: scale(.82); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ── 1.0.75「帮助 → 关于」弹窗内容（外层同样是库 Modal）────────────────── */
+.mc-about { text-align: left; }
+.mc-about__head {
+  display: flex; align-items: center; gap: 14px; margin-bottom: 16px;
+}
+.mc-about__name {
+  font-size: 17px; font-weight: 800; color: var(--mc-ink);
+}
+.mc-about__body {
+  white-space: pre-line;
+  font-size: 13px; font-weight: 500; line-height: 1.85;
+  color: var(--mc-ink-soft);
+  padding: 16px 18px;
+  border: 1px solid var(--mc-line);
+  border-radius: var(--mc-radius-sm);
+  background: color-mix(in srgb, var(--mc-paper) 70%, transparent);
+}
+
+/* ── 1.0.75 AI 写文件前确认弹窗内容（外层同样是库 Modal）────────────────── */
+.mc-write-confirm { text-align: left; }
+.mc-write-confirm__head {
+  display: flex; align-items: center; gap: 14px; margin-bottom: 16px;
+}
+.mc-write-confirm__headtext { min-width: 0; }
+.mc-write-confirm__title {
+  font-size: 16px; font-weight: 800; color: var(--mc-ink);
+}
+.mc-write-confirm__msg {
+  margin-top: 4px; font-size: 12.5px; color: var(--mc-ink-soft);
+  word-break: break-all;
+}
+.mc-write-confirm__detail {
+  padding: 14px 16px;
+  border: 1px solid var(--mc-line);
+  border-radius: var(--mc-radius-sm);
+  background: color-mix(in srgb, var(--mc-paper) 70%, transparent);
+  font-size: 12.5px; font-weight: 500; line-height: 1.8;
+  color: var(--mc-ink-soft);
+  max-height: 240px; overflow-y: auto; word-break: break-all;
+}
+.mc-write-confirm__detail .is-gap { height: 8px; line-height: 8px; }
+
+/* ── 1.0.75 MC 物料查询「查了但 0 条」的 NO DATA 空状态 ────────────────────
+   参考 animal-island-ui 的 no-data 观感：暖米色纸面、有机 blob、内置矢量图标、
+   大圆角、软浮动动效。不用纯黑 / 冷灰，不用 emoji，不叠卡片阴影。 */
+.mc-nodata {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  min-height: 268px; padding: 34px 20px; text-align: center;
+  border: 1px dashed var(--mc-line-strong);
+  border-radius: var(--mc-radius-lg);
+  background: var(--mc-surface-veil);
+  animation: mc-nodata-in .35s cubic-bezier(.4, 0, .2, 1) both;
+}
+.mc-nodata__blob {
+  position: relative; width: 118px; height: 118px; margin-bottom: 16px;
+  display: grid; place-items: center;
+}
+.mc-nodata__blob::before {
+  content: ''; position: absolute; inset: 0;
+  background: color-mix(in srgb, var(--mc-accent-soft) 52%, transparent);
+  border-radius: 46% 54% 58% 42% / 52% 44% 56% 48%;
+  animation: mc-nodata-float 4s cubic-bezier(.4, 0, .2, 1) infinite;
+}
+.mc-nodata__blob::after {
+  content: ''; position: absolute; inset: 18px;
+  border: 2px dashed color-mix(in srgb, var(--mc-accent) 34%, transparent);
+  border-radius: 54% 46% 42% 58% / 46% 56% 44% 54%;
+}
+.mc-nodata__icon { position: relative; z-index: 1; color: var(--mc-accent-deep); }
+.mc-nodata__title {
+  font-size: 18px; font-weight: 800; letter-spacing: .02em; color: var(--mc-ink);
+}
+.mc-nodata__hint {
+  margin-top: 8px; font-size: 13px; font-weight: 500;
+  color: var(--mc-ink-soft); line-height: 1.7;
+}
+@keyframes mc-nodata-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes mc-nodata-float {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  50% { transform: translateY(-6px) rotate(4deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mc-notice__icon, .mc-nodata, .mc-nodata__blob::before { animation: none; }
+}

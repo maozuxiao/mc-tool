@@ -13,6 +13,8 @@ description_zh: 查询锐明 OA MC 物料系统（物料搜索/料号查询/BOM/
 
 调用锐明 OA 系统 MC 物料搜索 API 查询物料（Cookie 缓存 + Node 直连 HTTP，毫秒级响应）。查询结果输出 **HTML 报告** + 中文摘要；规格文件可下载到用户指定目录。
 
+**`--json` 返回契约（1.0.75 / #8）**：成功固定 `ok:true` + `resultCode`（`OK` / `OK_EMPTY` / `NOT_FOUND`） + `evidence` 检索凭证 `{channel, queryString, scannedRows, scanCalls, matchCount, sampleHits, scanWarning?}`。`channel` 是本次真实接口（`wuliao` / `bom` / `specificationFile`），`scannedRows` 为实际解析到的服务端行数，`matchCount` 为命中数。失败固定 `ok:false + error_code + error_message + retryable`，新增 `CONFLICT`（二次核验失败 / 证据不齐）。**只有** `OK_EMPTY` + `verifiedTwice:true` + `matchCount===0` + 凭证齐备才允许说「无数据」；`scannedRows===0` 会带 `scanWarning` 提示可能是检索通道异常，其余一律说「查询失败」。
+
 技术架构（v2.0）：
 1. **直连模式（默认）**：脚本用本地缓存的 Cookie（`~/.cache/oa-mc-cookies.json`）直接发 HTTP 请求，**完全不需要 Chrome**；
 2. **登录模式（按需）**：无缓存或会话失效时，脚本自动以独立数据目录拉起 Chrome 等待用户扫码，成功后通过 CDP 导出全部 Cookie（含 httpOnly）写入缓存并**自动关闭浏览器**；

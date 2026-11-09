@@ -1,6 +1,25 @@
-import { app } from 'electron'
+import { app, dialog } from 'electron'
 import { tmpdir } from 'os'
-import { unlinkSync, writeFileSync } from 'fs'
+import { existsSync, statSync, unlinkSync, writeFileSync } from 'fs'
+import { tr } from './uiLang'
+
+/**
+ * 1.0.75：AI 写已有文件前的确认请求。文案已由主进程 `uiLang` 翻译好，
+ * 渲染层只负责用同款暖米色 Modal 排版展示，避免中英混杂。
+ */
+export interface WriteConfirmPayload {
+  title: string
+  message: string
+  detail: string[]
+  okText: string
+  cancelText: string
+}
+/** 返回 null = 渲染层不可用，调用方回退原生 dialog；false = 用户取消 / 等待超时 */
+export type WriteConfirmHandler = (payload: WriteConfirmPayload) => Promise<boolean | null>
+let writeConfirmHandler: WriteConfirmHandler | null = null
+export function setWriteConfirmHandler(h: WriteConfirmHandler | null): void {
+  writeConfirmHandler = h
+}
 import { join } from 'path'
 import {
   READ_LOCAL_FILE_TOOL_DEFINITION, readLocalTextFile
@@ -171,6 +190,53 @@ const REGISTRY: Record<string, ToolEntry> = {
           }
         } catch {
           // 不是合法 JSON 就原样交给脚本，由脚本照常报 BAD_JSON（错误信息更具体）
+        }
+      }
+      // 1.0.75 #8 P0-3：覆盖已有文件前，把「将改哪些内容、上一版还在不在」摆给用户确认。
+      // 新建文件不弹（没有可覆盖的内容）；脚本层本来就会生成 .bak 备份，这里一并告知。
+      if (existsSync(p)) {
+        // 1.0.75：文案走主进程 i18n，英文界面下不再中英混杂
+        const mode = input?.update ? tr('writeModeUpdate')
+          : input?.append ? tr('writeModeAppend')
+            : input?.newsheet ? tr('writeModeNewsSheet') : tr('writeModeOverwrite')
+        let size = 0
+        try { size = statSync(p).size } catch { /* ignore */ }
+        const lineCount = payload.split(/\r?\n/).filter(Boolean).length
+        const ui: WriteConfirmPayload = {
+          title: tr('writeConfirmTitle'),
+          message: tr('writeConfirmMsg', { name: p.split(/[\\/]/).pop() || p }),
+          detail: [
+            tr('writeConfirmTarget', { p }),
+            tr('writeConfirmExisting', { size }),
+            tr('writeConfirmMode', { mode }),
+            tr('writeConfirmLines', { lines: lineCount, chars: payload.length }),
+            tr('writeConfirmPreview', { text: payload.replace(/\s+/g, ' ').slice(0, 160) }),
+            ...(input?.startColumn ? [tr('writeConfirmStartCol', { v: input.startColumn })] : []),
+            ...(input?.headerRow ? [tr('writeConfirmHeaderRow', { v: input.headerRow })] : []),
+            '',
+            tr('writeConfirmBackup')
+          ],
+          okText: tr('writeConfirmOk'),
+          cancelText: tr('writeConfirmCancel')
+        }
+        // 1.0.75：优先走渲染层的库 Modal（与「关于 / 批量删除确认」同款暖米色风格）。
+        // 渲染层不可用时回退原生框，工具链不能因此丢功能；超时按「取消」处理，绝不误写。
+        let approved: boolean | null = writeConfirmHandler ? await writeConfirmHandler(ui) : null
+        if (approved === null) {
+          const r = await dialog.showMessageBox({
+            type: 'question',
+            buttons: [ui.okText, ui.cancelText],
+            defaultId: 0,
+            cancelId: 1,
+            noLink: true,
+            title: ui.title,
+            message: ui.message,
+            detail: ui.detail.join('\n')
+          })
+          approved = r.response === 0
+        }
+        if (!approved) {
+          return { ok: false, error: 'USER_CANCELLED', message: tr('writeCancelled') }
         }
       }
       try {

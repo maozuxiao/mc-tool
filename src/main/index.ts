@@ -9,7 +9,8 @@ import { OA_LOGIN_URL, OA_ORIGIN } from '@shared/constants'
 import { IPC } from '@shared/types'
 import { initAutoUpdater, isUpdateDownloaded, startUpdateDownload } from './updater'
 import { registerAIIPC } from './ai/aiIpc'
-import { setWjxtLoginOpener, setWjxtBootstrap, setWjxtLoginCloser, setWjxtHiddenNav, setWjxtSsoHttp, setWjxtIamProbe, setWjxtLoginNotifier, markChromiumIamReachability, parseChromiumNetError, wjxtResolveOriginUrl, wjxtH5Login, wjxtQrLoginUrl, startLoginWatch, wjxtDiag, wjxtProbeLoggedIn, wjxtSyncAfterLogin, WJXT_H5_LOGIN_URL, WJXT_ORIGIN } from './ai/wjxtSkill'
+import { setWriteConfirmHandler } from './ai/toolRegistry'
+import { setWjxtLoginOpener, setWjxtBootstrap, setWjxtLoginCloser, setWjxtHiddenNav, setWjxtSsoHttp, setWjxtIamProbe, setWjxtLoginNotifier, markChromiumIamReachability, parseChromiumNetError, wjxtResolveOriginUrl, wjxtH5Login, wjxtQrLoginUrl, startLoginWatch, wjxtDiag, wjxtProbeLoggedIn, wjxtSyncAfterLogin, WJXT_H5_LOGIN_URL, WJXT_ORIGIN, scheduleWjxtSync, setWjxtSessionRestored } from './ai/wjxtSkill'
 import { translate, type Lang } from '@shared/i18n'
 import { listSkills } from './ai/skillRegistry'
 import type { IamAlive as SharedIamAlive } from '@shared/ai-types'
@@ -19,10 +20,79 @@ import { listStatuses as listMcpStatuses } from './ai/mcpClient'
 // Cookie/Storage 目录，进程退出后依然保留，无需手动文件备份。
 // 定义收敛在 ai/fileDownload.ts（手动下载与 AI 下载共用同一份）。
 import { downloadToPath, deriveName, safeFileName, PARTITION } from './ai/fileDownload'
+import {
+  isWjPage, isWjSsoIndexUrl, isAcLoginPageUrl, isWjIntermediateUrl, isWjSsoShimUrl
+} from './ai/wjxtSyncPolicy'
 import { getHolidayPlan } from './holidaySync'
+import { setUiLang, tr } from './ai/uiLang'
 
 let mainWindow: BrowserWindow | null = null
 const APP_ID = 'com.streamax.mcquery'
+
+/**
+ * 1.0.75：edoc2 会话建立后主动通知渲染层。扫码 / 账密登录后的同步有几秒延迟，
+ * 用户拿着临界期的自检结果会看到 ❌；广播一条「已恢复」提示，不用手动重跑自检。
+ * 定义在模块顶层：扫码落地（completeOaSso）与 H5 登录回调处在不同作用域，都要调用。
+ */
+function notifyWjxtSessionRestored(): void {
+  try {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.WJXT_SESSION_RESTORED)
+  } catch { /* ignore */ }
+}
+
+/**
+ * 1.0.75：给渲染层的一条通用信息提示（链接已登录、无需重复操作等，不再静默无反馈）。
+ * 发的是 **i18n key**，由渲染层用自己的 `t()` 翻译 —— 主进程不需要知道当前语言。
+ */
+function notifyMcNotice(key: string): void {
+  try {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.MC_NOTICE, key)
+  } catch { /* ignore */ }
+}
+
+/**
+ * 1.0.75：鸿翼网页版未登录时的提示条。**带关闭按钮**，且会话恢复后由
+ * `setWjxtSessionRestored` 主动移除 —— 用户实测「账密登录成功后顶部仍显示已失效、还没法关」。
+ */
+function wjLoginTipScript(): string {
+  // 文案在**调用时**按当前界面语言取词，不能做成模块级常量（那时 dialog:setLang 还没到）
+  const text = JSON.stringify(tr('wjxtTipBar'))
+  const close = JSON.stringify(tr('wjxtTipClose'))
+  return `(function(){try{` +
+    `var old=document.getElementById('__mcWjLoginTip');if(old)old.remove();` +
+    `var d=document.createElement('div');d.id='__mcWjLoginTip';` +
+    `d.setAttribute('style','position:fixed;left:0;right:0;top:0;z-index:2147483647;` +
+    `padding:10px 44px 10px 16px;background:#1745A5;color:#fff;font:13px/1.7 sans-serif;` +
+    `box-shadow:0 2px 8px rgba(0,0,0,.2)');` +
+    `var s=document.createElement('span');s.textContent=${text};d.appendChild(s);` +
+    `var b=document.createElement('button');b.type='button';b.textContent='×';b.title=${close};` +
+    `b.setAttribute('style','position:absolute;right:10px;top:6px;border:0;background:transparent;` +
+    `color:#fff;font:20px/1 sans-serif;cursor:pointer;padding:2px 8px');` +
+    `b.onclick=function(){d.remove();};d.appendChild(b);` +
+    `setTimeout(function(){if(d.parentNode)d.remove();},90000);` +
+    `(document.body||document.documentElement).appendChild(d);}catch(e){}})()`
+}
+
+/** 会话恢复后移除所有可见鸿翼窗口里残留的提示条 */
+const WJ_LOGIN_TIP_REMOVE_SCRIPT =
+  `(function(){try{var d=document.getElementById('__mcWjLoginTip');if(d)d.remove();}catch(e){}})()`
+
+/**
+ * 1.0.75：edoc2 会话建立后的**全局收尾**（扫码成功与 H5 账密登录共用）。
+ * 用 `BrowserWindow.getAllWindows()` 而不是局部的 `visibleWjWindows`，因为两条调用链
+ * 处在不同的模块作用域 —— 之前 `notifyWjxtSessionRestored` 就因作用域问题编译失败过。
+ * 主要职责：撤掉所有可见鸿翼窗口里残留的「登录态已失效」提示条 + 广播渲染层提示。
+ */
+function finishWjxtSessionRestore(): void {
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (w.isDestroyed() || !w.isVisible()) continue
+    let u = ''
+    try { u = w.webContents.getURL() || '' } catch { continue }
+    if (!isWjPage(u)) continue
+    void w.webContents.executeJavaScript(WJ_LOGIN_TIP_REMOVE_SCRIPT).catch(() => null)
+  }
+  notifyWjxtSessionRestored()
+}
 
 // 开发时从项目根目录 build/ 读取；打包后从 resources/ 读取（extraResources 配置）
 function getIconPath() {
@@ -41,6 +111,7 @@ function getIconPath() {
 //   minimizeToTray — 启用系统托盘后台常驻（默认开）；关闭时是否隐藏到托盘由 closeToTray 决定
 //   closeToTray    — 关闭按钮 ❌ 时隐藏到托盘（默认开；仅在 minimizeToTray 开启时生效）
 //   autoLaunch     — 开机自启，静默启动到托盘不弹窗（默认关）
+//   theme          — 界面主题 id（1.0.75 起从渲染层 localStorage 迁来，见下方说明）
 // 托盘左键单击 = 显示主窗口；右键菜单：显示主窗口 / 物料查询 / AI 助手 / 检查更新 / 退出。
 const APP_PREFS_PATH = () => join(app.getPath('userData'), 'app-prefs.json')
 // uiLang：原生弹窗按钮与托盘菜单文案随界面语言（渲染层经 setUiLang 同步）。
@@ -49,13 +120,21 @@ let uiLang: '' | 'zh' | 'en' = ''
 let minimizeToTray = true
 let closeToTray = true
 let autoLaunch = false
+/**
+ * 1.0.75：界面主题改存主进程 userData/app-prefs.json。
+ * 原实现只写渲染层 localStorage 的 `mc-theme`，而 localStorage 按 **origin** 隔离：
+ * 现场 leveldb 里能读到 `META:http://localhost:5173`，打包版是 `file://`，
+ * 两套互不相通 —— 用户每次装新版本都以为「主题被重置」，其实是根本读不到。
+ * 其它设置本来就在这个 json 里不会丢，主题是唯一例外。
+ */
+let themePref = ''
 let tray: Tray | null = null
 // 正在退出应用（区分「关到托盘」与「真退出」：退出前最后关窗不能再拦截）
 let quitting = false
 // 以 --hidden 参数启动（开机自启）：主窗口创建时不显示，静默驻留托盘
 const startHidden = process.argv.some(a => a === '--hidden' || a === '/--hidden')
 
-interface AppPrefs { minimizeToTray?: boolean; closeToTray?: boolean; autoLaunch?: boolean }
+interface AppPrefs { minimizeToTray?: boolean; closeToTray?: boolean; autoLaunch?: boolean; theme?: string }
 function loadAppPrefs(): void {
   try {
     if (existsSync(APP_PREFS_PATH())) {
@@ -64,12 +143,13 @@ function loadAppPrefs(): void {
       minimizeToTray = p.minimizeToTray !== undefined ? !!p.minimizeToTray : true
       closeToTray = p.closeToTray !== undefined ? !!p.closeToTray : true
       autoLaunch = !!p.autoLaunch
+      themePref = typeof p.theme === 'string' ? p.theme.slice(0, 64) : ''
     }
   } catch { /* 损坏时按默认值处理 */ }
 }
 function saveAppPrefs(): void {
   try {
-    writeFileSync(APP_PREFS_PATH(), JSON.stringify({ minimizeToTray, closeToTray, autoLaunch }, null, 2), 'utf8')
+    writeFileSync(APP_PREFS_PATH(), JSON.stringify({ minimizeToTray, closeToTray, autoLaunch, theme: themePref }, null, 2), 'utf8')
   } catch { /* 忽略写入失败 */ }
 }
 function showMainWindow(): void {
@@ -604,6 +684,12 @@ function createWindow() {
   // 需要补 Cookie 的 OA 侧 webContents 集合：主 OA 窗口 + 它 target="_blank"/window.open 弹出的
   // 子窗口。注入器只认这个集合，应用主窗口（AI 页、查询页）一律不受影响。
   const oaWebContentsIds = new Set<number>()
+  // 1.0.75：鸿翼网页版（wj.streamax.com）在会话就绪后最多自动 reload 一次，
+  // 避免「SPA 一直 Loading...」卡死；也防止 reload → did-finish-load → reload 的死循环。
+  const wjWindowReloaded = new WeakSet<Electron.WebContents>()
+  // 1.0.75：所有**可见的**鸿翼网页版窗口。H5 账密登录成功后要遍历 reload 一次，
+  // 否则 OA 点「文件管理」开出来的那个窗口会永远停在 `Loading...`（用户实测截图）。
+  const visibleWjWindows = new Set<BrowserWindow>()
   let oaCookieInjectorInstalled = false
   // 注入诊断：按 host 只打一次日志，便于事后核对「某个域到底补了什么 cookie」
   const oaInjectLoggedHosts = new Set<string>()
@@ -618,7 +704,10 @@ function createWindow() {
     // 先存下 webContentsId：窗口 closed 之后不能再访问 win.webContents（会抛 Object has been destroyed）
     const wcId = win.webContents.id
     oaWebContentsIds.add(wcId)
-    win.on('closed', () => { oaWebContentsIds.delete(wcId) })
+    win.on('closed', () => {
+      oaWebContentsIds.delete(wcId)
+      visibleWjWindows.delete(win)
+    })
 
     win.webContents.setWindowOpenHandler(({ url }) => {
       debugLog('[oaWindow] window.open -> ' + url)
@@ -648,6 +737,48 @@ function createWindow() {
       registerOaWindow(child)
       if (child.isMinimized()) child.restore()
       child.focus()
+    })
+
+    // 1.0.75 #4：OA 点「文件管理」跳到鸿翼网页版时，若 edoc2 会话没建起来，
+    // 页面会永远停在 Loading...（用户实测截图）。子窗口本来就由 registerOaWindow 递归登记
+    // 并装了 cookie 注入器，缺的是「加载完探一次登录态」：确认没登录就跑一次换票，
+    // 换票成功后 reload 一次让 SPA 重新握手。已登录的窗口不动，且每窗口最多 reload 一次。
+    win.webContents.on('did-finish-load', () => {
+      // 1.0.75：隐藏的 bootstrap / hiddenNav 窗口同样走 registerOaWindow，
+      // 不能把它们当成「用户主动进文件系统」—— 否则启动后台同步会自己弹登录窗
+      // （2026-11-09 用户实测：打开 APP 就要输账号密码，根因就是这个）。
+      if (!win.isVisible()) return
+      let u = ''
+      try { u = win.webContents.getURL() } catch { return }
+      if (!isWjPage(u)) return
+      // 1.0.75：H5 登录页本身就是登录窗口，不要再探登录态 / 触发同步 / 二次开窗
+      if (/h5\.html#login/i.test(u)) return
+      visibleWjWindows.add(win)
+      if (wjWindowReloaded.has(win.webContents)) return
+      debugLog('[oaWindow] wj page finished -> probe edoc2: ' + u.slice(0, 120))
+      void wjxtProbeLoggedIn()
+        // 1.0.75：区分「本来就登录」与「同步后才登录」两种情况。
+        // 旧代码已登录时返回 `null`，第二段判成未登录 → **明明登录成功还注入了
+        // 「登录态已失效」提示条**（用户 2026-11-09 截图）；而且已登录也会 reload，
+        // 白白打断用户操作。现在已登录只移除残留提示条，不 reload。
+        .then(async (before) => before === true
+          ? { wasLoggedOut: false, ok: true }
+          : { wasLoggedOut: true, ok: (await scheduleWjxtSync('oa-window')) === true })
+        .then(({ wasLoggedOut, ok }) => {
+          if (win.isDestroyed() || win.webContents.isDestroyed()) return
+          if (!ok) {
+            // 未登录：站点窗口是白屏 / 一直 Loading，给一条带关闭按钮的可见说明。
+            void win.webContents.executeJavaScript(wjLoginTipScript()).catch(() => null)
+            return
+          }
+          // 无论本来登录还是刚恢复，都清掉可能残留的旧提示条
+          void win.webContents.executeJavaScript(WJ_LOGIN_TIP_REMOVE_SCRIPT).catch(() => null)
+          if (!wasLoggedOut || wjWindowReloaded.has(win.webContents)) return
+          wjWindowReloaded.add(win.webContents)
+          debugLog('[oaWindow] edoc2 session ready -> reload wj page once (fix infinite Loading)')
+          win.webContents.reload()
+        })
+        .catch(() => null)
     })
   }
 
@@ -737,7 +868,12 @@ function createWindow() {
       // IAM 侧必须认准 entityId/client_id 是 **edoc2**（鸿翼），否则会把 OA 的登录页也算进来 ——
       // 那样 OA 登录窗口会在 edoc2 会话建立时被误关。
       if (host === 'iam.streamax.com' && /entityId=edoc2|client_id=edoc2/i.test(String(u))) return true
-      if (host === 'wj.streamax.com' && /h5\.html#login|sso\/auth\/goToLoginPage/i.test(String(u))) return true
+      if (host === 'wj.streamax.com') {
+        if (/h5\.html#login|sso\/auth\/goToLoginPage/i.test(String(u))) return true
+        // 1.0.75 退路：用户手动打开鸿翼网页版首页（和浏览器一样跑完 SSO 链），
+        // 也要纳入登录态监听，成功后自动关窗。
+        if (/^\/index\.html$/i.test(url.pathname)) return true
+      }
     } catch { /* 地址不合法就不算 */ }
     return false
   }
@@ -829,6 +965,41 @@ function createWindow() {
     if (!/(^|\.)streamax\.com$/.test(host)) {
       void shell.openExternal(url)
       return false
+    }
+    // 1.0.75：AI 回复里的「账号密码登录」链接不再另开裸 H5 窗口。
+    // 之前会同时出现两个登录窗（openInternalUrl 开的 + wjxtH5Login 开的），
+    // 裸窗口没有自动填充 / 保存 / 单飞能力，登录成功后被 reload 还会把 token 清掉。
+    // 统一交给 wjxtH5Login()（h5Pending 单飞 + h5Win 复用），全局只保留 1 个。
+    if (/h5\.html#login/i.test(url)) {
+      // 1.0.75：点「账号密码登录」前先探一次。已登录还去加载站点登录页，会把刚建好的
+      // 会话重置（用户实测「进入登录页面后 edoc ❌ 概率出现」，有时还会再弹一个登录窗）。
+      const already = await wjxtProbeLoggedIn().catch(() => null)
+      if (already === true) {
+        debugLog('[openInternal] edoc2 already logged in -> skip H5 login link')
+        notifyMcNotice('wjxtNoticeAlreadyH5')
+        return true
+      }
+      void wjxtH5Login()
+      return true
+    }
+    // 1.0.75：edoc2 的 IAM AC 扫码页在应用内窗口是白屏（用户实测点了没用）。
+    // 唯一已验证可用的扫码路径是 A 场景：退出登录 → 重新扫 OA 二维码 → completeOaSso
+    // 顺手把 edoc2 会话建起来（鸿翼登录态 ✅）。不能只调 requestLoginView：OA 会话还有效时
+    // QR-START 会 "OA already logged in" 直接短路回工具页，根本不显示二维码。
+    if (/iam\.streamax\.com\/ac\/#\/index/i.test(url) && /client_id=edoc2|entityId=edoc2/i.test(url)) {
+      // 1.0.75：扫码成功后同步要几秒，期间自检可能还是 ❌；用户容易再点一次「扫码登录」，
+      // 而 performLogout 会把刚建好的 edoc2 会话一起清掉（日志 03:57:53 cleared 13/13）。
+      // 已经登录就直接放行，绝不再退出一次。
+      const already = await wjxtProbeLoggedIn().catch(() => null)
+      if (already === true) {
+        debugLog('[openInternal] edoc2 already logged in -> ignore QR link, keep session')
+        notifyMcNotice('wjxtNoticeAlreadyQr')
+        return true
+      }
+      debugLog('[openInternal] edoc2 AC page is blank in-app -> perform logout + OA QR re-login')
+      notifyMcNotice('wjxtNoticeReQr')
+      void performLogout()
+      return true
     }
     // 同一个地址反复点：只聚焦，不叠窗
     const existed = internalUrlWindows.get(url)
@@ -959,6 +1130,29 @@ function createWindow() {
   // 鸿翼文件系统技能在「分区里没有可用登录态」时会调用它弹出应用内登录窗口
   // （见 ai/wjxtSkill.ts：窗口与工具请求共用 persist:mc-query，登录一次即可复用）
   setWjxtLoginOpener((target) => { void openInternalUrl(target) })
+  // 1.0.75：H5 账密登录成功后刷新所有**可见**的鸿翼网页版窗口。
+  // 之前 `afterH5LoginSuccess` 只销毁自己、重绑隐藏上下文，OA 点「文件管理」
+  // 开出来的那个窗口拿不到任何通知，会永远停在 `Loading...`（用户实测截图）。
+  setWjxtSessionRestored(() => {
+    for (const w of visibleWjWindows) {
+      if (w.isDestroyed() || !w.isVisible()) continue
+      let u = ''
+      try { u = w.webContents.getURL() || '' } catch { continue }
+      if (!isWjPage(u)) continue
+      // 1.0.75：登录成功后**不能 reload H5 登录页** —— 实测 reload 会让站点把刚拿到的
+      // `token` 重新清成 `checkToken`，edoc2=out（用户第 4 点反馈）。这类窗口直接关掉。
+      if (/h5\.html#login/i.test(u)) {
+        debugLog('[oaWindow] edoc2 session restored -> close stale H5 login window')
+        try { w.close() } catch { /* ignore */ }
+        continue
+      }
+      if (wjWindowReloaded.has(w.webContents)) continue
+      wjWindowReloaded.add(w.webContents)
+      debugLog('[oaWindow] edoc2 session restored -> reload wj window once: ' + u.slice(0, 100))
+      try { w.webContents.reload() } catch { /* 窗口刚好关闭 */ }
+    }
+    finishWjxtSessionRestore()
+  })
 
   // ── 鸿翼文件系统的「隐藏窗口预热」────────────────────────────────────
   // 该站点的 SSO 换票依赖 **SPA 自己的 JS 流程**：实测应用内窗口一加载就自动登录成功，
@@ -991,29 +1185,80 @@ function createWindow() {
     wjxtBootstrapWin = win
     // 与可见窗口同一套登记：补 Cookie + 接管它可能弹出的子窗口
     registerOaWindow(win)
+    // 1.0.75 H5 修复（HAR 实测 2026-11-08）：鸿翼 SSO 链是
+    //   站点入口 → IAM authenticate(**200 + ssoShim 自动提交脚本**) → /sso/auth/callback?code=
+    //   → /jump.html?token=(**页面 JS 换 cookie**) → /index.html#doc/…
+    // 旧实现在**第一跳** did-finish-load 后只等 settleMs(2.5s) 就销毁窗口，
+    // 页面 JS 根本没机会执行，票换不成，日志里就是满屏 `hidden window off-site`。
+    // 现在改为轮询等整条链跑完（最多 20s），期间窗口一直活着。
+    const waitSsoChain = /^https?:\/\/wj\.streamax\.com/i.test(url)
     const settled = new Promise<boolean>((resolve) => {
       let done = false
       const finish = (ok: boolean) => { if (!done) { done = true; resolve(ok) } }
-      // SPA 的握手是「页面加载完之后」才发的异步请求，等 did-finish-load 后再留一点时间
-      win.webContents.once('did-finish-load', () => {
-        // 只有**真正落在 iam 域**才算「可达」。这个 bootstrap 跑的是 SSO 入口
-        // （首跳在 wj 域），若不校验落点，wj 页面加载成功就会把 iam 误标成可达，
-        // 从而让 gating 失效（用户反馈「SSO 入口本来是好的为什么要限制」）。
-        // 反过来，落在 iam 域但会话失效停在登录页是**内容问题**，
-        // 仍算可达 —— 否则会把 gating 永久锁死。
-        try {
-          if (/iam\.streamax\.com/i.test(win.webContents.getURL())) {
-            markChromiumIamReachability(true, 'bootstrap loaded iam page')
+      if (waitSsoChain) {
+        const started = Date.now()
+        const capMs = Math.max(settleMs, 20_000)
+        // IAM 会话有效时 authenticate 的 ssoShim 会在几百毫秒内自动提交 code 并跳走。
+        // 若 URL 卡在 authenticate 超过 5 秒不动，就是 IAM 已过期（页面在等登录），
+        // 提前结束去走 ssoHttp → 拿 AC 扫码页，别让用户白等满 20 秒。
+        let shimStuckAt = 0
+        let shimStuckUrl = ''
+        const poll = (): void => {
+          if (done) return
+          if (win.isDestroyed()) { finish(false); return }
+          let cur = ''
+          try { cur = win.webContents.getURL() || '' } catch { /* 窗口已销毁 */ }
+          if (isWjSsoShimUrl(cur)) {
+            if (shimStuckUrl !== cur) { shimStuckUrl = cur; shimStuckAt = Date.now() }
+            else if (Date.now() - shimStuckAt > 5000) {
+              debugLog('[wjxtBootstrap] SSO shim stuck 5s -> IAM likely expired, stop early')
+              finish(false)
+              return
+            }
+          } else {
+            shimStuckUrl = ''
           }
-        } catch { /* ignore */ }
-        setTimeout(() => finish(true), settleMs)
-      })
-      win.webContents.once('did-fail-load', (_e, code) => {
-        const netErr = parseChromiumNetError(String(code))
-        if (netErr) markChromiumIamReachability(false, `bootstrap did-fail-load ${netErr}`)
-        finish(false)
-      })
-      setTimeout(() => finish(false), 15000)
+          // 落到 IAM AC 登录页 = IAM 会话已过期，需要人扫码，别空等 20 秒
+          if (isAcLoginPageUrl(cur)) {
+            debugLog('[wjxtBootstrap] landed on AC login page -> need user')
+            finish(false)
+            return
+          }
+          // 只有 /index.html 才是 SPA 握手完成；/jump.html、/sso/auth/* 都只是中间态
+          const onIndex = isWjSsoIndexUrl(cur)
+          if (onIndex && Date.now() - started > 2500) {
+            debugLog('[wjxtBootstrap] SSO chain landed on SPA: ' + cur.slice(0, 120))
+            finish(true)
+            return
+          }
+          if (Date.now() - started > capMs) { finish(false); return }
+          setTimeout(poll, 500)
+        }
+        setTimeout(poll, 900)
+        win.webContents.once('did-fail-load', (_e, code) => {
+          const netErr = parseChromiumNetError(String(code))
+          if (netErr) markChromiumIamReachability(false, `bootstrap did-fail-load ${netErr}`)
+          finish(false)
+        })
+        // 兜底：即使轮询因异常没排上，也不能让窗口永远挂着
+        setTimeout(() => finish(false), capMs + 2000)
+      } else {
+        // 非鸿翼链（现取其它入口）保持原行为
+        win.webContents.once('did-finish-load', () => {
+          try {
+            if (/iam\.streamax\.com/i.test(win.webContents.getURL())) {
+              markChromiumIamReachability(true, 'bootstrap loaded iam page')
+            }
+          } catch { /* ignore */ }
+          setTimeout(() => finish(true), settleMs)
+        })
+        win.webContents.once('did-fail-load', (_e, code) => {
+          const netErr = parseChromiumNetError(String(code))
+          if (netErr) markChromiumIamReachability(false, `bootstrap did-fail-load ${netErr}`)
+          finish(false)
+        })
+        setTimeout(() => finish(false), 15000)
+      }
     })
     try {
       await win.loadURL(url)
@@ -1029,7 +1274,9 @@ function createWindow() {
     // 旧实现只要 did-finish-load 就返回 true，于是停在 iam 授权页也算"成功"，
     // 日志里满屏 `hidden window done ok=true`（实测 2026-10-27），排查时极具误导性。
     const landed = (() => { try { return win.webContents.getURL() || '' } catch { return '' } })()
-    const onSite = /^https?:\/\/wj\.streamax\.com/i.test(landed) && !/\/sso\/auth\//i.test(landed)
+    // 1.0.75 H5：/jump.html 也在站点域内，但它只是「拿 token 换 cookie」的中间页，
+    // 命中它不等于换票链走完；真正落回 /index.html（SPA 首页）才算。
+    const onSite = /^https?:\/\/wj\.streamax\.com/i.test(landed) && !isWjIntermediateUrl(landed)
     try { if (!win.isDestroyed()) win.destroy() } catch { /* ignore */ }
     if (wjxtBootstrapWin === win) wjxtBootstrapWin = null
     debugLog(`[wjxtBootstrap] hidden window done loaded=${loaded} onsite=${onSite} land=${landed.split('?')[0] || '(empty)'}`)
@@ -1550,6 +1797,8 @@ async function checkAndHealSession(): Promise<SessionVerdict> {
         healFailureStreak = 0
         // 自愈成功同样是「会话有效」，复位标志（用户全程无感，不该停在登录层）
         markSessionHealthy()
+        // 1.0.75：静默自愈重建了 IAM 会话，趁热把 edoc2 会话也换出来
+        void scheduleWjxtSync('session-heal').catch(() => null)
         return 'valid' as const
       }
       // 连续失败计数：心跳据此退避（见 SESSION_HEAL_BACKOFF_MS）
@@ -1778,6 +2027,14 @@ async function doCheckLoginAndNotify() {
   // 上一个检查已返回、inFlight 为空，会完整重跑一遍并把登录层强制刷新第二次。见上方注释。
   if (startupLoginChecked && Date.now() - lastLoginCheckAt < 3000) {
     debugLog(`[startup] duplicate login check skipped (${Date.now() - lastLoginCheckAt}ms after previous)`)
+    // 1.0.75：renderer 挂载后发的 OA_RELOAD 正好落在这个抑制窗口里。首次检查在 renderer
+    // 监听注册之前就把 OA_CHECK_LOGGED 发出去了（即发即弃，会丢），渲染层默认
+    // loggedIn=false → 明明已登录却卡在二维码界面，必须手点「刷新二维码」才进得去
+    // （2026-11-09 npm dev 启动实测）。这里跳过昂贵探测，但**重放已有结论**；
+    // 且只在 valid 时补发 true —— 补发 false 会触发重复拉码（1.0.53 修过的老 bug）。
+    if (sessionVerdict === 'valid' && mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(IPC.OA_CHECK_LOGGED, { loggedIn: true })
+    }
     return
   }
 
@@ -1876,6 +2133,12 @@ async function doCheckLoginAndNotify() {
     sessionVerdict = 'valid'
     markSessionHealthy()
     startSessionHeartbeat()
+    // 1.0.75：从备份 cookie 恢复会话同样算「已登录」，也必须把 edoc2 会话建起来。
+    // 此前只有扫码成功（completeOaSso）会同步，这条路径直接漏掉 —— 2026-11-08 用户
+    // 全程没扫码、OA 显示正常、鸿翼却一直未登录（自检弹窗 ①✅ ②❌）就是这么来的。
+    void scheduleWjxtSync('startup-restore')
+      .then((r) => debugLog(`[login-sync] startup edoc2=${r === true ? 'ok' : r === false ? 'not-logged-in' : 'unknown'}`))
+      .catch((e: any) => debugLog('[login-sync] startup sync threw: ' + String(e?.message || e)))
   } else {
     // 无可用 cookie：通知渲染进程在主窗口内显示登录视图（webview），不弹独立窗口
     sessionValid = false
@@ -1949,13 +2212,16 @@ app.whenReady().then(() => {
   if (!gotSingleInstanceLock) return
   app.setAppUserModelId(APP_ID)
   app.setName('MC物料查询')
-  // 1.0.48：清理历史遗留的「文件系统账号密码」文件 —— 该机制（记住账号密码/自动续登）已整体移除，
-  // 站点本身没有这个接口（那是浏览器行为），留在磁盘上的口令文件不再需要，启动时一律删除。
+  // 1.0.75：渲染层发 dialog:setLang 之前，先按系统语言给主进程文案一个初值
+  setUiLang(app.getLocale().toLowerCase().startsWith('zh') ? 'zh' : 'en')
+  // 1.0.48 曾移除「记住账号密码」，但 1.0.75 按用户明确要求恢复为 safeStorage 加密存储
+  // （wjxt-credentials.bin）。这里只清理 1.0.48 之前遗留的**明文** wjxt-login.json，
+  // 新文件名不同，不会被误删。
   try {
     const staleCreds = join(app.getPath('userData'), 'wjxt-login.json')
     if (existsSync(staleCreds)) {
       unlinkSync(staleCreds)
-      debugLog('[startup] removed legacy wjxt-login.json (credential saving removed in 1.0.48)')
+      debugLog('[startup] removed legacy plaintext wjxt-login.json (1.0.75 起改用加密的 wjxt-credentials.bin)')
     }
   } catch { /* ignore */ }
   // 先读偏好再建窗口：--hidden 静默启动与托盘开关都要用
@@ -2891,8 +3157,11 @@ async function completeOaSso(_loginToken: string, lck?: string): Promise<{ ok: b
     // 就只能要求他"再登录一次"（用户实测：刚扫码登录完，用技能又提示登录）。
     // 这里不 await：登录 UI 要立刻返回；同步过程写 wjxt.log 的 `[sync]` / debug-login 的
     // `[login-sync]`，失败也不影响 OA 主流程。
-    void wjxtSyncAfterLogin('oa-login')
-      .then((r) => debugLog(`[login-sync] edoc2=${r === true ? 'ok' : r === false ? 'not-logged-in' : 'unknown'}`))
+    void scheduleWjxtSync('oa-login')
+      .then((r) => {
+        if (r === true) finishWjxtSessionRestore()
+        debugLog(`[login-sync] edoc2=${r === true ? 'ok' : r === false ? 'not-logged-in' : 'unknown'}`)
+      })
       .catch((e: any) => debugLog('[login-sync] edoc2 sync threw: ' + String(e?.message || e)))
   }
   // 注意：不在此处发送 OA_CHECK_LOGGED，统一由 QR-POLL 外层根据返回值发送，
@@ -3728,7 +3997,11 @@ ipcMain.handle('mc-wjxt-diagnose', async (_e, langRaw?: string) => {
   return { ok: true, verdict, detail, oaOk, iam, edoc2 }
 })
 
-ipcMain.handle(IPC.COOKIE_CLEAR, async () => {
+/**
+ * 1.0.75：抽成函数，供「退出登录」IPC 与「扫码登录」链接路由共用。
+ * 用户 A 场景（退出登录 → 重新扫码 → 鸿翼登录态 ✅）已验证这条路径能一并恢复 edoc2。
+ */
+async function performLogout(): Promise<void> {
   const sess = session.fromPartition(PARTITION)
   // 2026-10-26：登出语义定为「真正的未登录」。
   // 历史上为了「登出后秒出码」刻意保留 iam.streamax.com 的 SSO 会话，但实测有两个问题：
@@ -3757,8 +4030,8 @@ ipcMain.handle(IPC.COOKIE_CLEAR, async () => {
   debugLog(`[COOKIE_CLEAR] logged out: cleared ${removed}/${all.length} OA + wjxt + IAM cookies`)
   // 同时删除 OA 会话文件备份，避免退出登录后重开又自动恢复登录态
   try { if (existsSync(SESSION_BACKUP_PATH)) unlinkSync(SESSION_BACKUP_PATH) } catch {}
-  // 说明：此前这里还会清掉文件系统（H5）保存的账号密码；该机制已整体移除（见 wjxtSkill.ts 顶部注释），
-  // 因此不再存在需要清理的口令文件。
+  // 1.0.75：用户明确要求账密可保存并按「记住账号密码」勾选框控制，故退出登录**不清**
+  // wjxt-credentials.bin —— 否则每次扫码都要重新输一次，与「保存」的语义冲突。
   // 会话判定复位 + 停心跳：否则登出后一次 focus 检测会拿旧的 valid 结论把二维码糊掉。
   sessionValid = false
   sessionExpired = false
@@ -3776,7 +4049,8 @@ ipcMain.handle(IPC.COOKIE_CLEAR, async () => {
   // 用专属 reason：渲染层据此显示「已退出登录，请重新扫码登录」，且不再额外 bump qrRefetchSeq
   // （登录层自己会因 loginState→logging 拉一次码；两路拉码会互相覆盖，把刚渲染的码擦掉）。
   requestLoginView('logout', { force: true })
-})
+}
+ipcMain.handle(IPC.COOKIE_CLEAR, async () => { await performLogout() })
 ipcMain.handle(IPC.INSTALL_UPDATE, () => {
   const fs = require('fs')
   const { spawn } = require('child_process')
@@ -3818,12 +4092,57 @@ ipcMain.handle(IPC.INSTALL_UPDATE, () => {
 // 未同步前按系统语言兜底（中文系统给中文按钮，其余给英文）。
 ipcMain.on('dialog:setLang', (_e, lang: string) => {
   uiLang = lang === 'en' ? 'en' : 'zh'
+  // 1.0.75：同步给主进程其它模块（弹窗 / 注入页 / 子窗口标题）的翻译函数
+  setUiLang(uiLang)
   // 托盘菜单文案跟随界面语言
   try { tray?.setContextMenu(trayMenu()) } catch { /* 忽略 */ }
 })
 
+/**
+ * 1.0.75：AI 写已有文件前的确认改走渲染层的暖米色 Modal（与「关于」/「批量删除确认」同款）。
+ * 主进程 send 请求并挂起工具调用，渲染层点完按钮回传 { id, ok }，按 id 唤醒。
+ * 兜底：主窗口不可用 / send 失败 → 返回 null 让 toolRegistry 回退原生 dialog；
+ * 120 秒没人点 → 按「取消」处理，绝不误写文件。
+ */
+const writeConfirmPending = new Map<string, (ok: boolean) => void>()
+ipcMain.on(IPC.WRITE_CONFIRM_REPLY, (_e, payload: { id?: string; ok?: boolean }) => {
+  const id = String(payload?.id || '')
+  const fn = writeConfirmPending.get(id)
+  if (!fn) return
+  writeConfirmPending.delete(id)
+  fn(payload?.ok === true)
+})
+setWriteConfirmHandler(async (payload) => {
+  if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) return null
+  const id = `wc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+  const win = mainWindow
+  return await new Promise<boolean | null>((resolve) => {
+    let done = false
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const finish = (v: boolean | null) => {
+      if (done) return
+      done = true
+      if (timer) clearTimeout(timer)
+      writeConfirmPending.delete(id)
+      resolve(v)
+    }
+    timer = setTimeout(() => finish(false), 120_000)
+    writeConfirmPending.set(id, (ok) => finish(ok))
+    try {
+      win.webContents.send(IPC.WRITE_CONFIRM, { id, ...payload })
+    } catch {
+      finish(null)
+    }
+  })
+})
+
 // 托盘 / 偏好设置：读取与设置（渲染层「设置」面板）
-ipcMain.handle('app:getPrefs', () => ({ minimizeToTray, closeToTray, autoLaunch }))
+ipcMain.handle('app:getPrefs', () => ({ minimizeToTray, closeToTray, autoLaunch, theme: themePref }))
+// 1.0.75：主题写进 app-prefs.json，不再依赖按 origin 隔离的 localStorage
+ipcMain.on('app:setTheme', (_e, id: string) => {
+  themePref = String(id || '').trim().slice(0, 64)
+  saveAppPrefs()
+})
 ipcMain.handle('app:setSetting', (_e, key: string, v: boolean) => {
   const val = !!v
   if (key === 'minimizeToTray') {
@@ -3865,7 +4184,9 @@ ipcMain.handle('dialog:message', async (_e, opts: {
     message: String(opts?.message ?? ''),
     buttons: [L.ok],
     defaultId: 0,
-    cancelId: 0
+    cancelId: 0,
+    // 1.0.75：不加会被 Windows 渲染成带「→」的命令链接，观感与界面风格不符
+    noLink: true
   })
 })
 

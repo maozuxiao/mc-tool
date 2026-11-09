@@ -40,6 +40,10 @@ export const IPC = {
   OA_CHECK_LOGGED: 'oa-check-logged',        // 主进程回：当前是否已登录
   OA_LOGIN_LANDING: 'oa-login-landing',      // 主进程回：扫码成功，正在 SSO 落地（渲染层显示 Loading 覆盖层）
   OA_LOGIN_STATE: 'oa-login-state',          // 主进程回：登录阶段状态（checking/logging/failed）
+  WJXT_SESSION_RESTORED: 'mc-wjxt-session-restored', // 主进程回：edoc2 会话已建立（自检结论可刷新）
+  MC_NOTICE: 'mc-notice',                     // 主进程回：一条通用信息提示（字符串）
+  WRITE_CONFIRM: 'mc-write-confirm',         // 主进程回：AI 写文件前请渲染层用应用内 Modal 确认
+  WRITE_CONFIRM_REPLY: 'mc-write-confirm-reply', // 渲染进程回：{ id, ok } 确认结果
   OA_NAVIGATE: 'oa-navigate',                // 渲染进程请求主进程显示登录视图
   OA_GET_LOGIN_URL: 'oa-get-login-url',      // 渲染进程获取 OA 登录页地址（webview 用）
   APP_VERSION: 'app-version',                // 渲染进程同步获取应用版本号

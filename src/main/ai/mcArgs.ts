@@ -20,7 +20,9 @@ export const MC_ERROR_CODES = {
   OK_EMPTY: 'OK_EMPTY',
   NEED_OA_LOGIN: 'NEED_OA_LOGIN',
   NETWORK_ERROR: 'NETWORK_ERROR',
-  QUERY_FAILED: 'QUERY_FAILED'
+  QUERY_FAILED: 'QUERY_FAILED',
+  /** 1.0.75 #8：两次检索结果冲突 / 证据不足，不允许产出「无数据」结论 */
+  CONFLICT: 'CONFLICT'
 } as const
 
 export type McErrorCode = typeof MC_ERROR_CODES[keyof typeof MC_ERROR_CODES]
@@ -204,13 +206,53 @@ export function resultCodeFor(command: string, result: any): 'OK' | 'OK_EMPTY' |
   return (result?.rows || []).length ? 'OK' : 'OK_EMPTY'
 }
 
-/** 反常识的空结论（整机 BOM 0 条 / 规格 0 文件 / 料号查无）需要自动二次核验 */
+/** 反常识的空结论（整机 BOM 0 条 / 规格 0 文件 / 料号查无 / 搜索 0 命中）需要自动二次核验 */
 export function isLowConfidenceResult(command: string, result: any): boolean {
   if (command === 'bom') return !(result?.bomRows || []).length
   if (command === 'spec') return !(result?.files || []).length
   if (command === 'item') return !(result?.rows || []).length
   if (command === 'batch') return !(result?.items || []).some((x: any) => x.found)
-  return false
+  // 1.0.75 #8 P1-1：原来 search 恒 false，空搜索结果从不复核 —— 正是「把没检索到当成没数据」的缺口
+  return !(result?.rows || []).length
+}
+
+/** 1.0.75 #8 P0-2：mc_query.js 每次成功返回都会带的检索方式凭证 */
+export interface McEvidence {
+  channel?: string
+  queryString?: string
+  scannedRows?: number
+  scanCalls?: number
+  matchCount?: number
+  sampleHits?: string[]
+  scanWarning?: string
+}
+
+/**
+ * 1.0.75 #8 P0-1 强证据闸门：只有结构化标记齐备，才允许上层陈述「无数据」。
+ * 任何一项缺失都返回 allowed:false —— 上层据此转 `CONFLICT`，绝不落到业务结论。
+ */
+export function assertEmptyConclusion(result: any): { allowed: boolean; reason: string } {
+  if (!result || result.ok === false) {
+    return { allowed: false, reason: '工具调用失败，只能说「查询失败」' }
+  }
+  if (result.resultCode !== MC_ERROR_CODES.OK_EMPTY) {
+    return { allowed: false, reason: `缺少 resultCode:OK_EMPTY（实际 ${String(result.resultCode ?? '无')}）` }
+  }
+  if (result.verifiedTwice !== true) {
+    return { allowed: false, reason: '空结果未经二次核验（缺 verifiedTwice:true）' }
+  }
+  const ev: McEvidence = result.evidence || {}
+  if (!ev.channel || !ev.queryString) {
+    return { allowed: false, reason: '缺少检索方式凭证 evidence.channel / evidence.queryString' }
+  }
+  if (typeof ev.matchCount === 'number' && ev.matchCount !== 0) {
+    return { allowed: false, reason: `evidence.matchCount=${ev.matchCount}，与「无数据」矛盾` }
+  }
+  return {
+    allowed: true,
+    reason: 'OK_EMPTY + verifiedTwice + matchCount=0 + 检索凭证齐备' +
+      (ev.scanWarning ? `（注意：${ev.scanWarning}）` : '')
+  }
 }
 
 /** 输出前自检硬门槛：与 mcSkillSystemPrompt 里的 A/B/C 清单逐字对应 */
@@ -218,8 +260,10 @@ export const MC_OUTPUT_SELF_CHECK =
   '【输出前自检 · 硬门槛】输出任何物料结论前逐条勾选：\n' +
   'A. 本轮是否至少有一次 ok:true 的 mc_query 结果？\n' +
   'B. 我引用的每个字段（料号、BOM 子项、库存、规格文件）能否在该次返回值中逐字找到？\n' +
-  'C. 若我要说「无 BOM / 无库存 / 无规格文件」，该返回值是否明确标了 resultCode:OK_EMPTY（或 verifiedTwice:true），而不是 ok:false / error_code？\n' +
+  'C. 若我要说「无 BOM / 无库存 / 无规格文件」，该返回值是否同时具备 resultCode:OK_EMPTY、verifiedTwice:true、' +
+  'evidence.matchCount===0，且 evidence.channel / evidence.queryString / evidence.scannedRows 齐备？' +
+  '缺任一项 → 只能说「查询失败」或 CONFLICT，绝不能说「无数据」。\n' +
   '任一条为「否」→ 禁止输出业务结论，改为重试或明确声明「查询失败」。\n' +
-  '【反例禁令】EMPTY_ARGS / BAD_ARGS / UNSUPPORTED_COMMAND / QUERY_FAILED 一律只能说「查询失败」，' +
+  '【反例禁令】EMPTY_ARGS / BAD_ARGS / UNSUPPORTED_COMMAND / QUERY_FAILED / CONFLICT 一律只能说「查询失败」，' +
   '禁止描述成「料号可能抄错 / 位数不对 / BOM 未维护 / 需要权限 / 系统没数据」；' +
   '只有 NOT_FOUND 才允许提示料号可能有问题。error_message 里的措辞照抄，不要自行改写。'

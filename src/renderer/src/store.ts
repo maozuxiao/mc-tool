@@ -1,12 +1,13 @@
 import { create } from 'zustand'
 import { I18N, Lang, translate } from '@shared/i18n'
-import { applyTheme, persistTheme, readStoredTheme } from './theme'
+import { applyTheme, persistTheme, readStoredTheme, DEFAULT_THEME, getThemePreset } from './theme'
 import {
   buildSearchUrl, buildItemNoUrl, buildBatchUrl, buildBomUrl, buildFileUrl, normalizeRows,
   parseBatchItemNos, mergeBatchResults, applyMaterialFilter, applyBomFilter,
   getDedupedData, sortRows, fixLinks, toCSV
 } from '@shared/query'
 import { OA_ORIGIN, STATUS_CLS } from '@shared/constants'
+import { pickTranslateModel } from './translateModel'
 import type { MaterialRow } from '@shared/types'
 
 export type Tab = 'mat' | 'bom' | 'file'
@@ -70,6 +71,11 @@ interface State {
   bomData: MaterialRow[]
   bomFiltered: MaterialRow[]
   fileData: MaterialRow[]
+  // 1.0.75：是否已真正发起过查询 —— 用于区分「从未查询」与「查了但 0 条」，
+  // 后者要显示 NO DATA 空状态而不是「请输入料号…」的引导语。
+  matQueried: boolean
+  bomQueried: boolean
+  fileQueried: boolean
   // 批量未命中（FR-2）
   notFound: string[]
   // 过滤 / 排序 / 去重
@@ -92,6 +98,8 @@ interface State {
   // - cancelRequested：用户点了「取消剩余翻译」，当前批次跑完后不再发起新批次
   descTrans: Record<DescTransKind, DescTransState>
   // UI
+  /** 1.0.75：全局提示弹窗（暖米色库 Modal）内容；null = 关闭。翻译失败等提示不再走原生 dialog */
+  notice: { message: string; type: 'info' | 'warning' | 'error' } | null
   activeTab: Tab
   loading: boolean
   // 当前正在执行的查询动作（''=无）。查询按钮的 loading 动画只显示在**被点击的那个按钮**上，
@@ -171,6 +179,9 @@ interface State {
   setActiveTab: (t: Tab) => void
   toggleCol: (k: string) => void
   setError: (m: string) => void
+  /** 1.0.75：打开/关闭全局暖米色提示弹窗（NoticeModal 消费） */
+  showNotice: (message: string, type?: 'info' | 'warning' | 'error') => void
+  clearNotice: () => void
   setUpdateInfo: (p: Partial<State['updateInfo']>) => void
   reset: () => void
 
@@ -300,9 +311,11 @@ export const useStore = create<State>((set, get) => ({
   fields: [{ id: 'f1', val: '' }, { id: 'f2', val: '' }, { id: 'f3', val: '' }],
   batchText: '',
   allData: [], filtered: [], bomData: [], bomFiltered: [], fileData: [], notFound: [],
+  matQueried: false, bomQueried: false, fileQueried: false,
   kw: '', kwNot: '', typeFilter: '', selectedStatuses: [], dedup: false,
   sortKey: '', sortAsc: true, bomKw: '', bomKwNot: '', bomSortKey: '', bomSortAsc: true,
   descTrans: { mat: emptyDescTrans(), bom: emptyDescTrans() },
+  notice: null,
   activeTab: 'mat', loading: false, busyAction: '', error: '', batchMsg: '',
   hiddenCols: (() => { try { return JSON.parse(localStorage.getItem('mc-hidden-cols') || '[]') } catch { return [] } })(),
   updateInfo: { hasUpdate: false, checking: false },
@@ -325,6 +338,9 @@ export const useStore = create<State>((set, get) => ({
     // 不影响本次会话，符合 localStorage 可能被禁用的兜底预期。
     applyTheme(id)
     persistTheme(id)
+    // 1.0.75：同时写主进程 userData/app-prefs.json —— localStorage 按 origin 隔离，
+    // 打包版（file://）读不到 dev 版（http://localhost:5173）的主题，更新后就会「变默认」
+    try { window.mcApi.setThemePref?.(id) } catch { /* 忽略 */ }
     set({ theme: id })
   },
   setLoggedIn: (v) => set({ loggedIn: v }),
@@ -387,7 +403,7 @@ export const useStore = create<State>((set, get) => ({
       const url = buildSearchUrl(descQ)
       const json = await fetchJSON(url)
       const rows = normalizeRows(json)
-      set({ allData: rows, selectedStatuses: [], matExpandedKeys: new Set() })
+      set({ allData: rows, selectedStatuses: [], matExpandedKeys: new Set(), matQueried: true })
       get().applyFilterInternal()
       set({ activeTab: 'mat' })
     } catch (e: any) {
@@ -405,7 +421,7 @@ export const useStore = create<State>((set, get) => ({
       const url = buildItemNoUrl(no)
       const json = await fetchJSON(url)
       const rows = normalizeRows(json)
-      set({ allData: rows, selectedStatuses: [], matExpandedKeys: new Set() })
+      set({ allData: rows, selectedStatuses: [], matExpandedKeys: new Set(), matQueried: true })
       get().applyFilterInternal()
       set({ activeTab: 'mat' })
     } catch (e: any) {
@@ -432,7 +448,7 @@ export const useStore = create<State>((set, get) => ({
         else notFound.push(no)
       } catch { failed.push(no) }
     }
-    set({ allData: results, selectedStatuses: [], batchMsg: '', notFound, matExpandedKeys: new Set() })
+    set({ allData: results, selectedStatuses: [], batchMsg: '', notFound, matExpandedKeys: new Set(), matQueried: true })
     get().applyFilterInternal()
     set({ activeTab: 'mat', loading: false, busyAction: '' })
     const msgs: string[] = []
@@ -452,7 +468,7 @@ export const useStore = create<State>((set, get) => ({
       const rows = normalizeRows(json)
       // 先落 bomData，再按当前 bomKw/bomKwNot/排序重算 bomFiltered：
       // 换料号重查后筛选条件继续生效，不需要用户删掉关键词再输一遍
-      set({ bomData: rows, bomExpandedKeys: new Set(), ...(switchTab ? { activeTab: 'bom' } : {}) })
+      set({ bomData: rows, bomExpandedKeys: new Set(), bomQueried: true, ...(switchTab ? { activeTab: 'bom' } : {}) })
       get().recomputeBomFiltered()
     } catch (e: any) { set({ error: s.t('errBomFail', { m: e.message }) }) }
     finally { set({ loading: false, busyAction: '' }) }
@@ -467,7 +483,7 @@ export const useStore = create<State>((set, get) => ({
     try {
       const json = await fetchJSON(buildFileUrl(no))
       const rows = normalizeRows(json)
-      set({ fileData: rows, ...(switchTab ? { activeTab: 'file' } : {}) })
+      set({ fileData: rows, fileQueried: true, ...(switchTab ? { activeTab: 'file' } : {}) })
     } catch (e: any) { set({ error: s.t('errFileFail', { m: e.message }) }) }
     finally { set({ loading: false, busyAction: '' }) }
   },
@@ -554,10 +570,13 @@ export const useStore = create<State>((set, get) => ({
     return { hiddenCols: next }
   }),
   setError: (m) => set({ error: m }),
+  showNotice: (message, type = 'info') => set({ notice: { message, type } }),
+  clearNotice: () => set({ notice: null }),
   setUpdateInfo: (p) => set(s => ({ updateInfo: { ...s.updateInfo, ...p } })),
   reset: () => set({
     itemNo: '', batchText: '', allData: [], filtered: [], bomData: [], bomFiltered: [],
-    fileData: [], notFound: [], kw: '', kwNot: '', typeFilter: '', selectedStatuses: [], dedup: false,
+    fileData: [], notFound: [], matQueried: false, bomQueried: false, fileQueried: false,
+    kw: '', kwNot: '', typeFilter: '', selectedStatuses: [], dedup: false,
     sortKey: '', sortAsc: true, bomKw: '', bomKwNot: '', bomSortKey: '', bomSortAsc: true,
     descTrans: { mat: emptyDescTrans(), bom: emptyDescTrans() },
     activeTab: 'mat', error: '', batchMsg: '', matExpandedKeys: new Set(), bomExpandedKeys: new Set(),
@@ -621,11 +640,16 @@ export const useStore = create<State>((set, get) => ({
       const restored = prefs.lastProviderId ? providers.find(p => p.id === prefs.lastProviderId) : undefined
       const target = restored || providers.find(p => p.hasApiKey) || providers[0]
       providerId = target?.id || ''
-      modelId = prefs.lastModelId || target?.defaultModel || undefined
+      const chatModel = prefs.lastModelId || target?.defaultModel || undefined
+      // 1.0.75：翻译不再盲用聊天模型。Agent / thinking 型会先跑长思维链，
+      // 1 条描述也要 20 秒以上；这里优先用显式配置，否则自动挑一个快模型。
+      const suggestions: string[] = (bundle?.suggestions?.[providerId] || []) as string[]
+      modelId = pickTranslateModel(prefs.translateModelId, chatModel, suggestions)
       // 没配 Key（且不是本地 Ollama）时不发请求：直接引导去 AI 助手配置
       if (providerId && !target?.hasApiKey && providerId !== 'ollama') {
         patchKind({ lastError: s.t('translateNeedAi') })
-        void window.mcApi.showMessage({ type: 'warning', message: s.t('translateNeedAi'), lang: s.lang })
+        // 1.0.75：统一走全局暖米色 Modal，不再弹 Windows 原生框
+        get().showNotice(s.t('translateNeedAi'), 'warning')
         return
       }
     } catch { /* 拿不到供应商列表：providerId 为空，主进程会给出明确报错 */ }
@@ -666,7 +690,7 @@ export const useStore = create<State>((set, get) => ({
           ? s.t('translateFailAt', { m: why, d: doneCount, n: todo.length })
           : s.t('translateFail', { m: why })
       })
-      void window.mcApi.showMessage({ type: 'error', message: s.t('translateFail', { m: why }), lang: s.lang })
+      get().showNotice(s.t('translateFail', { m: why }), 'error')
     } finally {
       // 收尾：清 translating / progress / cancelRequested / taskId；正常完成则切回「显示译文」，
       // 让用户直接看到成果；取消时维持当前显隐，不强行切换
@@ -678,7 +702,7 @@ export const useStore = create<State>((set, get) => ({
         visible: canceled ? get().descTrans[kind].visible : true
       })
       if (canceled) {
-        void window.mcApi.showMessage({ type: 'info', message: s.t('translateCanceled', { n: doneCount }), lang: s.lang })
+        get().showNotice(s.t('translateCanceled', { n: doneCount }), 'info')
       }
     }
   },
@@ -773,5 +797,31 @@ export const useStore = create<State>((set, get) => ({
 // 启动时把上次选择的语言同步给主进程：原生弹窗（showMessageBox）的
 // 按钮「确定/OK」「取消/Cancel」与默认标题需要跟随界面语言
 try { window.mcApi.setUiLang(useStore.getState().lang) } catch { /* 忽略 */ }
+
+/**
+ * 1.0.75：主题以主进程 `userData/app-prefs.json` 为准。
+ * 启动时首屏仍用 `readStoredTheme()` 同步渲染避免闪一下默认皮肤，随后异步做两件事：
+ *  - 主进程已有有效主题 → 覆盖首屏值，并把它同步回 localStorage（两边保持一致）；
+ *  - 主进程还没有、本地有非默认主题 → 一次性迁移写回 json，之后都以 json 为准。
+ * 这样 dev（http://localhost:5173）与打包版（file://）共享同一份主题，更新版本不再丢失。
+ */
+try {
+  void window.mcApi.getAppPrefs?.().then((prefs: any) => {
+    const saved = String(prefs?.theme || '').trim()
+    if (saved && getThemePreset(saved).id === saved) {
+      if (saved !== useStore.getState().theme) {
+        applyTheme(saved)
+        persistTheme(saved)
+        useStore.setState({ theme: saved })
+      }
+      return
+    }
+    const local = readStoredTheme()
+    if (local !== DEFAULT_THEME) {
+      persistTheme(local)
+      window.mcApi.setThemePref?.(local)
+    }
+  }).catch(() => null)
+} catch { /* 忽略 */ }
 
 export { STATUS_CLS_MAP }
