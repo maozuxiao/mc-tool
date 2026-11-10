@@ -41,6 +41,25 @@ function notifyWjxtSessionRestored(): void {
 }
 
 /**
+ * 1.0.75：只有「用户主动发起的登录」才弹「鸿翼文件系统登录态已恢复」提示。
+ *
+ * 用户实测：会话过期后应用自动弹二维码 → 扫码成功 → 每次都弹这个提示，很打扰。
+ * 启动恢复 / 心跳自愈 / 后台换票成功同样不该弹。三个主动入口才置位：
+ * ① Skill 里的「扫码登录」链接（performLogout 重新扫码）；
+ * ② 「账号密码登录」链接（H5 登录页）；
+ * ③ 鸿翼技能触发的登录窗口（setWjxtLoginOpener）。
+ * 带 10 分钟有效期，避免用户中途放弃后下一次自动登录被误判成主动。
+ */
+let userDrivenLoginAt = 0
+const USER_DRIVEN_LOGIN_WINDOW_MS = 10 * 60 * 1000
+function markUserDrivenLogin(): void { userDrivenLoginAt = Date.now() }
+function consumeUserDrivenLogin(): boolean {
+  const ok = userDrivenLoginAt > 0 && Date.now() - userDrivenLoginAt < USER_DRIVEN_LOGIN_WINDOW_MS
+  userDrivenLoginAt = 0
+  return ok
+}
+
+/**
  * 1.0.75：给渲染层的一条通用信息提示（链接已登录、无需重复操作等，不再静默无反馈）。
  * 发的是 **i18n key**，由渲染层用自己的 `t()` 翻译 —— 主进程不需要知道当前语言。
  */
@@ -83,7 +102,7 @@ const WJ_LOGIN_TIP_REMOVE_SCRIPT =
  * 处在不同的模块作用域 —— 之前 `notifyWjxtSessionRestored` 就因作用域问题编译失败过。
  * 主要职责：撤掉所有可见鸿翼窗口里残留的「登录态已失效」提示条 + 广播渲染层提示。
  */
-function finishWjxtSessionRestore(): void {
+function finishWjxtSessionRestore(notify: boolean): void {
   for (const w of BrowserWindow.getAllWindows()) {
     if (w.isDestroyed() || !w.isVisible()) continue
     let u = ''
@@ -91,7 +110,8 @@ function finishWjxtSessionRestore(): void {
     if (!isWjPage(u)) continue
     void w.webContents.executeJavaScript(WJ_LOGIN_TIP_REMOVE_SCRIPT).catch(() => null)
   }
-  notifyWjxtSessionRestored()
+  // 撤提示条总是做；「已恢复」弹窗只在用户主动发起登录时弹
+  if (notify) notifyWjxtSessionRestored()
 }
 
 // 开发时从项目根目录 build/ 读取；打包后从 resources/ 读取（extraResources 配置）
@@ -690,6 +710,11 @@ function createWindow() {
   // 1.0.75：所有**可见的**鸿翼网页版窗口。H5 账密登录成功后要遍历 reload 一次，
   // 否则 OA 点「文件管理」开出来的那个窗口会永远停在 `Loading...`（用户实测截图）。
   const visibleWjWindows = new Set<BrowserWindow>()
+  // 1.0.75：因「鸿翼登录态失效」而卡在 Loading / 白屏、并注入过提示条的窗口。
+  // 用户实测：从 logo → OA → 文件系统先进这个 Loading 窗口，再弹 H5 登录窗，
+  // H5 登录成功后 Loading 窗口不会自动关掉。登录成功时把这些窗口关掉即可，
+  // 比 reload 更干脆（页面已卡住，提示条文案也是「关闭本页重新进入」）。
+  const wjLoginBlockedWindows = new Set<BrowserWindow>()
   let oaCookieInjectorInstalled = false
   // 注入诊断：按 host 只打一次日志，便于事后核对「某个域到底补了什么 cookie」
   const oaInjectLoggedHosts = new Set<string>()
@@ -707,6 +732,7 @@ function createWindow() {
     win.on('closed', () => {
       oaWebContentsIds.delete(wcId)
       visibleWjWindows.delete(win)
+      wjLoginBlockedWindows.delete(win)
     })
 
     win.webContents.setWindowOpenHandler(({ url }) => {
@@ -767,12 +793,17 @@ function createWindow() {
         .then(({ wasLoggedOut, ok }) => {
           if (win.isDestroyed() || win.webContents.isDestroyed()) return
           if (!ok) {
-            // 未登录：站点窗口是白屏 / 一直 Loading，给一条带关闭按钮的可见说明。
+            // 未登录：站点窗口是白屏 / 一直 Loading，给一条带关闭按钮的可见说明，
+            // 并登记为「登录成功后要自动关掉」的窗口（见 setWjxtSessionRestored）。
+            wjLoginBlockedWindows.add(win)
             void win.webContents.executeJavaScript(wjLoginTipScript()).catch(() => null)
             return
           }
-          // 无论本来登录还是刚恢复，都清掉可能残留的旧提示条
+          // 无论本来登录还是刚恢复，都清掉可能残留的旧提示条；
+          // 并从「待关闭的卡 Loading 窗口」集合里移除 —— 用户 2026-11-10 实测
+          // 已登录时点目录链接，窗口仍被 setWjxtSessionRestored 当成旧 Loading 窗关掉。
           void win.webContents.executeJavaScript(WJ_LOGIN_TIP_REMOVE_SCRIPT).catch(() => null)
+          wjLoginBlockedWindows.delete(win)
           if (!wasLoggedOut || wjWindowReloaded.has(win.webContents)) return
           wjWindowReloaded.add(win.webContents)
           debugLog('[oaWindow] edoc2 session ready -> reload wj page once (fix infinite Loading)')
@@ -872,7 +903,11 @@ function createWindow() {
         if (/h5\.html#login|sso\/auth\/goToLoginPage/i.test(String(u))) return true
         // 1.0.75 退路：用户手动打开鸿翼网页版首页（和浏览器一样跑完 SSO 链），
         // 也要纳入登录态监听，成功后自动关窗。
-        if (/^\/index\.html$/i.test(url.pathname)) return true
+        // 1.0.75 修正（2026-11-10）：带业务 hash 的 `index.html#doc/enterprise/...`
+        // 是**正常浏览目录/文件**，不是登录窗口。旧判据只看 pathname，导致登录态下
+        // 点目录链接 → 窗口被登记成「登录窗口」→ 2 秒后注入「✅ 登录成功，正在返回应用…」
+        // 并自动关闭（用户截图）。只有无业务路由的首页才可能是 SSO 换票落地页。
+        if (/^\/index\.html$/i.test(url.pathname) && !/#\S/i.test(url.hash)) return true
       }
     } catch { /* 地址不合法就不算 */ }
     return false
@@ -979,6 +1014,8 @@ function createWindow() {
         notifyMcNotice('wjxtNoticeAlreadyH5')
         return true
       }
+      // 1.0.75：用户点「账号密码登录」链接属于主动登录，成功后允许弹「已恢复」提示
+      markUserDrivenLogin()
       void wjxtH5Login()
       return true
     }
@@ -1099,6 +1136,17 @@ function createWindow() {
     //      而引导弹窗被自己压掉了，用户得不到下一步动作。
     // 现在：节流时刻改到「用户确实选择稍后再说」之后才记（选登录就不压制 AI 链路），
     // 并在每个出口都留一条日志。
+    // 1.0.75：弹窗前再确认一次会话。静默自愈 / 探针都有落地临界期，用户刚登录完
+    // 鸿翼时这里会误弹「文件系统登录态已失效 → 登录文件系统」，属冗余（2026-11-10 反馈）。
+    // 等 1.2s 避开临界期，已登录就直接重载预览页、不打扰用户。
+    await new Promise(r => setTimeout(r, 1200))
+    if (win.isDestroyed()) return
+    if ((await wjxtProbeLoggedIn().catch(() => null)) === true) {
+      debugLog('[wjxt] preview window: session already ok -> skip redundant login prompt')
+      void win.loadURL(url).catch(() => { /* 站内跳转会 reject，忽略 */ })
+      return
+    }
+
     debugLog(`[wjxt] preview login prompt -> user (heal failed, landed=${landed.split('?')[0]})`)
     const r = await dialog.showMessageBox(win, {
       type: 'warning',
@@ -1129,11 +1177,25 @@ function createWindow() {
 
   // 鸿翼文件系统技能在「分区里没有可用登录态」时会调用它弹出应用内登录窗口
   // （见 ai/wjxtSkill.ts：窗口与工具请求共用 persist:mc-query，登录一次即可复用）
-  setWjxtLoginOpener((target) => { void openInternalUrl(target) })
+  setWjxtLoginOpener((target) => {
+    // 1.0.75：鸿翼技能主动触发的登录窗口，成功后允许弹「已恢复」提示
+    markUserDrivenLogin()
+    void openInternalUrl(target)
+  })
   // 1.0.75：H5 账密登录成功后刷新所有**可见**的鸿翼网页版窗口。
   // 之前 `afterH5LoginSuccess` 只销毁自己、重绑隐藏上下文，OA 点「文件管理」
   // 开出来的那个窗口拿不到任何通知，会永远停在 `Loading...`（用户实测截图）。
   setWjxtSessionRestored(() => {
+    // 1.0.75：H5 登录成功后，先关掉因登录态失效而卡在 Loading / 白屏的窗口。
+    // 用户实测：logo → OA → 文件系统先进 Loading 窗口，再弹 H5 登录窗，登录成功后
+    // 那个 Loading 窗口一直留着。这些窗口都注入过「登录态已失效」提示条，精准关闭，
+    // 不影响用户正常打开的文件系统页面。
+    for (const w of Array.from(wjLoginBlockedWindows)) {
+      if (w.isDestroyed() || !w.isVisible()) continue
+      debugLog('[oaWindow] edoc2 session restored -> close stale Loading window')
+      try { w.close() } catch { /* ignore */ }
+    }
+    wjLoginBlockedWindows.clear()
     for (const w of visibleWjWindows) {
       if (w.isDestroyed() || !w.isVisible()) continue
       let u = ''
@@ -1151,7 +1213,7 @@ function createWindow() {
       debugLog('[oaWindow] edoc2 session restored -> reload wj window once: ' + u.slice(0, 100))
       try { w.webContents.reload() } catch { /* 窗口刚好关闭 */ }
     }
-    finishWjxtSessionRestore()
+    finishWjxtSessionRestore(consumeUserDrivenLogin())
   })
 
   // ── 鸿翼文件系统的「隐藏窗口预热」────────────────────────────────────
@@ -3159,7 +3221,7 @@ async function completeOaSso(_loginToken: string, lck?: string): Promise<{ ok: b
     // `[login-sync]`，失败也不影响 OA 主流程。
     void scheduleWjxtSync('oa-login')
       .then((r) => {
-        if (r === true) finishWjxtSessionRestore()
+        if (r === true) finishWjxtSessionRestore(consumeUserDrivenLogin())
         debugLog(`[login-sync] edoc2=${r === true ? 'ok' : r === false ? 'not-logged-in' : 'unknown'}`)
       })
       .catch((e: any) => debugLog('[login-sync] edoc2 sync threw: ' + String(e?.message || e)))
@@ -4002,6 +4064,9 @@ ipcMain.handle('mc-wjxt-diagnose', async (_e, langRaw?: string) => {
  * 用户 A 场景（退出登录 → 重新扫码 → 鸿翼登录态 ✅）已验证这条路径能一并恢复 edoc2。
  */
 async function performLogout(): Promise<void> {
+  // 1.0.75：Skill 的「扫码登录」链接 / 用户主动退出登录 → 属于主动发起的登录流程，
+  // 后续扫码成功后才允许弹「鸿翼文件系统登录态已恢复」提示。
+  markUserDrivenLogin()
   const sess = session.fromPartition(PARTITION)
   // 2026-10-26：登出语义定为「真正的未登录」。
   // 历史上为了「登出后秒出码」刻意保留 iam.streamax.com 的 SSO 会话，但实测有两个问题：

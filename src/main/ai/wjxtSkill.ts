@@ -533,6 +533,14 @@ display:flex;align-items:center;justify-content:center;flex-direction:column;gap
 export function wjxtH5Login(): Promise<boolean> {
   if (h5Pending) return h5Pending
   h5Pending = (async (): Promise<boolean> => {
+    // 1.0.75：所有登录入口的最后一道闸 —— 已经登录就绝不再开登录窗。
+    // 用户 2026-11-10 实测：刚登录完鸿翼，另一条路径（限频兜底 / 预览窗引导 /
+    // 后台同步）仍会弹一次「登录文件系统」，纯冗余。这里统一挡掉。
+    const already = await probeLoggedIn().catch(() => null)
+    if (already === true) {
+      wjxtLog('[h5login] already logged in -> skip redundant login window')
+      return true
+    }
     const creds = loadWjxtCredentials()
     const autoMode = !!creds
     // 用对象包一层：值由 console-message 回调异步写入，TS 对闭包赋值的裸变量会误判成 never
@@ -2003,7 +2011,8 @@ const LOGIN_FALLBACK_COOLDOWN_MS = 5 * 60 * 1000
 function offerManualLoginWindow(reason: string): void {
   if (Date.now() - lastLoginFallbackAt < LOGIN_FALLBACK_COOLDOWN_MS) return
   lastLoginFallbackAt = Date.now()
-  wjxtLog(`[sync] ${reason}: IAM expired -> open visible H5 login window once`)
+  // 日志别再写死「IAM expired」：限频兜底也会走到这里，会话可能完全正常
+  wjxtLog(`[sync] ${reason}: needs manual login -> open visible H5 login window once`)
   void wjxtH5Login().catch(() => false)
 }
 
@@ -2071,7 +2080,7 @@ export function wjxtSyncAfterLogin(reason = 'oa-login'): Promise<boolean | null>
  * 现在三条路径共用一个入口；限频避免心跳 / 多个子窗口重复发起换票。
  */
 let lastLoginSyncAt = 0
-export function scheduleWjxtSync(reason = 'oa-login', minIntervalMs = 30_000): Promise<boolean | null> {
+export async function scheduleWjxtSync(reason = 'oa-login', minIntervalMs = 30_000): Promise<boolean | null> {
   const now = Date.now()
   // 1.0.75：扫码登录成功（`oa-login`）是低频且关键的用户动作，**必须立刻重跑换票**。
   // 2026-11-09 04:17 实测：启动恢复在 04:17:41 跑过一次并记下时间戳，用户 04:17:52
@@ -2080,10 +2089,19 @@ export function scheduleWjxtSync(reason = 'oa-login', minIntervalMs = 30_000): P
   const effInterval = reason === 'oa-login' ? 0 : minIntervalMs
   if (shouldThrottleLoginSync(now, lastLoginSyncAt, effInterval)) {
     wjxtLog(`[sync] ${reason}: skipped (throttled)`)
-    // 后台同步刚跑过导致这里被限频时，别让用户对着白屏干等下一次 30 秒窗口；
-    // 但同样只在用户主动进文件系统时才给登录窗，启动 / 心跳一律不打扰。
-    if (reason === 'oa-window') offerManualLoginWindow(reason)
-    return Promise.resolve(null)
+    // 1.0.75：**限频 ≠ IAM 过期**。旧代码在这里无条件 offerManualLoginWindow()，
+    // 日志还写死「IAM expired」，于是用户刚登录完鸿翼、30 秒内点一次目录就又弹
+    // 一次登录窗（2026-11-10 03:30:29 日志实证）。限频只说明「刚跑过一次同步」，
+    // 必须先复探会话，确实未登录才给登录窗；启动 / 心跳一律不打扰。
+    if (reason === 'oa-window') {
+      const ok = await probeLoggedIn().catch(() => null)
+      if (ok === true) {
+        wjxtLog(`[sync] ${reason}: throttled but session already ok -> no login window`)
+      } else {
+        offerManualLoginWindow(reason)
+      }
+    }
+    return null
   }
   lastLoginSyncAt = now
   return wjxtSyncAfterLogin(reason)

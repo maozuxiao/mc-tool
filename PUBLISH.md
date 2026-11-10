@@ -290,6 +290,33 @@ dist/
 >    **④ 兼容性**：`theme` 指向已下线主题时回退默认且不崩；改托盘/开机自启设置时不会把 `theme` 冲掉。
 >    **⑤ 自检**：`npx tsc --noEmit` 0 错误、`npm test` 151 passed、`npm run build` 通过。
 
+> 60. **登录提示收敛与 Loading 窗口收尾（1.0.75，#11）**：
+>    **① 文案**：主动登录后弹出的提示应为「**鸿翼**文件系统登录态已恢复，可以正常使用查询与预览了」；切 English 为 `edoc2 file system session restored — search and preview are ready`。
+>    **② 触发范围**：会话过期后应用**自动弹二维码**再扫码成功 → **不弹**该提示（自检 ② 仍应 ✅）；启动恢复 / 心跳自愈 / 后台换票成功 → 不弹；只有 Skill 点「扫码登录」→ 扫码成功、点「账号密码登录」→ 登录成功、鸿翼技能主动触发登录窗 → 登录成功，这三种才弹一次。
+>    **③ Loading 窗口**：清空鸿翼登录态 → logo → OA → 文件系统 → 应先进卡 Loading 的窗口、再弹 H5 登录窗 → H5 登录成功后，那个 Loading 窗口**自动关闭**（日志 `[oaWindow] edoc2 session restored -> close stale Loading window`），不留空窗、提示条不残留；正常登录态下打开的文件系统窗口不应被误关。
+>    **④ 自检**：`npx tsc --noEmit` 0 错误、`npm test` 151 passed、`npm run build` 通过。
+
+> 61. **登录态下正常浏览目录不被误关（1.0.75）**：
+>    **① 核心回归**：鸿翼已登录 → 在 AI 回复里点任意目录 / 文件链接（URL 形如 `https://wj.streamax.com:9443/index.html#doc/enterprise/...`）→ 窗口应**稳定停留**、可继续点子目录，**不得**出现「✅ 登录成功，正在返回应用…」，也不得在 1~2 秒后自动关闭；日志不得出现 `[wjxt] login windows auto-closed` 与 `[oaWindow] … close stale Loading window`。
+>    **② 真登录窗口仍会自动关**：未登录时点「账号密码登录」/「扫码登录」→ 登录成功后仍应显示「登录成功，正在返回应用…」并自动关窗。
+>    **③ 卡 Loading 窗口仍会自动关**：鸿翼登录态失效 → logo → OA → 文件系统 → H5 登录成功 → 那个卡 Loading 的窗口仍应自动关闭。
+>    **④ 判定矩阵**：目录页 `index.html#doc/...` = 浏览（不关）；无 hash 的 `index.html` = 登录落地（可关）；`h5.html#login` 与 IAM AC `entityId=edoc2` = 登录（可关）；根路径 `/` = 浏览（不关）。
+>    **⑤ 自检**：`npx tsc --noEmit` 0 错误、`npm test` 151 passed、`npm run build` 通过。
+
+> 62. **登录完成后不再重复弹「登录文件系统」（1.0.75）**：
+>    **① 核心回归**：鸿翼登录成功后**立刻（30 秒内）**点目录 / 文件链接 → 不得再出现任何 H5 登录窗，也不得出现「文件系统登录态已失效 / 登录文件系统」原生对话框；日志应为 `[sync] oa-window: throttled but session already ok -> no login window` 或 `[h5login] already logged in -> skip redundant login window`，**不得**出现 `[h5login] window open`。
+>    **② 预览引导**：登录成功后打开预览页，若自愈临界期误判，应看到 `preview window: session already ok -> skip redundant login prompt` 并自动重载，不弹框。
+>    **③ 真未登录仍要能登**：清空鸿翼登录态 → 从 OA 进文件系统 / 点「账号密码登录」→ 仍应正常弹出登录窗口并可用；`offerManualLoginWindow` 日志为 `needs manual login`，不再是误导性的 `IAM expired`。
+>    **④ 不误关浏览窗**：登录态下点目录，窗口仍稳定停留（见第 61 条）。
+>    **⑤ 自检**：`npx tsc --noEmit` 0 错误、`npm test` 151 passed、`npm run build` 通过。
+
+> 63. **v1.0.76 发布收口（登录提示 / 窗口 / 冗余弹窗，一起验收）**：
+>    **① 提示文案与范围**：用户主动登录后提示「**鸿翼**文件系统登录态已恢复，可以正常使用查询与预览了」（English 为 `edoc2 file system session restored …`）；会话过期后应用自动弹二维码再扫码成功、启动恢复、心跳自愈、后台换票成功 → **都不弹**；只有 Skill 点「扫码登录」/ 点「账号密码登录」/ 鸿翼技能主动触发登录窗 → 弹一次。
+>    **② 不误关浏览窗**：登录态下在 AI 回复里点目录/文件链接（`index.html#doc/...`）→ 窗口稳定停留、可继续下钻，不出现「✅ 登录成功，正在返回应用…」；日志无 `login windows auto-closed`。真登录窗 / 卡 Loading 窗在登录成功后仍应自动关。
+>    **③ 不重复弹登录**：登录完成后立刻（30 秒内）点目录 → 无 H5 登录窗、无「登录文件系统」原生对话框；日志为 `throttled but session already ok -> no login window` / `already logged in -> skip redundant login window`；清空鸿翼登录态后仍应能正常弹窗登录。
+>    **④ 版本一致性**：`package.json` / `package-lock.json`（两处）均为 `1.0.76`，`electron-builder.yml` 为 `1.0.76.0`；产物为 `mc-material-query-setup-1.0.76.exe`、便携版 `mc-material-query-1.0.76.exe`、`latest.yml` 与 `.blockmap`。
+>    **⑤ 自检**：`npx tsc --noEmit` 0 错误、`npm test` 151 passed、`npm run build` 通过。
+
 ### 6. 发布到 GitHub Release
 
 需要一个有**仓库写权限**的 GitHub Token，二选一：

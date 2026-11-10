@@ -4,7 +4,7 @@
 
 - 仓库：https://github.com/maozuxiao/mc-tool
 - 技术栈：Electron 33 + electron-vite + React 18 + TypeScript + Zustand，UI 组件库 [`animal-island-ui`](https://www.npmjs.com/package/animal-island-ui)；AI 面板里的操作类小图标用 [`naive-icons`](https://www.npmjs.com/package/naive-icons)（同为手绘 naive 风，按需引 `svg/*.svg?raw` 并改色跟随主题，见 `src/renderer/src/components/NaiveIcon.tsx`）
-- 当前版本：`1.0.75`（2026-11-09 发布，`package.json` 的 `version` 为准；完整改动见 `MC Tool Release Notes.md`）
+- 当前版本：`1.0.76`（2026-11-10 发布，`package.json` 的 `version` 为准；完整改动见 `MC Tool Release Notes.md`）
 
 ---
 
@@ -206,6 +206,8 @@
 - **提示弹窗统一风格 + 查询结果空状态（1.0.75）**：新增提示（已登录时点扫码 / 账密链接、会话恢复）改用与「批量删除确认」同款的 `animal-island-ui` 暖米色 Modal，不再是 Windows 原生蓝标题栏弹窗；其余原生弹窗也去掉了「→ 确定」命令链接样式。**MC 物料 / BOM / 规格文件查询成功但 0 条**时，显示参考 animal-island-ui no-data 风格制作的 NO DATA 空状态（有机 blob + 矢量图标 + 软动效，中英双语），与「尚未查询」时的引导语区分开；筛选后无匹配仍显示原「暂无匹配结果」。**「帮助 → 关于」也换成同款暖米色 Modal**（原来的 Windows 原生蓝标题栏弹窗已弃用），说明 / 作者 / 联系方式 / 版本沿用原有中英文案，版本号仍动态读取。**AI 写已有文件前的「写入前确认」也换成同款 Modal**：新增一条主→渲染→主的确认 IPC，主进程挂起工具调用、按请求 id 唤醒；渲染层不可用时自动回退原生弹窗，120 秒无人操作按「取消」处理，绝不误写。差异摘要与按钮全部双语。
 - **物料描述翻译不再被 thinking 拖慢（1.0.75 / #9）**：诊断确认不是网络问题，而是翻译复用了 AI 助手当前选中的推理型 Agent 模型（`hy3-preview-agent`），1 条描述也要先跑 20 秒以上思维链。现在翻译请求会带 `reasoning_effort:'none'` / `enable_thinking:false`（网关不认则 400 自动回退），并把**翻译模型与聊天模型解耦**：agent/thinking 型自动换用同服务商的快模型（当前配置下 `hy3-preview-agent` → `hy3`）；也可在 `ai-prefs.json` 用 `translateModelId` 显式指定。单条超时 90 秒缩短到 30 秒，`debug-ai.log` 新增 `[translate] start/done/fail` 耗时日志（真机实测 1.2~2.7 秒完成）。**翻译的服务商现在会跟随 AI 助手面板的当前选择**：此前切换服务商只改局部状态，翻译一直用上一次「保存配置」时的旧服务商；现在切换即写回偏好，重启后 AI 助手也会回到上次选的服务商。部分走 `openai-responses` 后端的模型（如 `gpt-5.6-luna`）不认非标准 thinking 参数，已改为只带 OpenAI 标准的 `reasoning_effort:'none'` 并对参数类错误自动退回原始请求；**翻译失败 / 未配置 Key / 已取消的提示也统一为暖米色 Modal**（带 info / warning / error 语义色），不再弹 Windows 原生框。
 - **主题设置跨版本保留（1.0.75 / #10）**：主题原先只存在渲染层 `localStorage` 的 `mc-theme`（Chromium leveldb，路径 `%APPDATA%\mc-material-query\Partitions\mc-query\Local Storage\leveldb\`），而 localStorage 按 origin 隔离 —— dev 版 `http://localhost:5173` 与打包版 `file://` 各存一份，所以每次装新版本都像被重置。现改为与其它设置一起写进 **`%APPDATA%\mc-material-query\app-prefs.json`** 的 `theme` 字段（可直接查看/备份），dev 与打包版共享、覆盖安装不丢；旧的 localStorage 值启动时自动迁移一次。
+- **登录提示收敛与 Loading 窗口收尾（1.0.75 / #11）**：「已恢复」提示文案改为「**鸿翼**文件系统登录态已恢复…」（中英双语），且**只有**用户主动发起登录（Skill 点扫码链接、点账号密码登录、鸿翼技能触发登录窗）时才弹 —— 会话过期自动弹二维码、启动恢复、心跳自愈、后台换票成功都不再打扰。鸿翼登录态失效时从 logo → OA → 文件系统进的那个卡 Loading 窗口，在 H5 登录成功后会**自动关闭**；而**登录态下正常点目录/文件链接浏览**的窗口不会被当成登录窗口误关（`isWjxtLoginUrl` 现在会排除带业务 hash 的 `index.html#doc/...`）。**登录完成后不再重复弹「登录文件系统」**：`wjxtH5Login()` 入口先探会话、已登录直接返回；30 秒同步限频不再被误判成「IAM 过期」而无条件开登录窗；预览窗的原生引导弹窗也会在弹出前复探一次。
+- **1.0.76 登录体验收口**：「已恢复」提示文案改为「**鸿翼**文件系统登录态已恢复」（中英双语），且**只有**用户主动发起登录（Skill 点扫码链接 / 账密链接 / 技能触发登录窗）时才弹 —— 会话过期自动弹二维码、启动恢复、心跳自愈、后台换票成功都不再打扰；H5 登录成功后自动关闭卡 Loading 的文件系统窗口；**登录态下正常点目录/文件浏览的窗口不再被误判为登录窗口自动关闭**（`isWjxtLoginUrl` 排除带业务 hash 的 `index.html#doc/...`）；登录完成后不再因 30 秒同步限频被误判成「IAM 过期」而重复弹「登录文件系统」。
 - **物料查询：证据不足就不给业务结论（1.0.75 / #8）**：`mc_query` 成功结果统一带 `evidence`（`channel` / `queryString` / `scannedRows` / `matchCount` / `sampleHits`），一行都没解析到时附 `scanWarning`；只有 `resultCode:OK_EMPTY` + `verifiedTwice:true` + `matchCount===0` + 凭证齐备才允许说「无数据」，二次核验失败或证据不齐一律返回 `CONFLICT`（只能说「查询失败」）。搜索空结果也纳入二次核验；**写已有文件前**会弹差异摘要（目标文件 / 写入方式 / 内容预览 / 备份提示）要求确认，取消则不改动。
 - **会话记录框与主会话框等高（1.0.75）**：两列共用一个 grid 行高，主会话框却因多挂了通用 `.card` 背了 14px 下外边距，所以看起来比「会话记录」框短一截；把这一个 `margin-bottom` 归零即可，布局与滚动不变。
 - **目录与搜索**：`file_search` 支持正则（`--regex`）、文件名通配符（`*`/`?`）、按类型过滤（`--glob` / `--ext`），类似 FileLocatorPro 的保底检索。
@@ -449,9 +451,9 @@ npm run pack:all   # 全平台
 ```
 dist/
 ├─ latest.yml                            # 自动更新元数据
-├─ mc-material-query-setup-1.0.75.exe            # NSIS 安装包
-├─ mc-material-query-setup-1.0.75.exe.blockmap  # 增量更新块映射
-└─ mc-material-query-1.0.75.exe   # 便携版
+├─ mc-material-query-setup-1.0.76.exe            # NSIS 安装包
+├─ mc-material-query-setup-1.0.76.exe.blockmap  # 增量更新块映射
+└─ mc-material-query-1.0.76.exe   # 便携版
 ```
 
 > macOS 交叉编译在 Windows 上不可靠，DMG 请在 macOS 上打包。

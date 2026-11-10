@@ -280,7 +280,7 @@ export const I18N: Record<string, Record<string, string | string[]>> = {
     aiDiagBtn: '诊断',
     aiDiagRunning: '自检中…',
     aiDiagTitle: '登录态自检',
-    aiWjxtRestored: '文件系统登录态已恢复，可以正常使用查询与预览了',
+    aiWjxtRestored: '鸿翼文件系统登录态已恢复，可以正常使用查询与预览了',
     aiDiagFailed: '自检失败',
     // MCP 服务管理（1.0.46）
     mcpTitle: 'MCP 服务',
@@ -754,7 +754,7 @@ aiImgLoadFail: '图片加载失败（链接可能已过期）',
     aiDiagBtn: 'Diagnose',
     aiDiagRunning: 'Checking…',
     aiDiagTitle: 'Login self-check',
-    aiWjxtRestored: 'File system session restored — search and preview are ready',
+    aiWjxtRestored: 'edoc2 file system session restored — search and preview are ready',
     aiDiagFailed: 'Self-check failed',
     // MCP services (1.0.46)
     mcpTitle: 'MCP services',
