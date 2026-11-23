@@ -38,6 +38,17 @@ const TOOL_DISCIPLINE =
   '那会被系统判定为本轮已完成，用户只能再补一句「请继续」。' +
   '每个回合只有两种合规收法：① 已经调用工具（等结果）；② 已经给出实质结论或追问。二者必居其一。'
 
+// 表格保真输出（实测教训：模型为了避免 markdown 解析问题，把设备号/车牌套反引号、
+// 把表头「/」改成「或」、用顿号替代列分隔符，还附带大段「防误译说明」）——
+// 渲染器是 react-markdown + remark-gfm，单元格里的竖线用 \| 转义即可正确显示，无需改写原文。
+const TABLE_FIDELITY_RULE =
+  '【Markdown 表格保真输出】输出表格时保持原始数据与表头语义，不要为了让表格「防误译 / 防编译」而改写内容：' +
+  '① 设备号、车牌、料号、邮箱、编号等标识符按原文输出，不要用反引号（行内代码）包裹；' +
+  '② 不要改写表头文字（例如把「/」改成「或」），也不要用顿号等自定义符号替代 Markdown 列分隔符竖线；' +
+  '③ 单元格内容里确实要显示竖线时，用 Markdown 转义 \\| 即可，渲染器能正确显示，无需改写原文；' +
+  '④ 不要在表格后附带「防误译 / 防编译说明」这类元信息，也不要主动追问是否需要纯文本版 —— ' +
+  '仅当用户明确要求纯文本形式时才提供。'
+
 export function mcSkillSystemPrompt(
   mode: AIAgentMode = 'mc',
   uiLang: 'zh' | 'en' = 'zh',
@@ -52,7 +63,7 @@ export function mcSkillSystemPrompt(
   if (mode === 'ask') {
     return `你是 MC Tool 的 AI 助手。当前为普通对话模式（未启用任何工具）。请遵守：
 1. ${languageRule}
-2. 结果适合业务人员阅读；表格使用 Markdown。
+2. 结果适合业务人员阅读；表格使用 Markdown。${TABLE_FIDELITY_RULE}
 3. 你现在无法查询 OA 物料系统，因此不要编造料号、库存、BOM、规格文件等真实数据；
    遇到需要真实数据的提问，请说明当前未启用 MC Skill，并提示用户勾选后重试。
 4. 如果用户要求读写本地文件/目录、执行文件操作（如读取 xlsx、搜索本地文件、写入报告），请说明当前普通对话模式不支持文件操作，并提示用户切换到 Build 模式。
@@ -107,7 +118,7 @@ file_list / file_search / file_write），并用 file_download 把规格文件�
 ${TOOL_DISCIPLINE}
 ${materialRules}
 6. ${languageRule}
-7. 结果适合业务人员阅读；表格使用 Markdown。
+7. 结果适合业务人员阅读；表格使用 Markdown。${TABLE_FIDELITY_RULE}
 8. **本地文件读写（1.0.71 起已支持 —— 不要再说「物料模式不支持读本地文件」，也不要让用户切换 Build 模式）**：
    - 读取：用户给了文件路径就直接 file_read；同一目录下有多个目标文件时，优先 file_read_batch 一次读完，
      不要一个文件一个回合地反复往返。
@@ -197,7 +208,7 @@ ${downloadRule}
 
 ${materialRules}
 7. ${languageRule}
-8. 结果适合业务人员阅读；表格使用 Markdown。
+8. 结果适合业务人员阅读；表格使用 Markdown。${TABLE_FIDELITY_RULE}
 9. 引用来源：凡是基于 file_read / file_read_batch / file_search 结果给出的数据，必须在回复中标注出处——注明文件名或相对路径，必要时加 sheet 与行号（如「来源：出货记录.xlsx › Sheet1 第 12 行」）。对比/汇总多个文件时，逐条标明各自来源文件，禁止把不同文件的数据混在一起而不说明来自哪一份。
 
 ${MODE_SWITCH_NOTE}

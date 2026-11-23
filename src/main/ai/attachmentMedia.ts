@@ -20,9 +20,11 @@ export const MAX_ATTACHMENT_CONCURRENCY = 3
 
 /** 注入系统提示词：统一描述「图片会直接给模型看、长文件按需读」 */
 export const MEDIA_TOOL_NOTE =
-  '【附件 / 图片读取（1.0.74）】工具下载的图片会以下一条**图片消息**直接提供给你，请直接看图作答，' +
-  '禁止说「我看不到图 / 请上传图片」；日志、PDF、压缩包只回 localPath + textPreview，' +
-  '需要完整内容时调用 read_local_file 传 filePath 读取；图片确实读不出来时如实说明，绝不假装看过图。'
+  '【附件 / 图片读取（1.0.74）】用户本轮粘贴 / 拖入的图片、以及工具下载的图片，都会作为**图片消息**直接提供给你，' +
+  '请直接看图作答，禁止说「我看不到图 / 请上传图片」，也禁止用 file_read / file_read_batch 读取图片' +
+  '（file_read 只处理文本 / Office / PDF，读图片必然报 UNSUPPORTED_FORMAT）；' +
+  '日志、PDF、压缩包只回 localPath + textPreview，需要完整内容时调用 read_local_file 传 filePath 读取；' +
+  '图片确实读不出来时如实说明，绝不假装看过图。'
 
 export interface MediaImage {
   path: string

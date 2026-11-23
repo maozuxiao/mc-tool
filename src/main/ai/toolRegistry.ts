@@ -24,6 +24,14 @@ import { join } from 'path'
 import {
   READ_LOCAL_FILE_TOOL_DEFINITION, readLocalTextFile
 } from './attachmentMedia'
+import {
+  isImageReadPath, imageReadBlockedResult, splitImagePaths,
+  imageBatchBlockedResult, withSkippedImages
+} from './imageReadGuard'
+export {
+  isImageReadPath, imageReadBlockedResult, splitImagePaths,
+  imageBatchBlockedResult, withSkippedImages, IMAGE_READ_HINT
+} from './imageReadGuard'
 import { bareSkillId } from '@shared/ai-types'
 import type { AIAgentMode, AIExtraRoot } from '@shared/ai-types'
 import { MC_QUERY_TOOL_DEFINITION, runMcQuery, type McRunSink } from './mcSkill'
@@ -122,6 +130,7 @@ const REGISTRY: Record<string, ToolEntry> = {
     run: async (input, ctx) => {
       const p = String(input?.path || '').trim()
       if (!p) return { ok: false, error: 'MISSING_ARG', message: '缺少 path 参数' }
+      if (isImageReadPath(p)) return imageReadBlockedResult(p)
       return fileSkillRead({
         roots: ctx.allowedRoots,
         path: p,
@@ -284,7 +293,10 @@ const REGISTRY: Record<string, ToolEntry> = {
     run: async (input, ctx) => {
       const paths = Array.isArray(input?.paths) ? input.paths.map(String) : []
       if (!paths.length) return { ok: false, error: 'MISSING_ARG', message: '缺少 paths 参数' }
-      return runFileSkillCommand('read_batch', paths, ctx.allowedRoots, ctx.signal, 60000)
+      const { images, others } = splitImagePaths(paths)
+      if (!others.length) return imageBatchBlockedResult(images)
+      const result = await runFileSkillCommand('read_batch', others, ctx.allowedRoots, ctx.signal, 60000)
+      return withSkippedImages(result, images)
     }
   },
   // 会话级打开目录：校验 + 用户确认，由 chatService 的 requestRoot 实现

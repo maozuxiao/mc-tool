@@ -54,18 +54,18 @@ export function persistAttachments(atts?: AIAttachment[]): SavedAttachment[] {
   cleanupOld()
   const saved: SavedAttachment[] = []
   const seen = new Set<string>()
-  const push = (name: string, abs: string): void => {
+  const push = (name: string, abs: string, kind?: AIAttachment['kind'], mime?: string): void => {
     const key = abs.toLowerCase()
     if (!abs || seen.has(key)) return
     seen.add(key)
-    saved.push({ name: name || basename(abs), path: abs })
+    saved.push({ name: name || basename(abs), path: abs, kind, mime })
   }
 
   for (const a of list) {
     const own = String(a.path || '').trim()
     if (own) {
       try {
-        if (statSync(own).isFile()) { push(a.name, own); continue }
+        if (statSync(own).isFile()) { push(a.name, own, a.kind, a.mime); continue }
       } catch { /* 路径失效：继续尝试 dataUrl 兜底 */ }
     }
     if (a.kind !== 'image' || !a.dataUrl) continue
@@ -78,7 +78,7 @@ export function persistAttachments(atts?: AIAttachment[]): SavedAttachment[] {
       const abs = join(dir, `${Date.now()}-${++seq}-${name}`)
       writeFileSync(abs, dec.buf)
       a.path = abs
-      push(name, abs)
+      push(name, abs, 'image', dec.mime)
     } catch { /* 落盘失败：识图不受影响，只是不能当附件传 */ }
   }
   return saved

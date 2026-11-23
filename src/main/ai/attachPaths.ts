@@ -14,9 +14,18 @@
  * 这里只放纯函数（可单测）；真正落盘在 `attachStore.ts`（依赖 electron 的 userData）。
  */
 
+import { isImageName } from './attachmentMedia'
+
 export interface SavedAttachment {
   name: string
   path: string
+  /** 可选，供路径提示区分「图片直接看图」与「普通文件用 file_read」；旧数据没有时按扩展名推断 */
+  kind?: 'image' | 'text' | 'file'
+  mime?: string
+}
+
+function isImageAttachment(f: SavedAttachment): boolean {
+  return f.kind === 'image' || isImageName(f.name, f.mime)
 }
 
 const EXT_BY_MIME: Record<string, string> = {
@@ -90,19 +99,44 @@ function lines(files: SavedAttachment[]): string {
   return files.map(f => `- ${f.name} → ${f.path}`).join('\n')
 }
 
-/** 本条消息附件的路径提示：直接可用，禁止再向用户索要路径 */
+/**
+ * 本条消息附件的路径提示：直接可用，禁止再向用户索要路径。
+ * 图片与普通文件分流：图片已作为 image_url 发给模型，禁止再调 file_read；普通文件保留读取提示。
+ */
 export function currentAttachNote(files: SavedAttachment[]): string {
   if (!files.length) return ''
-  return '【本条消息附件的本机路径（用户已经在输入框里给了这些文件，**不要再向他索要路径**）：'
-    + '需要作为工单 / 评论附件时，直接把下面的路径传进 jira_add_comment / jira_create_ticket 的 attachments；'
-    + '需要看内容时用 file_read】\n'
-    + lines(files)
+  const images = files.filter(isImageAttachment)
+  const rest = files.filter(f => !isImageAttachment(f))
+  const blocks: string[] = []
+  if (images.length) {
+    blocks.push('【本条消息的图片附件（已作为图片消息直接提供，请直接看图作答，**禁止用 file_read / file_read_batch 读取图片**，也不要说看不到图）：'
+      + '下面路径仅在需要作为工单 / 评论附件上传时使用，不要再向用户索要路径】\n' + lines(images))
+  }
+  if (rest.length) {
+    blocks.push('【本条消息其它附件的本机路径（用户已经在输入框里给了这些文件，**不要再向他索要路径**）：'
+      + '需要作为工单 / 评论附件时，直接把下面的路径传进 jira_add_comment / jira_create_ticket 的 attachments；'
+      + '需要看内容时用 file_read】\n' + lines(rest))
+  }
+  return blocks.join('\n\n')
 }
 
-/** 上一轮附件的路径提示：只在用户这轮是「确认」类短句时给，避免把旧图误当成新附件 */
+/**
+ * 上一轮附件的路径提示：只在用户这轮是「确认」类短句时给，避免把旧图误当成新附件。
+ * 图片同样说明已在历史图片消息里，避免「确认」之后再触发 file_read。
+ */
 export function previousAttachNote(files: SavedAttachment[], userText?: string): string {
   if (!files.length || !isConfirmFollowUp(userText)) return ''
-  return '【上一轮附件的本机路径（用户这句是在确认上一轮的操作，可以直接复用，**不要再向他索要路径**）：'
-    + '需要作为工单 / 评论附件时，把下面的路径传进 jira_add_comment / jira_create_ticket 的 attachments】\n'
-    + lines(files)
+  const images = files.filter(isImageAttachment)
+  const rest = files.filter(f => !isImageAttachment(f))
+  const blocks: string[] = []
+  if (images.length) {
+    blocks.push('【上一轮的图片附件（用户这句是在确认上一轮的操作；图片已在前面的图片消息里提供，直接看图作答，'
+      + '**禁止用 file_read 读取图片**；路径仅在需要作为工单 / 评论附件上传时使用，不要再索要路径）】\n' + lines(images))
+  }
+  if (rest.length) {
+    blocks.push('【上一轮其它附件的本机路径（用户这句是在确认上一轮的操作，可以直接复用，**不要再向他索要路径**）：'
+      + '需要作为工单 / 评论附件时，把下面的路径传进 jira_add_comment / jira_create_ticket 的 attachments】\n'
+      + lines(rest))
+  }
+  return blocks.join('\n\n')
 }

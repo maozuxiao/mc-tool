@@ -963,20 +963,25 @@
    这些选择器只依赖 Collapse 稳定的 DOM 顺序 button > [icon, text, leaf]，
    真遇到库改结构时最多退回库默认外观，不影响展开/收起功能。 */
 .ai-tool-run-collapse { margin-bottom: 10px; }
-.ai-tool-run-collapse > button { padding: 7px 10px; gap: 8px; }
+/* 标题行顶部对齐：长摘要换行后，图标 / 耗时贴在第一行，不再被 flex 居中到多行中间 */
+.ai-tool-run-collapse > button { padding: 7px 10px; gap: 8px; align-items: flex-start; }
 .ai-tool-run-collapse > button > span:first-child {
   width: 20px;
   height: 20px;
   font-size: 14px;
   box-shadow: none;
+  flex-shrink: 0;
 }
 .ai-tool-run-collapse > button > span:nth-child(2) { font-size: 12px; font-weight: 600; }
 /* 详情区：左右内边距收窄，展开时再补下内边距（收起态不加，避免留下空隙） */
 .ai-tool-run-collapse [role="region"] > div { padding: 0 10px; }
 .ai-tool-run-collapse button[aria-expanded="true"] + [role="region"] > div { padding-bottom: 10px; }
-.ai-tool-run__q { display: inline-flex; align-items: center; gap: 6px; min-width: 0; width: 100%; }
-.ai-tool-run__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ai-tool-run__time { margin-left: auto; font-size: 11px; font-weight: 500; color: var(--mc-ink-soft); }
+.ai-tool-run__q { display: inline-flex; align-items: flex-start; gap: 6px; min-width: 0; width: 100%; }
+/* 工具摘要（尤其失败原因）原先 nowrap + ellipsis 会把长错误信息单行截断、末尾看不到；
+ * 改为自然换行：overflow-wrap: anywhere 让超长无空格串（路径 / 扩展名清单）也能折行。
+ * 短摘要仍是单行，观感不变；只有真长时才长高。 */
+.ai-tool-run__name { white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
+.ai-tool-run__time { margin-left: auto; font-size: 11px; font-weight: 500; color: var(--mc-ink-soft); white-space: nowrap; flex-shrink: 0; }
 .ai-tool-run-collapse.done { border-color: color-mix(in srgb, var(--mc-accent) 35%, var(--mc-line)); }
 .ai-tool-run-collapse.error { border-color: color-mix(in srgb, var(--mc-red) 35%, var(--mc-line)); }
 /* 工具详情里「超过 CODE_HIGHLIGHT_MAX」时的纯文本兜底（见 ChatPanel 的 ToolRunCard）。

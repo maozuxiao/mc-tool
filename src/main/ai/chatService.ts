@@ -300,7 +300,7 @@ function buildUserContent(input: {
   // 这里必须点名「直接传路径、不要再向用户索要」——否则模型会回头问「请提供图片的完整路径」。
   const withPath: SavedAttachment[] = atts
     .filter(a => a.path)
-    .map(a => ({ name: a.name, path: String(a.path) }))
+    .map(a => ({ name: a.name, path: String(a.path), kind: a.kind, mime: a.mime }))
   if (withPath.length) parts.push({ type: 'text', text: '\n\n' + currentAttachNote(withPath) })
   if (input.prevAttachNote) parts.push({ type: 'text', text: '\n\n' + input.prevAttachNote })
 

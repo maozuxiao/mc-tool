@@ -317,6 +317,13 @@ dist/
 >    **④ 版本一致性**：`package.json` / `package-lock.json`（两处）均为 `1.0.76`，`electron-builder.yml` 为 `1.0.76.0`；产物为 `mc-material-query-setup-1.0.76.exe`、便携版 `mc-material-query-1.0.76.exe`、`latest.yml` 与 `.blockmap`。
 >    **⑤ 自检**：`npx tsc --noEmit` 0 错误、`npm test` 151 passed、`npm run build` 通过。
 
+> 64. **v1.0.77 发布收口（AI 工具错误 / 表格输出体验）**：
+>    **① 贴图不再误报 file_read**：AI 助手里粘贴 / 拖入图片后提问 → 模型直接看图作答，不再出现「`失败：暂不支持读取该格式: …image.png (UNSUPPORTED_FORMAT)`」的工具错误卡片；工具调用，若仍误触图片路径，应返回 `IMAGE_USE_VISION` 指引而非底层格式错误。普通文件（日志 / Office / PDF / 表格）仍可正常用 `file_read` / `file_read_batch` 读取。
+>    **② 表格保真输出**：让模型从图片整理成表格（如设备号 / 车牌 / 到期日）→ 标识符按原文输出、不加反引号、表头与列分隔符不被改写（不出现「防误译版」「斜杠改成或」「顿号替代竖线」），不再附带大段「防误译处理说明」或主动追问要不要纯文本版。三种模式（对话 / 物料 / Build）规则一致。
+>    **③ 工具错误摘要换行**：构造一条超长失败摘要（如 UNSUPPORTED_FORMAT 的完整支持格式清单）→ 折叠卡标题**自然换行完整显示**，末尾信息不再被省略号截断；图标、摘要、耗时顶部对齐；展开区 JSON 与「复制」按钮照常可用，短摘要仍单行。
+>    **④ 版本一致性**：`package.json` / `package-lock.json`（两处）均为 `1.0.77`，`electron-builder.yml` 为 `1.0.77.0`；产物为 `mc-material-query-setup-1.0.77.exe`、便携版 `mc-material-query-1.0.77.exe`、`latest.yml` 与 `.blockmap`。
+>    **⑤ 自检**：`npx tsc --noEmit` 0 错误、`npm test` 164 passed（新增 `imageReadGuard.test.ts` 7 例、`mcSkillPrompt.test.ts` 3 例）、`npm run build` 通过。
+
 ### 6. 发布到 GitHub Release
 
 需要一个有**仓库写权限**的 GitHub Token，二选一：

@@ -4,7 +4,7 @@
 
 - 仓库：https://github.com/maozuxiao/mc-tool
 - 技术栈：Electron 33 + electron-vite + React 18 + TypeScript + Zustand，UI 组件库 [`animal-island-ui`](https://www.npmjs.com/package/animal-island-ui)；AI 面板里的操作类小图标用 [`naive-icons`](https://www.npmjs.com/package/naive-icons)（同为手绘 naive 风，按需引 `svg/*.svg?raw` 并改色跟随主题，见 `src/renderer/src/components/NaiveIcon.tsx`）
-- 当前版本：`1.0.76`（2026-11-10 发布，`package.json` 的 `version` 为准；完整改动见 `MC Tool Release Notes.md`）
+- 当前版本：`1.0.77`（2026-11-23 发布，`package.json` 的 `version` 为准；完整改动见 `MC Tool Release Notes.md`）
 
 ---
 
@@ -208,6 +208,7 @@
 - **主题设置跨版本保留（1.0.75 / #10）**：主题原先只存在渲染层 `localStorage` 的 `mc-theme`（Chromium leveldb，路径 `%APPDATA%\mc-material-query\Partitions\mc-query\Local Storage\leveldb\`），而 localStorage 按 origin 隔离 —— dev 版 `http://localhost:5173` 与打包版 `file://` 各存一份，所以每次装新版本都像被重置。现改为与其它设置一起写进 **`%APPDATA%\mc-material-query\app-prefs.json`** 的 `theme` 字段（可直接查看/备份），dev 与打包版共享、覆盖安装不丢；旧的 localStorage 值启动时自动迁移一次。
 - **登录提示收敛与 Loading 窗口收尾（1.0.75 / #11）**：「已恢复」提示文案改为「**鸿翼**文件系统登录态已恢复…」（中英双语），且**只有**用户主动发起登录（Skill 点扫码链接、点账号密码登录、鸿翼技能触发登录窗）时才弹 —— 会话过期自动弹二维码、启动恢复、心跳自愈、后台换票成功都不再打扰。鸿翼登录态失效时从 logo → OA → 文件系统进的那个卡 Loading 窗口，在 H5 登录成功后会**自动关闭**；而**登录态下正常点目录/文件链接浏览**的窗口不会被当成登录窗口误关（`isWjxtLoginUrl` 现在会排除带业务 hash 的 `index.html#doc/...`）。**登录完成后不再重复弹「登录文件系统」**：`wjxtH5Login()` 入口先探会话、已登录直接返回；30 秒同步限频不再被误判成「IAM 过期」而无条件开登录窗；预览窗的原生引导弹窗也会在弹出前复探一次。
 - **1.0.76 登录体验收口**：「已恢复」提示文案改为「**鸿翼**文件系统登录态已恢复」（中英双语），且**只有**用户主动发起登录（Skill 点扫码链接 / 账密链接 / 技能触发登录窗）时才弹 —— 会话过期自动弹二维码、启动恢复、心跳自愈、后台换票成功都不再打扰；H5 登录成功后自动关闭卡 Loading 的文件系统窗口；**登录态下正常点目录/文件浏览的窗口不再被误判为登录窗口自动关闭**（`isWjxtLoginUrl` 排除带业务 hash 的 `index.html#doc/...`）；登录完成后不再因 30 秒同步限频被误判成「IAM 过期」而重复弹「登录文件系统」。
+- **1.0.77 AI 图片与表格输出体验**：① **贴图不再触发 file_read 误报错**：图片已作为图片消息发给模型，但附件路径提示误导模型又去调 `file_read` 读出 `UNSUPPORTED_FORMAT` 错误卡片 —— 现在路径提示按「图片 / 普通文件」分流，图片明确「直接看图、禁止用文件读取工具」，工具描述同步声明边界，并在工具分发前兜底拦截图片路径（命中返回 `IMAGE_USE_VISION` 指引，不启动子进程）；普通文件读取方式不变。② **表格保真输出**：系统提示新增统一规则，设备号 / 车牌 / 料号等标识符按原文输出、不包反引号，不改写表头与分隔符，单元格内竖线用 Markdown 转义，不再输出「防误译说明」或主动追问要不要纯文本版（三种模式共用一套规则）。③ **工具错误摘要换行**：折叠卡标题的长错误文案不再被单行省略号截断，改为自然换行、图标与耗时顶部对齐，完整显示失败原因。
 - **物料查询：证据不足就不给业务结论（1.0.75 / #8）**：`mc_query` 成功结果统一带 `evidence`（`channel` / `queryString` / `scannedRows` / `matchCount` / `sampleHits`），一行都没解析到时附 `scanWarning`；只有 `resultCode:OK_EMPTY` + `verifiedTwice:true` + `matchCount===0` + 凭证齐备才允许说「无数据」，二次核验失败或证据不齐一律返回 `CONFLICT`（只能说「查询失败」）。搜索空结果也纳入二次核验；**写已有文件前**会弹差异摘要（目标文件 / 写入方式 / 内容预览 / 备份提示）要求确认，取消则不改动。
 - **会话记录框与主会话框等高（1.0.75）**：两列共用一个 grid 行高，主会话框却因多挂了通用 `.card` 背了 14px 下外边距，所以看起来比「会话记录」框短一截；把这一个 `margin-bottom` 归零即可，布局与滚动不变。
 - **目录与搜索**：`file_search` 支持正则（`--regex`）、文件名通配符（`*`/`?`）、按类型过滤（`--glob` / `--ext`），类似 FileLocatorPro 的保底检索。
@@ -451,9 +452,9 @@ npm run pack:all   # 全平台
 ```
 dist/
 ├─ latest.yml                            # 自动更新元数据
-├─ mc-material-query-setup-1.0.76.exe            # NSIS 安装包
-├─ mc-material-query-setup-1.0.76.exe.blockmap  # 增量更新块映射
-└─ mc-material-query-1.0.76.exe   # 便携版
+├─ mc-material-query-setup-1.0.77.exe            # NSIS 安装包
+├─ mc-material-query-setup-1.0.77.exe.blockmap  # 增量更新块映射
+└─ mc-material-query-1.0.77.exe   # 便携版
 ```
 
 > macOS 交叉编译在 Windows 上不可靠，DMG 请在 macOS 上打包。

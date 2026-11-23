@@ -50,7 +50,7 @@ export const FILE_READ_TOOL_DEFINITION = {
   type: 'function',
   function: {
     name: 'file_read',
-    description: '读取文件。支持：① 文本类（md/txt/csv/tsv/json/log/yml/xml/html/sql 以及 vue/kt/kts/swift/dart/toml/proto 等源码与配置，扩展名不认识时会嗅探内容，无扩展名文件按文本读）；② Office：docx/docm/dotx、xlsx/xlsm/xltx、xls、pptx/pptm/ppsx、doc、ppt（老版 .doc/.ppt 会先判断真实容器 —— 实为 docx/rtf/html 的精确读取，真正的 OLE 二进制则按 UTF-16 尽力抽取并在 note 里说明）；③ OpenDocument 与电子书：odt/ods/odp/epub；④ rtf；⑤ pdf。pdf 与中文文档已自动处理编码。**表格（xlsx/xls）读出来是 Markdown 表格：首行给出列字母（A/B/…/O），首列为 R 开头的 Excel 真实行号，连续空行压成「(连续空行 ×N)」——据此可直接判断「表头在第几行」「O 列是哪一格」，不要自己猜行号**；单元格内的 `|` 已转义为 `\\|`、换行转为 `<br>`。单次最多返回约 200KB，返回里 truncated 为 true 表示被截断，需更多时用 offset/limit 分段读取。路径直接用本机绝对路径（如 C:/Users/张三/文档/报告.xlsx、D:/共享/出货记录.xls），也可用 open_folder 打开目录后返回的「别名/路径」前缀；不传别名时按绝对/相对路径直接访问本机文件。若返回 EBUSY/文件被占用，说明该文件正被其他程序（如 Excel）打开，提示用户关闭后再重试即可。',
+    description: '读取文件。支持：① 文本类（md/txt/csv/tsv/json/log/yml/xml/html/sql 以及 vue/kt/kts/swift/dart/toml/proto 等源码与配置，扩展名不认识时会嗅探内容，无扩展名文件按文本读）；② Office：docx/docm/dotx、xlsx/xlsm/xltx、xls、pptx/pptm/ppsx、doc、ppt（老版 .doc/.ppt 会先判断真实容器 —— 实为 docx/rtf/html 的精确读取，真正的 OLE 二进制则按 UTF-16 尽力抽取并在 note 里说明）；③ OpenDocument 与电子书：odt/ods/odp/epub；④ rtf；⑤ pdf。pdf 与中文文档已自动处理编码。**表格（xlsx/xls）读出来是 Markdown 表格：首行给出列字母（A/B/…/O），首列为 R 开头的 Excel 真实行号，连续空行压成「(连续空行 ×N)」——据此可直接判断「表头在第几行」「O 列是哪一格」，不要自己猜行号**；单元格内的 `|` 已转义为 `\\|`、换行转为 `<br>`。单次最多返回约 200KB，返回里 truncated 为 true 表示被截断，需更多时用 offset/limit 分段读取。路径直接用本机绝对路径（如 C:/Users/张三/文档/报告.xlsx、D:/共享/出货记录.xls），也可用 open_folder 打开目录后返回的「别名/路径」前缀；不传别名时按绝对/相对路径直接访问本机文件。若返回 EBUSY/文件被占用，说明该文件正被其他程序（如 Excel）打开，提示用户关闭后再重试即可。**图片不要用本工具读**：用户粘贴 / 拖入的图片、工具下载的图片都已作为图片消息直接给你看了，请直接看图作答；本工具不支持图片，读图片只会返回 UNSUPPORTED_FORMAT。',
     parameters: {
       type: 'object',
       properties: {
@@ -248,7 +248,8 @@ export const FILE_READ_BATCH_TOOL_DEFINITION = {
   function: {
     name: 'file_read_batch',
     description: '一次读取多个文件（最多 12 个），只消耗一次工具调用。每个文件返回 { ok, relative, format, text, truncated }。' +
-      '已知多个目标文件时优先用它，禁止逐个调用 file_read。路径用法同 file_read（绝对路径或「别名/路径」）。',
+      '已知多个目标文件时优先用它，禁止逐个调用 file_read。路径用法同 file_read（绝对路径或「别名/路径」）。' +
+      '**图片路径会自动跳过**（图片已作为图片消息直接给你看了，请直接看图作答，不要用本工具读图片）。',
     parameters: {
       type: 'object',
       properties: {

@@ -66,19 +66,46 @@ describe('isConfirmFollowUp', () => {
 })
 
 describe('附件路径提示', () => {
-  const files = [{ name: 'image.png', path: 'C:\\Users\\u\\AppData\\Roaming\\mc-material-query\\attachments\\1-1-image.png' }]
+  const image = { name: 'image.png', path: 'C:\\Users\\u\\AppData\\Roaming\\mc-material-query\\attachments\\1-1-image.png', kind: 'image' as const, mime: 'image/png' }
+  const doc = { name: 'report.xlsx', path: 'C:\\Users\\u\\Documents\\report.xlsx', kind: 'file' as const }
 
-  it('本轮提示点名路径并要求不要再索要', () => {
-    const note = currentAttachNote(files)
+  it('本轮普通文件提示点名路径并要求不要再索要', () => {
+    const note = currentAttachNote([doc])
     expect(note).toContain('不要再向他索要路径')
     expect(note).toContain('jira_add_comment')
-    expect(note).toContain(files[0].path)
+    expect(note).toContain('需要看内容时用 file_read')
+    expect(note).toContain(doc.path)
     expect(currentAttachNote([])).toBe('')
   })
 
-  it('上一轮提示只在确认类短句时给出', () => {
-    expect(previousAttachNote(files, '确认')).toContain(files[0].path)
-    expect(previousAttachNote(files, '再帮我查一下 ETESC-120 的 RDMS')).toBe('')
+  it('本轮图片提示要求直接看图、禁止 file_read', () => {
+    const note = currentAttachNote([image])
+    expect(note).toContain(image.path)
+    expect(note).toContain('直接看图')
+    expect(note).toContain('禁止用 file_read')
+    expect(note).not.toContain('需要看内容时用 file_read')
+  })
+
+  it('图片靠扩展名也能识别（旧历史数据没有 kind）', () => {
+    const note = currentAttachNote([{ name: 'image.png', path: image.path }])
+    expect(note).toContain('直接看图')
+    expect(note).not.toContain('需要看内容时用 file_read')
+  })
+
+  it('混合列表分别给出两种提示', () => {
+    const note = currentAttachNote([image, doc])
+    expect(note).toContain('直接看图')
+    expect(note).toContain('需要看内容时用 file_read')
+    expect(note).toContain(image.path)
+    expect(note).toContain(doc.path)
+  })
+
+  it('上一轮提示只在确认类短句时给出，图片同样禁止 file_read', () => {
+    expect(previousAttachNote([doc], '确认')).toContain(doc.path)
+    const note = previousAttachNote([image], '确认')
+    expect(note).toContain(image.path)
+    expect(note).toContain('禁止用 file_read')
+    expect(previousAttachNote([doc], '再帮我查一下 ETESC-120 的 RDMS')).toBe('')
     expect(previousAttachNote([], '确认')).toBe('')
   })
 })
