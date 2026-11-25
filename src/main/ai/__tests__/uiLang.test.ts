@@ -4,6 +4,7 @@ import { I18N, translate } from '@shared/i18n'
 import { getUiLang, setUiLang, tr } from '../uiLang'
 
 const NEW_KEYS = [
+  'aiCopyImage', 'aiCopyImageFailed',
   'wjxtNoticeAlreadyH5', 'wjxtNoticeAlreadyQr', 'wjxtNoticeReQr',
   'wjxtTipBar', 'wjxtTipClose', 'wjxtLoading', 'wjxtH5Title',
   'wjxtAccountSelect', 'wjxtRemember',

@@ -324,6 +324,13 @@ dist/
 >    **④ 版本一致性**：`package.json` / `package-lock.json`（两处）均为 `1.0.77`，`electron-builder.yml` 为 `1.0.77.0`；产物为 `mc-material-query-setup-1.0.77.exe`、便携版 `mc-material-query-1.0.77.exe`、`latest.yml` 与 `.blockmap`。
 >    **⑤ 自检**：`npx tsc --noEmit` 0 错误、`npm test` 164 passed（新增 `imageReadGuard.test.ts` 7 例、`mcSkillPrompt.test.ts` 3 例）、`npm run build` 通过。
 
+> 65. **v1.0.78 发布收口（图片右键复制 / 工具卡复制按钮 / 气泡 chip 对齐）**：
+>    **① 图片右键复制**：AI 回复气泡里的 Markdown 图片、全屏预览里的图片 → 右键弹「复制图片」（English: `Copy Image`），点击后粘贴到 Word / 画图能得到原图；dataUrl / 带鉴权 http(s) / file 三种来源都覆盖，>20MB 或链接过期弹暖米色失败提示，不静默。
+>    **② 工具卡复制不遮挡**：展开工具卡 input/output JSON → 右上角不再有浮层按钮盖住首行；代码块下方独立一行「复制完整内容」按钮，点它粘贴得到完整 JSON（非截断片段）。长 message 首行横向滚动到最右也不被遮挡。
+>    **③ 气泡 chip 居中**：输入框贴图片 + 文字发送后，用户气泡里 chip 与文字垂直居中齐平（对照用户给的第三张图）；句首 / 句中 / 多个 chip 换行都对齐，纯文字消息无回归。
+>    **④ 版本一致性**：`package.json` / `package-lock.json`（两处）均为 `1.0.78`，`electron-builder.yml` 为 `1.0.78.0`；产物为 `mc-material-query-setup-1.0.78.exe`、便携版 `mc-material-query-1.0.78.exe`、`latest.yml` 与 `.blockmap`。
+>    **⑤ 自检**：`npx tsc --noEmit` 0 错误、`npm test` 178 passed（新增 `imageClipboard.test.ts` 11 例、`uiLang.test.ts` 双语 key 同步）、`npm run build` 通过。
+
 ### 6. 发布到 GitHub Release
 
 需要一个有**仓库写权限**的 GitHub Token，二选一：

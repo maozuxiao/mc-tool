@@ -450,15 +450,17 @@
    所以这里放开溢出。气泡内容都是文字/inline 元素，不会真的溢出。 */
 .ai-message.user .ai-bubble { background: color-mix(in srgb, var(--mc-amber) 18%, var(--mc-surface)); overflow: visible; }
 .ai-plain { white-space: pre-wrap; word-break: break-word; }
-/* 带内联附件的用户消息：chip 跟着文字走，靠 inline-block 回到基线附近 */
+/* 带内联附件的用户消息：chip 跟着文字走，与同行文字垂直居中（#14）。
+ * 旧值 vertical-align:-5px 刻意把 chip 下压 5px，发送后看起来「偏低」；输入框里的
+ * chip 本来就居中，改成 middle 后两种场景一致。内层不再重复声明 vertical-align，
+ * 由外层统一负责对齐，避免两套口径叠加。 */
 .ai-plain--inline { display: block; }
 .ai-plain__chip {
   display: inline-block;
-  vertical-align: -5px;
+  vertical-align: middle;
   margin: 2px 3px;
   max-width: 100%;
 }
-.ai-plain__chip .ai-attach-chip { vertical-align: middle; }
 /* 气泡里的 chip 预览朝**下**展开：气泡位于滚动流中，向上弹容易被列表顶部裁掉 */
 .ai-plain__chip .ai-attach-preview {
   top: calc(100% + 8px);
@@ -1007,16 +1009,16 @@
   border: 1px solid #3d3028;
   color: #e8d5bc;
 }
-/* 「工具返回被截断」时的底部提示行（1.0.42 性能优化，见 ChatPanel 的 TOOL_JSON_MAX_CHARS）：
-   左侧说明、右侧一键复制完整 JSON。只在真的发生截断时渲染，正常卡片完全不受影响。 */
+/* 工具卡底部按钮行：右侧一键复制完整 JSON（#13 起始终显示，替代库浮在代码上的复制按钮）；
+   左侧「内容已截断」说明仅在真的截断时出现（见 ChatPanel 的 TOOL_JSON_MAX_CHARS）。 */
 .ai-tool-run__more {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 8px;
   margin-top: 6px;
 }
-.ai-tool-run__more-hint { font-size: 11px; color: var(--mc-ink-soft); }
+.ai-tool-run__more-hint { margin-right: auto; font-size: 11px; color: var(--mc-ink-soft); }
 
 .ai-composer {
   border-top: 1px solid var(--mc-line);

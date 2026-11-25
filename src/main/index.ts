@@ -1,4 +1,4 @@
-import { app, BrowserWindow, session, ipcMain, shell, dialog, Menu, MenuItem, Tray } from 'electron'
+import { app, BrowserWindow, session, ipcMain, shell, dialog, Menu, MenuItem, Tray, nativeImage, clipboard, net } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import { join, dirname } from 'path'
 import { appendFileSync, existsSync, readFileSync, unlinkSync, writeFileSync, mkdirSync, statSync, renameSync } from 'fs'
@@ -25,6 +25,7 @@ import {
 } from './ai/wjxtSyncPolicy'
 import { getHolidayPlan } from './holidaySync'
 import { setUiLang, tr } from './ai/uiLang'
+import { copyImageToClipboard } from './ai/imageClipboard'
 
 let mainWindow: BrowserWindow | null = null
 const APP_ID = 'com.streamax.mcquery'
@@ -654,6 +655,38 @@ function createWindow() {
 
   // 输入框/选中文本右键菜单（Electron 默认无右键菜单）
   mainWindow.webContents.on('context-menu', (_event, params) => {
+    // #12：图片右键「复制图片」。必须放在文本早退判定之前 ——
+    // 图片既不是可编辑区、也没有选中文字，旧代码会在第一行直接 return，导致完全没有菜单。
+    // mediaType==='image' 对气泡里的 markdown 图与全屏预览里的图都成立，一处覆盖两个场景。
+    if (params.mediaType === 'image' && params.srcURL) {
+      const srcURL = params.srcURL
+      const menu = new Menu()
+      menu.append(new MenuItem({
+        label: tr('aiCopyImage'),
+        click: () => {
+          void copyImageToClipboard(srcURL, {
+            // 带会话 fetch：知识库 / OA 的图片链接常带鉴权参数或依赖 cookie，
+            // 用主进程会话（PARTITION）拉取才能拿到真图，不是 401 登录页。
+            fetchImpl: async (url) => {
+              const r = await session.fromPartition(PARTITION).fetch(url)
+              if (!r.ok) throw new Error(`HTTP ${r.status}`)
+              return r.arrayBuffer()
+            },
+            makeImage: (buf) => nativeImage.createFromBuffer(buf),
+            writeImage: (img) => clipboard.writeImage(img)
+          }).then(res => {
+            // 不记 srcURL 原文（可能含 token）：只记来源类型与字节数，便于复盘。
+            debugLog(`[image-copy] kind=${res.kind || '-'} bytes=${res.bytes || 0} ok=${res.ok} err=${res.error || '-'}`)
+            if (!res.ok) notifyMcNotice('aiCopyImageFailed')
+          }).catch((e: any) => {
+            debugLog(`[image-copy] failed: ${String(e?.message || e).slice(0, 120)}`)
+            notifyMcNotice('aiCopyImageFailed')
+          })
+        }
+      }))
+      menu.popup({ window: mainWindow! })
+      return
+    }
     if (!params.isEditable && !params.selectionText) return
     const menu = new Menu()
     if (params.editFlags.canCut) menu.append(new MenuItem({ label: '剪切', role: 'cut' }))

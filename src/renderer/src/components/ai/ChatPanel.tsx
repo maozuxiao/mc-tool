@@ -3217,13 +3217,12 @@ function clampJson(text: string): { shown: string; truncated: boolean } {
  *  11.5px 字号、280px 限高、8px 圆角），只保留库自己的深色代码底与复制按钮。
  *  深色底 / 边框 / 等宽字体 / overflow 都来自库，不必在这里重复声明。
  *
- *  paddingRight 必须显式给：库只在「没传 padding / paddingRight」时才会自动补 96px
- *  右内边距来给复制按钮让位（见其实现里的 padding===undefined 判断），
- *  我们传了 padding，自动补位就失效了，不给就会被按钮压住第一行代码。 */
+ *  #13：原先这里给了 paddingRight:88 给库自带复制按钮让位，但库按钮是 absolute
+ *  浮在 pre 上的，首行超长横向滚动时文字仍会滚进留白被按钮盖住。现在关掉库的
+ *  copyable，改用下方独立的自绘按钮行，代码区可完整占宽，故不再需要右侧留白。 */
 const CODE_BLOCK_STYLE: React.CSSProperties = {
   margin: 0,
   padding: '10px',
-  paddingRight: 88,
   fontSize: 11.5,
   maxHeight: 280,
   borderRadius: 8
@@ -3286,17 +3285,16 @@ const ToolRunCard = memo(function ToolRunCard({ run }: { run: AIToolRun }) {
               完整内容由下面这行的按钮负责。 */}
           {truncated || shown.length > CODE_HIGHLIGHT_MAX
             ? <pre className="ai-tool-run__pre">{shown}</pre>
-            : <CodeBlock code={shown} style={CODE_BLOCK_STYLE} />}
-          {/* 被截断时才出现这一行：完整内容仍可一键复制，信息不会丢 */}
-          {truncated && (
-            <div className="ai-tool-run__more">
-              <span className="ai-tool-run__more-hint">{t('aiJsonTruncated', { n: full.length })}</span>
-              <button type="button" className="ai-copy-btn" onClick={handleCopyFull}>
-                <Icon name={copied ? 'Check' : 'File'} size={13} />
-                <span>{copied ? t('aiCopied') : t('aiCopyFull')}</span>
-              </button>
-            </div>
-          )}
+            : <CodeBlock code={shown} style={CODE_BLOCK_STYLE} copyable={false} />}
+          {/* #13：复制按钮独立成行、始终显示，不再浮在代码上遮挡首行；
+              自绘按钮复制的是完整 input+output，比库按钮只复制 shown 更准确。 */}
+          <div className="ai-tool-run__more">
+            {truncated && <span className="ai-tool-run__more-hint">{t('aiJsonTruncated', { n: full.length })}</span>}
+            <button type="button" className="ai-copy-btn" onClick={handleCopyFull}>
+              <Icon name={copied ? 'Check' : 'File'} size={13} />
+              <span>{copied ? t('aiCopied') : t('aiCopyFull')}</span>
+            </button>
+          </div>
         </>
       }
     />
